@@ -39,6 +39,33 @@ related_files:
   - tui/upgrade.go
   - tui/kernel_upgrade_consent_test.go
   - tui/startup_preflight_test.go
+  - tui/.gitignore
+  - tui/agent_count_unix.go
+  - tui/agent_count_windows.go
+  - tui/clean_test.go
+  - tui/go.sum
+  - tui/i18n/ANATOMY.md
+  - tui/internal/doctorreport/ANATOMY.md
+  - tui/internal/globalmigrate/ANATOMY.md
+  - tui/internal/headless/ANATOMY.md
+  - tui/internal/process/ANATOMY.md
+  - tui/internal/sqlitelog/ANATOMY.md
+  - tui/main_doctor_test.go
+  - tui/main_handoff_test.go
+  - tui/packages/tui-darwin-arm64/package.json
+  - tui/packages/tui-darwin-x64/package.json
+  - tui/packages/tui-linux-arm64/package.json
+  - tui/packages/tui-linux-x64/package.json
+  - tui/packages/tui-win32-x64/package.json
+  - tui/packages/tui/bin/lingtai.js
+  - tui/packages/tui/package.json
+  - tui/runtime_migrations_disabled_test.go
+  - tui/scripts/setup-playground.sh
+  - tui/scripts/smoke-test.sh
+  - tui/scripts/test-tui.sh
+  - tui/tui_process_unix.go
+  - tui/tui_process_windows.go
+  - tui/upgrade_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -75,7 +102,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **`tui_process_unix.go` / `tui_process_windows.go`** — platform helpers for detecting other running `lingtai-tui` binaries; native Homebrew migration leaves those sibling processes running while it pauses only their agents.
 - **`Makefile:1-23`** — build, dev (fast local), cross-compile (darwin/linux × arm64/amd64), clean. Version stamp via `-ldflags "-X main.version=$(VERSION)"` where `VERSION` is `git describe --tags --always`.
 - **`tui/i18n/i18n.go:10`** — `//go:embed en.json zh.json wen.json`. The only embed target in the root `tui/` package; all other embeds are in `internal/preset/`.
-- **`tui/internal/`** — all substantive packages (tui screens, preset engine, historical migration package, filesystem readers, process launcher, headless JSON CLI surface, lock shims).
+- **`tui/internal/`** — all substantive packages (tui screens, preset engine, historical migration package, filesystem readers, process launcher, headless JSON CLI surface, lock shims). Each has its own anatomy; descend rather than reading them from here: `tui/internal/tui/ANATOMY.md`, `tui/internal/preset/ANATOMY.md`, `tui/internal/fs/ANATOMY.md`, `tui/internal/config/ANATOMY.md`, `tui/internal/inventory/ANATOMY.md`, `tui/internal/migrate/ANATOMY.md`, `tui/internal/globalmigrate/ANATOMY.md`, `tui/internal/process/ANATOMY.md`, `tui/internal/processscan/ANATOMY.md`, `tui/internal/sqlitelog/ANATOMY.md`, `tui/internal/headless/ANATOMY.md`, `tui/internal/doctorreport/ANATOMY.md`. The locale tables have their own map at `tui/i18n/ANATOMY.md`.
 - **`tui/internal/headless/`** — JSON-emitting non-interactive surface. `RunPresets` (lists templates/saved presets as JSON), `RunSpawn` (creates a project + launches an agent), and `ExitError` (structured error codes). Wired from `main.go` via `bootstrapMain` (`tui/main.go:959`), `presetsMain` (`tui/main.go:1047`), and `spawnMain` (`tui/main.go:1071`). For agents and scripts that drive `lingtai-tui` without the Bubble Tea UI. `RunSpawn`'s runtime check calls `config.RuntimeReady` — read-only, never installs/repairs/upgrades. Headless spawn cannot prompt, so a not-ready runtime (missing, broken, or a declined preflight) surfaces as an actionable `bootstrap_failed` error instead of a silent install.
 
 ## Connections
@@ -130,3 +157,4 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **Version stamping:** `Makefile:4` uses `git describe --tags --always`. Dev builds get `-X main.version=dev`. The upgrade check in `tui/main.go:158-162` skips dev builds (those containing `-` in the version string). This check — and the whole GitHub-release-lookup/Homebrew-upgrade-prompt block around it — runs AFTER the no-project decision gate, so entering the launcher for an empty directory never blocks on a network version check either.
 - **MCP packages are dependencies of `lingtai`.** The `lingtai` PyPI package bundles `lingtai-kernel` + all addon MCPs. `config.RunKernelUpdate`/`CheckUpgrade` upgrade everything at once, but only mutate when the human consents — on an interactive returning-user launch's `[y/N]` prompt (itself shown only when the read-only `config.InspectKernel` reports an actionable update), or via explicit `doctor`/`self-update`/`/update` invocation — never silently on every launch. Users never install MCP packages individually.
 - **No-project launcher is a distinct model, not a fake `App`.** `App` assumes a resolved project/orchestrator context, so the root begins as `LauncherRootModel`, renders the canonical Bodhi loading page after Open Existing, and installs the real App only after a concrete root is prepared. The launcher and App are model phases of the same Open Existing Bubble Tea program; Create remains the launcher’s draft flow and is committed before its normal App program starts.
+- **`related_files` is this module's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.

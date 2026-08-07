@@ -18,6 +18,12 @@ related_files:
   - portal/internal/migrate/m035_remove_brief.go
   - portal/internal/migrate/m038_agent_init_skills_paths.go
   - portal/internal/migrate/m039_agent_init_context_preset_repair.go
+  - portal/internal/migrate/error_propagation_test.go
+  - portal/internal/migrate/m028_addons_to_mcp_test.go
+  - portal/internal/migrate/m038_agent_init_skills_paths_test.go
+  - portal/internal/migrate/m039_agent_init_context_preset_repair_test.go
+  - portal/internal/migrate/parity_test.go
+  - portal/internal/migrate/runtime_migrations_disabled_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -96,3 +102,4 @@ source, test, registry directory, or `migration/migration.md` was deleted.
   parity tests; they are not a live startup contract after runtime retirement.
 - Exactly six authorized m040/preflight files remain deleted. Retained m001–m039
   code/tests and `migration/migration.md` are protected historical evidence.
+- **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.

@@ -19,6 +19,10 @@ related_files:
   - tui/startup_preflight_test.go
   - install.sh
   - RELEASING.md
+  - tui/internal/config/env_test.go
+  - tui/internal/config/global_atomic_test.go
+  - tui/internal/config/tui_updater.go
+  - tui/internal/config/tui_updater_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -93,3 +97,4 @@ This package manages the TUI's bootstrap sequence — the steps that run before 
 - **Dev mode conversion:** local dev workspaces are enabled explicitly with `$LINGTAI_DEV_ROOT` (for example, `LINGTAI_DEV_ROOT=~/work/GitHub` when that directory contains sibling `lingtai-kernel/` and `lingtai/`). If configured and valid, the runtime should track `lingtai-kernel` editable. `InspectKernel` reports a not-yet-editable dev checkout as `NeedsUpdate=true` (an actionable pending conversion), so it surfaces through the same consent-gated prompt as a PyPI version bump — never automatically; existing editable installs for the same checkout are left alone (`NeedsUpdate=false`) to avoid reinstalling every launch. No common-directory auto-scan runs by default, so ordinary users with source clones are not silently switched off PyPI.
 - **`uv` preferred over `pip`:** all pip operations prefer `uv` if available (faster, can auto-download Python).
 - **`.env` is no longer clobber-rewritten.** Both `WriteEnvFile` (managed API keys) and `SetEnvVar` (single unmanaged key, e.g. the soul-flow opt-in) preserve everything they don't own: comments, blanks, unrelated vars, and file permissions. This is what lets `LINGTAI_SOUL_FLOW_ENABLED` — written by the first-run/`/setup` wizard opt-in via `preset.GenerateInitJSONWithOpts` — survive a later API-key save. The kernel reads this var from process env (populated from `env_file` at agent boot); the delay/cadence in `manifest.soul.delay` is cadence-only after opt-in, not an on/off switch.
+- **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.

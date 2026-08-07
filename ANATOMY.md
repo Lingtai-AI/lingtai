@@ -38,6 +38,49 @@ related_files:
   - portal/embed.go
   - portal/go.mod
   - portal/Makefile
+  - .github/workflows/sync-hf.yml
+  - .gitignore
+  - LICENSE
+  - NOTICE
+  - assets/braille/22610_source.png
+  - assets/braille/22610_source.svg
+  - assets/braille/22610_source_alt.svg
+  - assets/braille/22610_w29_tui.txt
+  - assets/braille/22610_w44.txt
+  - assets/braille/22610_w66.txt
+  - discussions/cascade-skill-and-sentinel-ordering-patch.md
+  - discussions/codex-credential-redesign-patch.md
+  - discussions/covenant-distillation-and-per-agent-profile.md
+  - discussions/firstrun-step2-builtin-default-patch.md
+  - discussions/intrinsics-strict-schema-scan.md
+  - discussions/lingtai-preset-swap-silent-revert-patch.md
+  - discussions/lingtai-vision-capability-fallback-patch.md
+  - discussions/preset-editor-codex-oauth-patch.md
+  - examples/bash_policy.json
+  - examples/imap.jsonc
+  - examples/init.jsonc
+  - examples/telegram.jsonc
+  - migration/migration.md
+  - prompt/archive/base_prompt.md
+  - prompt/archive/base_prompt_wen.md
+  - prompt/archive/base_prompt_zh.md
+  - prompt/archive/covenant_base.md
+  - prompt/archive/covenant_base_lzh.md
+  - prompt/archive/covenant_base_zh.md
+  - prompt/archive/molt_prompt_default.md
+  - reports/ANATOMY.md
+  - scripts/dump_tool_descriptions.py
+  - scripts/img2blocks.py
+  - scripts/img2braille.py
+  - scripts/rename.py
+  - scripts/star_tracker.py
+  - scripts/test-install-sh-gitee-bundle.sh
+  - scripts/test-install-sh.sh
+  - scripts/test-publish-bundle-to-gitee.sh
+  - scripts/test-release-workflow-publish-gating.py
+  - scripts/test-sync-gitee-mirror.sh
+  - scripts/test_dump_tool_descriptions.py
+  - scripts/test_star_tracker.py
 maintenance: |
   This file is both the repository-root anatomy and the normative
   anatomy-of-anatomy for the distributed code navigation system across the two
@@ -88,7 +131,7 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 
 - **`ANATOMY.md` / `CONTRACT.md`** — the two normative distributed-system roots. This file is the code-navigation map and anatomy-of-anatomy; `CONTRACT.md` is the code-interface/Behavior definition root and contract-of-contract. They list each other in `related_files`.
 - **`dev-guide-skill/`** — the repository-local agent dev kit. Its `SKILL.md` routes agents into the Anatomy and Contract systems and the change/validation workflow, and may grow focused scripts, references, templates, or assets as real workflows recur. Distinct from the bundled `lingtai-dev-guide` skill under `tui/internal/preset/skills/`, which ships to agents and owns deeper per-topic procedures.
-- **`tui/architecture_documents_test.go`** — a small real-repository smoke test in the existing TUI module (`cd tui && go test ./...`). It checks only the root Anatomy/Contract/dev-guide routing and the links from the three READMEs and `CLAUDE.md`; schema, prose, hypothetical child graphs, and defensive YAML/path edge cases stay in review rather than a bespoke test framework. The root documents belong to neither binary, so the smoke test lives in the TUI module rather than a third module.
+- **`tui/architecture_documents_test.go`** — the real-repository architecture check in the existing TUI module (`cd tui && go test ./...`). It covers three things: the root Anatomy/Contract/dev-guide routing plus the links from the three READMEs and `CLAUDE.md`; the runtime/control-surface route anchors; and — `TestArchitectureDocumentsCoverEveryTrackedFile` — the graph-coverage rule, walking `related_files` from this root against `git ls-files` so an orphan tracked file, an unreachable `ANATOMY.md`, an empty/duplicated list, a self-link, or an entry that no longer resolves fails the build. It deliberately reads frontmatter with a narrow line-based reader rather than pulling in a YAML dependency; prose accuracy and semantic misdescription stay in review. The root documents belong to neither binary, so the check lives in the TUI module rather than a third module.
 - **`tui/`** — Terminal UI binary (`lingtai-tui`). Bubble Tea v2 + lipgloss v2. Single-binary launcher, agent monitor, first-run wizard, mail viewer, preset editor. Builds to `tui/bin/lingtai-tui`. The flat `tui/main.go` wires subcommands (`purge`, `list`, `clean`, `suspend`, `bootstrap`, `presets`, `spawn`, `self-update`, `doctor`) and the interactive entry; everything substantive is under `tui/internal/`. See the per-package summary below.
 - **`portal/`** — Web portal binary (`lingtai-portal`). Go HTTP server with an embedded React frontend served from a single binary via `embed.FS`. Reads the same `.lingtai/` filesystem the TUI does, surfaces a network visualisation, mail/replay UI, and topology recorder. Builds to `portal/bin/lingtai-portal`. Per-package layout under `portal/internal/`.
 - **`install.sh`** — One-shot installer (`curl -fsSL https://lingtai.ai/install.sh | bash`), Homebrew-free. `--source auto|github|gitee` (default `auto`, or `LINGTAI_SOURCE`) selects the release provider: `auto` runs a bounded, fail-open public-IP country lookup (`detect_country_cn`) and prefers Gitee (`huangzesen1997/lingtai` + `huangzesen1997/lingtai-kernel`) for mainland China, falling back to GitHub on any detection/reachability failure — always for the SAME resolved tag/bundle, never by re-querying "latest" a second time (`resolve_source_provider`, `fetch_bundle_manifest`, `fetch_kernel_manifest`). Every tagged release exposes `lingtai-bundle-manifest.json` (schema `lingtai.tui.bundle/v1`, published by `.github/workflows/release.yml`'s `windows-release` job), binding one exact TUI tag/commit to one exact pinned kernel tag/version/artifacts/checksums; its strict parser (`parse_bundle_manifest`) also accepts a `lingtai-<tag>-windows-amd64.zip` archive entry for `install.ps1`'s use without selecting or downloading it itself — see `RELEASING.md`. Downloads a prebuilt per-platform tarball (`lingtai-<tag>-<os>-<arch>.tar.gz`) when the release exposes one, **verifying its `.sha256` sidecar before extraction**, otherwise falls back to building the release source tarball with Go/npm. Installs into `--bin-dir`/`--prefix`, else a writable `/usr/local/bin`, else `~/.local/bin` (never prefers Homebrew). Ordinary (non-`--update`) install is first-install-only: `validate_fresh_install_state`/`validate_install_target` refuse to run over an existing receipt, runtime root, or managed binary at the selected target — pointing to `fix.sh`/`update.sh` instead of silently adopting or overwriting it — and the top of `main()` refuses a symlinked `$HOME/.lingtai-tui`. Then one-shot-creates/updates the Python runtime venv at `~/.lingtai-tui/runtime/venv`: `canonical_runtime_venv` requires that venv path to be physically (not merely lexically) contained under the owned runtime root, rejecting a symlink-escaped venv or ancestor, and `runtime_venv_state` refuses to silently reuse an already-occupied healthy/broken runtime on this same non-update path. LingTai is installed ONLY from a verified pinned kernel source, never from a package index by name: on the default release-asset path a resolved bundle manifest is mandatory, or — for a source-only TUI release with no dual bundle manifest — the exact-tag `kernel-release.json` pin (`fetch_kernel_pin`, schema `lingtai.tui.kernel-pin/v1`, same-tag-only provider fallback, never re-resolving "latest") is tried before failing loud; `kernel_tag_for_install`/`kernel_source_for_install` prefer an existing bundle and fall back to the pin. Either way `install_kernel_from_bundle` selects a compatible platform wheel for the venv's actual interpreter (`select_kernel_wheel`, via `packaging.tags.sys_tags()`) or the pinned sdist fallback, verifies its SHA256, and installs it by **explicit local file path**; the kernel release manifest itself is validated by a strict Python parser (`update_validate_manifest`) checking every required key, artifact shape, digest format, and — for wheels — that the filename's own version/tag triple agrees with its declared metadata, not a substring schema check. Only that artifact's third-party dependencies touch a package index, and exactly one: `python_dependency_index_url` returns a non-empty `LINGTAI_PYPI_INDEX_URL` if set, else the default of the provider that actually served the final bundle manifest (Gitee → `https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`, GitHub → `https://pypi.org/simple`) — one `--index-url` argv pair, never `--extra-index-url`, because `pypi.org` is not reliably reachable from the mainland-China hosts the Gitee route exists to serve. This index selection covers the POSIX verified-bundle/pin path only; `install.ps1` and `--latest` (`install_kernel_from_main`) are unaffected, as is the version-pinned GitHub raw `install.sh` that `tui/internal/config/tui_updater.go`'s Homebrew migration / `/update-tui` bootstrap fetches before any provider selection happens — see "Lifecycle source ownership" below for why that flag's existing behavior is untouched by this integration. If no bundle manifest or release pin can be resolved (either provider, same-tag fallback attempted), or the resolved kernel artifact fails to verify/install, `ensure_runtime_venv` **fails loud** — the overall install exits nonzero rather than silently reaching for PyPI. `--ref`/source-ref builds have no bundle to pin against and fail loud the same way. `--skip-python` (alias `--skip-venv`) is the explicit opt-out for a TUI/portal-only install. The install postcondition (`runtime_health_check`) requires both `lingtai` and `lingtai.kernel` to import with `sys.prefix` equal to the selected venv AND both modules' `__file__` physically inside that same prefix — not merely importable — so a same-version package reachable through an external `.pth` entry or system site-packages can never be mistaken for a healthy owned install; stamps the env marker, symlinks `lingtai-agent`. Stamps exact `vX.Y.Z` release installs as that tag and writes `install.json` via exclusive-create, no-clobber, mode-`0600` publication on a fresh install (`install_method: "source"`, additive `install_kind: release-asset|source-build`, additive `runtime_venv` pointer, and — only on a verified kernel install — additive `kernel_source: "bundle"|"release-pin"` + the matching bundle/pin provenance fields) so both the TUI source updater and `tui/internal/config/venv.go`'s bundle-provenance gate can read it; `--update` legitimately republishes over its own existing receipt in place. On WSL/Debian/Ubuntu it can `apt-get install` missing Go/Python/git when interactive with sudo; non-interactive mode prints the exact command instead. Independently of source policy, still auto-detects CN-restricted Go-proxy reachability for source builds and falls back to mirrors for Go modules / `npm` / Go checksum DB. Helper functions are unit-tested via `scripts/test-install-sh.sh`, `scripts/test-install-sh-gitee-bundle.sh`, and `scripts/test-install-sh-hardening.sh` (the kernel-release-pin, strict-manifest-validation, runtime-containment, existing-state, and receipt-publication capabilities integrated from the public web fork — see "Lifecycle source ownership" below).
@@ -106,8 +149,11 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 - **`scripts/`** — The standalone lifecycle maintenance assets (`update.sh`, `fix.sh`, `verify.sh`, `dev.sh`, `remove.sh`, `remove.ps1` — see "Lifecycle source ownership" above; only `install.sh`/`install.ps1` stay at the repo top level) plus auxiliary Python utilities (image-to-blocks, tool description dumper, file-rename helper) and release/installer test and publish infrastructure: `test-install-sh.sh` / `test-install-sh-gitee-bundle.sh` / `test-publish-bundle-to-gitee.sh` / `test-sync-gitee-mirror.sh` (source `install.sh` with `LINGTAI_INSTALL_SH_SOURCE_ONLY=1`, or exercise the standalone scripts, against a fake-curl harness or real local-git-remote fixtures), `test-install-ps1.ps1` (the `install.ps1` contract suite — see above), `test-lifecycle-assets.sh` (real-subprocess contract suite for `update.sh`/`fix.sh`/`verify.sh`/`dev.sh`/`remove.sh` — see "Lifecycle source ownership" above), `test-remove-ps1.ps1` (the `remove.ps1` real-subprocess/real-fault-injection contract suite, Windows-only — see "Lifecycle source ownership" above), `test-release-workflow-publish-gating.py` (static assertions that `release.yml` is exactly `source-release`+`update-homebrew`+`windows-release`, that only `windows-release` uploads assets, and that it fails closed on the kernel pin), `sync_gitee_mirror.sh` (non-force git push of the exact release commit/tag to the Gitee mirror — fast-forward-only, create-only tag, never `--force`), and `publish_bundle_to_gitee.sh` (the Gitee release asset publisher, `--execute`-gated). The Gitee sync/publish scripts remain explicit maintainer tools and are not invoked by the tag workflow; see `RELEASING.md`. NOT the runtime — these are dev/release tools, not shipped in any TUI/portal binary.
 - **`examples/`** — Reference config files (`init.jsonc`, `bash_policy.json`, `imap.jsonc`, `telegram.jsonc`) for users wiring up their own agents.
 - **`docs/`** — Repo-native developer and reference docs (specs, plans, daily change log, screenshots, known limitations, graphify). The human-facing beginner guide now lives on the website tutorial (`https://lingtai.ai/{en,zh,wen}/tutorial/`), not in this repo; see `docs/ANATOMY.md`.
-- **`prompt/`** — Localised prompt fragments shared across the TUI/portal.
-- **`assets/`** — Static images (logos, screenshots) used by README and docs.
+- **`reports/`** — Local-only by default. The tracked files here are the deliberate exceptions: one evidence bundle per shipped release plus a few promoted explainers. See `reports/ANATOMY.md` for the tracked/untracked boundary and `CLAUDE.md` for the working rule.
+- **`prompt/`** — Localised prompt fragments. Everything tracked here now lives under `prompt/archive/` — the superseded base-prompt, covenant, and molt-prompt originals, kept for provenance after the live copies moved into the kernel and `tui/internal/preset/`. Nothing in either binary reads this directory.
+- **`assets/`** — Static images (logos, screenshots) used by README and docs, plus `assets/braille/` — the source art and the pre-rendered 29/44/66-column braille variants of the 𢘐 (U+22610) glyph behind the first-run splash (`tui/internal/tui/firstrun.go:3436`).
+- **`discussions/`** — Patch proposals and design discussions written by LingTai agents. This is where the maintenance banner's "report drift as issues, do not silently fix" rule lands: `discussions/<name>-patch.md`.
+- **`migration/`** — `migration/migration.md`, the release-scoped migration note (product, release tag, pinned kernel tag) handed to users upgrading across a breaking release.
 - **`README.md` / `README.zh.md` / `README.wen.md`** — Tri-lingual project README: concise orientation (what LingTai is, install/start, interfaces, architecture, contributing). Each links to its locale's website tutorial (`https://lingtai.ai/{en,zh,wen}/tutorial/`) for step-by-step beginner learning rather than duplicating it.
 - **`RELEASING.md`** — Release process: tag, GitHub release, Windows asset/bundle publication, automated Homebrew tap update, manual tap fallback, and the PowerShell install path.
 - **`.github/workflows/release.yml`** — Tag-push workflow (`v*` push only), three jobs. `source-release` verifies the tag and creates the public GitHub Release without building or uploading binaries. `update-homebrew` computes the GitHub tag source-tarball checksum, rewrites `lingtai-tui.rb`, and pushes the source-build formula update to `Lingtai-AI/homebrew-lingtai`. `windows-release` (`needs: source-release`) fails closed unless `kernel-release.json`'s pinned kernel release exists and publishes a verified `win_amd64` wheel, then cross-compiles `lingtai-tui.exe`/`lingtai-portal.exe` for `windows/amd64`, packages `lingtai-<tag>-windows-amd64.zip`+`.sha256`, generates `lingtai-bundle-manifest.json`, and uploads all three via `gh release upload` — the only job in this workflow that uploads assets. See `RELEASING.md`.
@@ -121,14 +167,15 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 | `tui/internal/tui/` | ~22k | Bubble Tea models for every screen — first-run wizard, network home (`app.go`), agent detail, mail composer, preset editor, knowledge/skills, doctor, addon installer. The biggest module by far; the `tui/` package is itself decomposable but the boundaries match Bubble Tea's screen-per-file convention. |
 | `tui/internal/preset/` | — | Atomic `{llm, capabilities}` bundle layer. `preset.go` (~1900 lines) handles load/save/list, `recipe_apply.go` handles recipe import, `state.go` tracks user preset state. Embeds the canonical preset templates, covenant text, principles, soul fragments, procedures, skills, and recipe assets via `//go:embed`. |
 | `tui/internal/migrate/` | — | Retained m001–m039 historical source/tests and registry API; production startup, project creation, launcher, and diagnostics do not execute it or advance `.lingtai/meta.json`. See `tui/internal/migrate/ANATOMY.md`. |
-| `tui/internal/globalmigrate/` | — | Per-machine analogue under `~/.lingtai-tui/`. Same conventions, separate version space (`~/.lingtai-tui/meta.json`). For things like Homebrew tap renames and runtime venv relocations. Currently at v2; v2 (`split-presets-dir`) is a neutralized no-op tombstone — it once moved/deleted flat `presets/*.json` files and caused the preset-loss incident, so its destructive body was removed while the version entry is retained for advancement semantics. |
+| `tui/internal/globalmigrate/` | — | Per-machine analogue under `~/.lingtai-tui/`. Same conventions, separate version space (`~/.lingtai-tui/meta.json`). For things like Homebrew tap renames and runtime venv relocations. Currently at v2; v2 (`split-presets-dir`) is a neutralized no-op tombstone — it once moved/deleted flat `presets/*.json` files and caused the preset-loss incident, so its destructive body was removed while the version entry is retained for advancement semantics. See `tui/internal/globalmigrate/ANATOMY.md`. |
 | `tui/internal/fs/` | — | Filesystem accessors: agent manifest, heartbeat, mail (read/list/write outbox), token ledger, location, network discovery, signal files, session JSONL load. The TUI's read-only window into a running agent's working directory. |
-| `tui/internal/sqlitelog/` | — | Small sqlite3 CLI-backed readers for kernel `logs/log.sqlite`; currently used by `/notification` to page notification events just-in-time instead of relying on stale `.notification/` snapshots. |
+| `tui/internal/sqlitelog/` | — | Small sqlite3 CLI-backed readers for kernel `logs/log.sqlite`; currently used by `/notification` to page notification events just-in-time instead of relying on stale `.notification/` snapshots. See `tui/internal/sqlitelog/ANATOMY.md`. |
 | `tui/internal/config/` | — | Global TUI config under `~/.lingtai-tui/`: `tui_config.json`, runtime venv resolution, addon registry. |
-| `tui/internal/process/` | — | Subprocess launcher (`launcher.go`). Spawns `python -m lingtai run <dir>` with the right venv, log redirection, and PID tracking. |
+| `tui/internal/process/` | — | Subprocess launcher (`launcher.go`). Spawns `python -m lingtai run <dir>` with the right venv, log redirection, and PID tracking; also the terminate path. See `tui/internal/process/ANATOMY.md`. |
 | `tui/internal/inventory/` | — | Typed running-agent inventory shared by `lingtai-tui list` and `/projects`: processscan rows plus `.agent.json`/heartbeat/status/admin/IM enrichment, duplicate collapse, deterministic grouping, and admin-only enterability. |
-| `tui/internal/headless/` | — | JSON-emitting non-interactive CLI surface. Backs the `bootstrap`, `presets`, and `spawn` subcommands wired from `tui/main.go` (`bootstrapMain`, `presetsMain`, `spawnMain`). The adjacent `doctorMain` and `selfUpdateMain` subcommands use `config` update routines directly because they repair the local install rather than emitting headless JSON. Exposes `RunPresets`, `RunSpawn`, `ExitError` for structured agent-consumable output. |
-| `tui/i18n/` | — | en/zh/wen JSON tables. **Three locales always** — adding a key requires updating all three. Missing keys render as the raw key string. |
+| `tui/internal/headless/` | — | JSON-emitting non-interactive CLI surface. Backs the `bootstrap`, `presets`, and `spawn` subcommands wired from `tui/main.go` (`bootstrapMain`, `presetsMain`, `spawnMain`). The adjacent `doctorMain` and `selfUpdateMain` subcommands use `config` update routines directly because they repair the local install rather than emitting headless JSON. Exposes `RunPresets`, `RunSpawn`, `ExitError` for structured agent-consumable output. See `tui/internal/headless/ANATOMY.md`. |
+| `tui/i18n/` | — | en/zh/wen JSON tables. **Three locales always** — adding a key requires updating all three; a key missing everywhere renders as the raw key string. See `tui/i18n/ANATOMY.md`. |
+| `tui/internal/doctorreport/` | — | Writer-only serializer for a finished `/doctor` run: redacts the captured draft and emits the private `report.md`/`metadata.json`/`redaction.json` bundle. Runs no diagnostics of its own. See `tui/internal/doctorreport/ANATOMY.md`. |
 | `tui/scripts/` | — | Build helper scripts (cross-compile, asset bundling). |
 | `tui/packages/` | — | Vendored or generated dependency artefacts. |
 | Per-OS `*_unix.go` / `*_windows.go` | — | Platform-specific shims for `agent_count`, `exec`, `list`, `purge`, `suspend` subcommands. |
@@ -215,6 +262,21 @@ lives in [`CONTRACT.md`](CONTRACT.md); the change/validation *workflow* lives in
 [`dev-guide-skill/SKILL.md`](dev-guide-skill/SKILL.md). This section owns only
 the structural schema and link rules, and does not restate either.
 
+**Coverage (no orphans).** Every tracked file in this repository MUST be
+reachable from this root anatomy by descending `related_files` — the whole file
+tree climbs the anatomy graph, and no tracked file is an orphan. Each file is
+owned by the anatomy of the layer it belongs to (a package's own `ANATOMY.md`
+when it has one, otherwise its parent's), and an `ANATOMY.md` counts only once
+its parent lists it. This is enforced, not aspirational:
+`tui/architecture_documents_test.go`'s
+`TestArchitectureDocumentsCoverEveryTrackedFile` walks the graph from this file
+against `git ls-files` and fails on any orphan, unreachable anatomy, empty or
+duplicated list, self-link, or entry that no longer resolves to a tracked file.
+Adding a file to the repo therefore means adding it to exactly the
+`related_files` list that owns it, in the same change. `related_files` is the
+complete inventory of a layer; the anatomy *body* stays the curated architectural
+map of that layer and is deliberately not a per-file listing.
+
 **Navigation model.** Navigation is distributed: the root defines the system and
 enumerates the two binary trees; each component's anatomy maps only the layer it
 owns; parent/child and `related_files` links connect them. Do not copy local
@@ -275,6 +337,11 @@ Maintenance is part of reading:
 - Verify every touched citation after moves, renames, splits, or ownership
   changes. The anatomy drift checker catches missing/out-of-range citation
   targets, not semantic misdescription.
+- Adding, moving, or deleting a tracked file is an anatomy change. Update the
+  owning `related_files` list in the same commit, or
+  `TestArchitectureDocumentsCoverEveryTrackedFile` fails with the exact paths to
+  add. Deleting a file means deleting its entry; a new package directory means a
+  new `ANATOMY.md` linked from its parent.
 - Keep parent/child and Anatomy/Contract pair links reciprocal, and keep the
   two-binary facts compatible across `tui/ANATOMY.md` and `portal/ANATOMY.md`.
   When this system's convention itself changes, update this root, its smoke test
