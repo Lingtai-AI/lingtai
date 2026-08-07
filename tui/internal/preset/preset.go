@@ -514,7 +514,7 @@ func RefreshTemplates() error {
 // "DEEPSEEK_API_KEY") and is applied to the preset when the option is
 // selected. Empty Env means "don't touch api_key_env".
 type RegionURL struct {
-	Label string // e.g. "CN", "INTL"
+	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
 	Env   string // optional credential env-var name; empty = leave api_key_env alone
 }
@@ -524,11 +524,15 @@ type RegionURL struct {
 // and their base_url is free-text in the editor. The first entry is
 // the default for new presets. An entry with an empty URL is the free-text
 // "Custom" sentinel: selecting it clears base_url so the editor opens an
-// inline edit for any user-typed endpoint.
+// inline edit for any user-typed endpoint. At most one entry per provider
+// may carry an empty URL.
 var ProviderRegionURLs = map[string][]RegionURL{
 	"deepseek": {
 		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
-		{Label: "OpenCode", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		// OpenCode Go is scoped to DeepSeek models served through the OpenCode Go
+		// subscription (provider stays "deepseek"); other Go models are reached via
+		// a Custom preset.
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
 	"zhipu": {

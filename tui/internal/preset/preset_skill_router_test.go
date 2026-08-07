@@ -324,7 +324,7 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"minimax":    "tui/internal/preset/preset.go:979-1004",
 		"zhipu":      "tui/internal/preset/preset.go:1006-1023",
 		"mimo":       "tui/internal/preset/preset.go:1025-1050",
-		"deepseek":   "tui/internal/preset/preset.go:1052-1061",
+		"deepseek":   "tui/internal/preset/preset.go:1127-1136",
 		"gemini":     "tui/internal/preset/preset.go:1063-1090",
 		"kimi":       "tui/internal/preset/preset.go:1092-1104",
 		"nvidia":     "tui/internal/preset/preset.go:1106-1125",
