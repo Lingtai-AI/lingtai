@@ -54,10 +54,10 @@ func TestDaemonRecentLedgerTagsIdentity(t *testing.T) {
 		"run_id": "em-1-20260101-000000-abc123",
 		"state":  "running",
 		"task":   "do a thing",
-		"model":  "glm-4.6",
+		"model":  "GLM-5.2",
 	})
 	writeDaemonLedger(t, agentDir, "em-1-20260101-000000-abc123", []string{
-		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"thinking":1,"cached":2,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"thinking":1,"cached":2,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 
 	entries := DaemonRecentLedger(agentDir, 100)
@@ -77,7 +77,7 @@ func TestDaemonRecentLedgerTagsIdentity(t *testing.T) {
 	if e.Input != 10 || e.Output != 5 {
 		t.Errorf("tokens wrong: in=%d out=%d", e.Input, e.Output)
 	}
-	if e.Model != "glm-4.6" {
+	if e.Model != "GLM-5.2" {
 		t.Errorf("Model = %q", e.Model)
 	}
 }
@@ -90,7 +90,7 @@ func TestDaemonRecentLedgerPreservesBackendIndependently(t *testing.T) {
 		"backend": "claude-p",
 	})
 	writeDaemonLedger(t, agentDir, "em-1-backend", []string{
-		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 
 	entries := DaemonRecentLedger(agentDir, 100)
@@ -104,8 +104,8 @@ func TestDaemonRecentLedgerPreservesBackendIndependently(t *testing.T) {
 	if got := DeriveLedgerProvider(entry.Endpoint, entry.Model); got != "zhipu" {
 		t.Fatalf("provider = %q, want zhipu", got)
 	}
-	if entry.Model != "glm-4.6" {
-		t.Fatalf("Model = %q, want glm-4.6", entry.Model)
+	if entry.Model != "GLM-5.2" {
+		t.Fatalf("Model = %q, want GLM-5.2", entry.Model)
 	}
 }
 
@@ -225,7 +225,7 @@ func TestDaemonRecentLedgerRejectsTypeInvalidDaemonCard(t *testing.T) {
 		"backend": "claude-p",
 	})
 	writeDaemonLedger(t, agentDir, "em-1-x", []string{
-		`{"ts":"2026-01-01T00:00:01","input":7,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":7,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 
 	entries := DaemonRecentLedger(agentDir, 100)
@@ -278,11 +278,11 @@ func TestDaemonLedgerSummaryGroupsByProvider(t *testing.T) {
 	writeDaemonState(t, agentDir, "em-1-x", map[string]interface{}{"handle": "em-1", "state": "done"})
 	writeDaemonState(t, agentDir, "em-2-y", map[string]interface{}{"handle": "em-2", "state": "done"})
 	writeDaemonLedger(t, agentDir, "em-1-x", []string{
-		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"thinking":1,"cached":2,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"thinking":1,"cached":2,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 	writeDaemonLedger(t, agentDir, "em-2-y", []string{
-		`{"ts":"2026-01-01T00:00:01","input":8,"output":3,"model":"deepseek-v3","endpoint":"https://api.deepseek.com"}`,
-		`{"ts":"2026-01-01T00:00:02","input":3,"output":1,"model":"deepseek-v3","endpoint":"https://api.deepseek.com"}`,
+		`{"ts":"2026-01-01T00:00:01","input":8,"output":3,"model":"deepseek-v4-pro","endpoint":"https://api.deepseek.com"}`,
+		`{"ts":"2026-01-01T00:00:02","input":3,"output":1,"model":"deepseek-v4-pro","endpoint":"https://api.deepseek.com"}`,
 	})
 	got, _ := DaemonLedgerSummary(agentDir, 0)
 	if len(got) != 2 {
@@ -307,7 +307,7 @@ func TestDaemonLedgerSummaryLedgerOverFallbackPrecedence(t *testing.T) {
 		"cli_tokens": map[string]interface{}{"input": 9999, "output": 99, "calls": 1},
 	})
 	writeDaemonLedger(t, agentDir, "em-5", []string{
-		`{"ts":"2026-01-01T00:00:01","input":42,"output":7,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":42,"output":7,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 	got, _ := DaemonLedgerSummary(agentDir, 0)
 	if len(got) != 1 {
@@ -329,7 +329,7 @@ func TestDaemonLedgerSummaryReturnsBothTotalsAndRecent(t *testing.T) {
 	agentDir := t.TempDir()
 	writeDaemonState(t, agentDir, "em-1-x", map[string]interface{}{"handle": "em-1", "state": "done"})
 	writeDaemonLedger(t, agentDir, "em-1-x", []string{
-		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"GLM-5.2","endpoint":"https://z.ai/api"}`,
 	})
 	totals, recent := DaemonLedgerSummary(agentDir, 100)
 	if len(totals) != 1 {
@@ -470,13 +470,13 @@ func TestDaemonLedgerSummaryHonestUnknownFallback(t *testing.T) {
 
 func TestDaemonLedgerSummaryModelDerivationFallback(t *testing.T) {
 	agentDir := t.TempDir()
-	// No preset_provider, backend=lingtai (ignored), but model=deepseek-v3
-	// → DeriveLedgerProvider("", "deepseek-v3") = "deepseek".
+	// No preset_provider, backend=lingtai (ignored), but model=deepseek-v4-pro
+	// → DeriveLedgerProvider("", "deepseek-v4-pro") = "deepseek".
 	writeDaemonState(t, agentDir, "em-ds", map[string]interface{}{
 		"handle":     "em-ds",
 		"state":      "done",
 		"backend":    "lingtai",
-		"model":      "deepseek-v3",
+		"model":      "deepseek-v4-pro",
 		"cli_tokens": map[string]interface{}{"input": 75, "output": 25, "calls": 2},
 	})
 	totals, _ := DaemonLedgerSummary(agentDir, 100)
@@ -498,14 +498,14 @@ func TestDaemonLedgerSummaryPresetModelOverModel(t *testing.T) {
 	writeDaemonState(t, agentDir, "em-pm", map[string]interface{}{
 		"handle":       "em-pm",
 		"state":        "done",
-		"preset_model": "glm-4.6",
+		"preset_model": "GLM-5.2",
 		"model":        "unknown-model",
 		"cli_tokens":   map[string]interface{}{"input": 60, "output": 20, "calls": 1},
 	})
 	totals, _ := DaemonLedgerSummary(agentDir, 100)
 	zhipu, ok := totals["zhipu"]
 	if !ok {
-		t.Fatalf("expected zhipu bucket from preset_model glm-4.6, got: %v", totals)
+		t.Fatalf("expected zhipu bucket from preset_model GLM-5.2, got: %v", totals)
 	}
 	if zhipu.Input != 60 {
 		t.Errorf("zhipu input = %d, want 60", zhipu.Input)

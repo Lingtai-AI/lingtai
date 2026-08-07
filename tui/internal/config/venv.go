@@ -644,8 +644,10 @@ func (execCommandRunner) Run(name string, args ...string) CommandResult {
 
 // RunDoctorUpdate force-checks and repairs the two shipped update surfaces:
 // the TUI binary and the managed Python `lingtai` runtime. It detects the TUI
-// install method first; today's automated TUI upgrade path is only Homebrew,
-// while source/user-local and unknown installs get explicit manual guidance.
+// install method first; a forced TUI update then runs the backend matching
+// that method (Homebrew via `brew upgrade`, source/user-local via
+// `install.sh --update`). Only installs whose method could not be identified
+// get explicit manual guidance.
 // Python runtime upgrades are delegated to uv/pip, then verified afterwards.
 func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
 	report := DoctorReport{Healthy: true}

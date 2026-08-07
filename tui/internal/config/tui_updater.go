@@ -148,8 +148,10 @@ type ManualTUIUpdateOptions struct {
 }
 
 // RunManualTUIUpdate detects the current install method and runs the matching
-// TUI updater backend. Unlike doctor, source/user-local and unknown installs
-// are command failures because the requested mutation is not implemented yet.
+// TUI updater backend: Homebrew via `brew upgrade`, source/user-local installs
+// in place via a version-pinned `install.sh --update`. Only installs whose
+// method could not be identified (TUIInstallMethodUnknown) are command
+// failures, because there is no backend to dispatch them to.
 func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdateResult {
 	result := TUIUpdateResult{Healthy: true}
 	if opts.Executable == nil {

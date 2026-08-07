@@ -13,7 +13,7 @@ import (
 //
 // Strip-only: no MCP server registration is added. Agents that need media
 // generation can register the MiniMax-Media MCP server manually via the
-// `lingtai-mcp` skill.
+// `mcp-manual` skill.
 //
 // Portal scope: only per-agent init.json under lingtaiDir. The TUI binary
 // additionally cleans up the global preset library at ~/.lingtai-tui/

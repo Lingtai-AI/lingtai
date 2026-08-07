@@ -3,17 +3,21 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
+
+	"github.com/anthropics/lingtai-tui/internal/processscan"
 )
 
 // countRunningAgents returns the number of `lingtai run` processes on this
 // machine. It mirrors the discovery logic in listMain (list_windows.go) but
 // only counts. Returns 0 on any error.
+//
+// Process enumeration is delegated to processscan.WindowsAgentProcessOutput so
+// the wmic → PowerShell Get-CimInstance fallback is shared: wmic is gone from
+// Windows 11 24H2+ and Server 2025, and a wmic-only scan silently reports zero
+// agents there while agents are in fact running.
 func countRunningAgents() int {
-	out, err := exec.Command("wmic", "process", "where",
-		"commandline like '%lingtai run%'",
-		"get", "processid,commandline", "/format:list").Output()
+	out, err := processscan.WindowsAgentProcessOutput()
 	if err != nil {
 		return 0
 	}
