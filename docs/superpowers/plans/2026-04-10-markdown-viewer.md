@@ -1,5 +1,7 @@
 # Reusable Markdown Viewer Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** `skills.go` was renamed to `library.go` (`scanLibrary`/`buildLibraryEntries`); the markdown-viewer component itself (`mdviewer.go`) is unaffected and still matches this plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extract a reusable two-panel markdown viewer from `/skills`, then wire it for both `/skills` and recipe Ctrl+O preview.

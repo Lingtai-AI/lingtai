@@ -1,5 +1,7 @@
 # Vision capability silently swallows custom-provider config — three layered bugs + one preset-design footgun
 
+> **Superseded — historical record (as of 2026-08-07).** Both gaps described here are already closed: `lingtai-kernel/src/lingtai/tools/vision/__init__.py` wires `AnthropicVisionService`, and `tui/internal/preset/preset.go`'s `expand_inherit` copies both `api_compat` and `wire_api`.
+
 **Date:** 2026-05-19
 **Repo:** upstream `lingtai` Python package + `lingtai_kernel`, both installed at
 `~/.lingtai-tui/runtime/venv/lib/python3.13/site-packages/`. Not in the

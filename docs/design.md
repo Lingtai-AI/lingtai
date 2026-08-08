@@ -19,8 +19,7 @@
 │                                             │
 │  Layers:  bash · diary · plan · delegate    │
 │                                             │
-│  Intrinsics:  read edit write glob grep     │
-│               email vision web_search       │
+│  Intrinsics:  file · email · vision · web   │
 │                                             │
 │  Services: LLM · FileIO · Email · Vision ·  │
 │            Search                           │
@@ -47,9 +46,16 @@ No domain dependency. Just an agent with tools.
 
 | Tier | What it is | Examples |
 |------|-----------|----------|
-| **Intrinsics** | What the agent *is* — irreducible core capabilities | read, edit, write, glob, grep, email, vision, web_search |
+| **Intrinsics** | What the agent *is* — irreducible core capabilities | file (read/edit/write/glob/grep), email, vision, web |
 | **Layers** | What the agent *can do* — composable capabilities added via `add_tool()` + `update_system_prompt()` | diary, plan, bash, delegate |
 | **MCP tools** | What the agent *works on* — domain context provided by the host app | xhelio data pipeline, cdaweb fetch, plotly render |
+
+> **Vocabulary note — "intrinsic" in this document is the original prototype vocabulary.**
+> The shipped kernel calls `file`, `vision`, and `web` **capabilities**, and reserves
+> *intrinsic* for the six mandatory families `BaseAgent` always wires — `email`, `system`,
+> `context`, `psyche`, `soul`, `notification`. The authoritative split is
+> `lingtai-kernel/src/lingtai/tools/registry.py` (`INTRINSICS` vs. `BUILTIN_TOOLS`);
+> this document keeps the historical framing on purpose.
 
 ## Services Architecture
 
@@ -58,17 +64,17 @@ Every intrinsic is backed by a **service** — an abstract contract with pluggab
 | Service | What it abstracts | Intrinsics | First implementation |
 |---------|------------------|------------|---------------------|
 | `LLMService` | Thinking, generating text | *(core agent loop)* | Gemini adapter |
-| `FileIOService` | File access | `read`, `edit`, `write`, `glob`, `grep` | `LocalFileIOService` (text files) |
-| `EmailService` | Message transport | `email` | `TCPEmailService` |
+| `FileIOService` | File access | `file` (read/edit/write/glob/grep) | `LocalFileIOService` (text files) |
+| `EmailService` | Message transport | `email` | disk-backed mailbox (no TCP transport) |
 | `VisionService` | Image understanding | `vision` | `LLMVisionService` (wraps LLM) |
-| `SearchService` | Web search | `web_search` | `LLMSearchService` (wraps LLM) |
+| `SearchService` | Web search | `web` | `LLMSearchService` (wraps LLM) |
 
 **All services are optional.** An agent with no services is still valid — maybe a pure message router or inbox collector.
 
-- No `FileIOService` → `read`, `edit`, `write`, `glob`, `grep` disabled
+- No `FileIOService` → `file` (read/edit/write/glob/grep) disabled
 - No `EmailService` → `email` disabled (but inbox can still receive)
 - No `VisionService` → `vision` disabled
-- No `SearchService` → `web_search` disabled
+- No `SearchService` → `web` disabled
 - No `LLMService` → no thinking, but can still process emails deterministically
 
 Same pattern as LLM — abstract the contract, implement one backend first, add more later:
@@ -111,9 +117,9 @@ class EmailService(ABC):
     @abstractmethod
     def stop(self) -> None: ...
 
-# First implementation
-class TCPEmailService(EmailService):
-    def __init__(self, listen_port: int | None = None): ...
+# First implementation — filesystem-backed mailbox, no network transport
+class FilesystemEmailService(EmailService):
+    def __init__(self, mailbox_dir: str): ...
 ```
 
 Vision and Search are conceptually separate from "talk to an LLM" even if they use the LLM under the hood today. Tomorrow vision could be a dedicated model, web_search could be a Brave API call:
@@ -156,18 +162,20 @@ class BaseAgent:
 - **No `role` parameter** — role is a system prompt section injected via `update_system_prompt()`.
 - **No file-based config** — host app passes `AgentConfig` with resolved values.
 
-### Intrinsic Tools (8)
+### Intrinsic Tools (4, in the original prototype vocabulary)
+
+See the vocabulary note under [Three-Tier Model](#three-tier-model): the shipped kernel calls
+these four **capabilities** and reserves *intrinsic* for its six mandatory families — see
+`lingtai-kernel/src/lingtai/tools/registry.py`.
+
+The original 8-tool split (separate `read`/`edit`/`write`/`glob`/`grep`) has since collapsed into one unified `file` capability with those five as actions — a clean break with no alias, so an agent calling the old separate names fails loudly.
 
 | Tool | LLM tool name | Python method | Service |
 |------|--------------|---------------|---------|
-| Read | `read` | `self.read_file(path)` | `FileIOService` |
-| Edit | `edit` | `self.edit_file(path, old, new)` | `FileIOService` |
-| Write | `write` | `self.write_file(path, content)` | `FileIOService` |
-| Glob | `glob` | `self.glob(pattern)` | `FileIOService` |
-| Grep | `grep` | `self.grep(pattern, path)` | `FileIOService` |
+| File (read/edit/write/glob/grep) | `file` | `self.read_file(path)` / `self.edit_file(path, old, new)` / `self.write_file(path, content)` / `self.glob(pattern)` / `self.grep(pattern, path)` | `FileIOService` |
 | Email | `email` | `self.email(address, message)` | `EmailService` |
 | Vision | `vision` | `self.see_image(path)` | `VisionService` |
-| Web Search | `web_search` | `self.web_search(query)` | `SearchService` |
+| Web | `web` | `self.web_search(query)` | `SearchService` |
 
 **Dual interface:** Every intrinsic is both LLM-callable tool and Python method. The LLM calls `email` as a tool; a wrapper calls `self.email()` as a method.
 
@@ -230,7 +238,7 @@ Protected sections: host app marks them, LLM cannot modify.
 
 ## Email — Inter-Agent Messaging
 
-`talk` is renamed to `email`. Fire-and-forget, no request/response coupling.
+`talk` is renamed to `email`. Fire-and-forget, no request/response coupling. The current implementation is a **disk-backed filesystem mailbox** — there is no TCP transport or `host:port` addressing; the address is a bare path under `.lingtai/`.
 
 ### Message Format
 
@@ -238,15 +246,15 @@ Every email is a one-way message:
 
 ```python
 {
-    "from": "localhost:8300",
-    "to": "localhost:8301",
+    "from": "human",
+    "to": "researcher",
     "message": "What's the solar wind speed?"
 }
 
 # A reply is just another email
 {
-    "from": "localhost:8301",
-    "to": "localhost:8300",
+    "from": "researcher",
+    "to": "human",
     "message": "450 km/s"
 }
 ```
@@ -257,11 +265,11 @@ No threading. No conversation IDs. No request/response pairing. Just messages in
 
 ```python
 # LLM calls
-email(host="localhost", port=8301, message="What's the solar wind speed?")
-# Returns immediately: {"status": "delivered"} or {"status": "refused"}
+email(action="send", input={"address": "researcher", "message": "What's the solar wind speed?"})
+# Returns immediately: {"status": "ok"} or an error
 ```
 
-The sender doesn't block. The receiver checks when ready. The address is opaque to BaseAgent — passed to `EmailService.send()`.
+The sender doesn't block. The receiver checks when ready (or is notified). The address is opaque to BaseAgent — passed to `EmailService.send()`.
 
 ### Inbox
 
@@ -387,19 +395,20 @@ class AgentConfig:
 
 ## LLM Adapters
 
-10 provider adapters, each lazy-imported:
+11 provider adapters, each lazy-imported:
 
 | Provider | Package |
 |----------|---------|
 | Gemini | `google-genai` |
 | OpenAI | `openai` |
 | Anthropic | `anthropic` |
+| Claude Code | `openai` (compatible) |
 | MiniMax | `minimax` |
 | DeepSeek | `openai` (compatible) |
-| Grok | `openai` (compatible) |
-| Qwen | `openai` (compatible) |
-| GLM | `openai` (compatible) |
-| Kimi | `openai` (compatible) |
+| Mimo | `openai` (compatible) |
+| Kimi Code | `openai` (compatible) |
+| OpenRouter | `openai` (compatible) |
+| Zhipu (GLM) | `openai` (compatible) |
 | Custom | `openai` (compatible) |
 
 No hard dependencies — only the active provider's SDK needs to be installed.
@@ -420,20 +429,16 @@ lingtai/
     services/
       __init__.py
       file_io.py              ← FileIOService ABC + LocalFileIOService
-      email.py                ← EmailService ABC + TCPEmailService
+      email.py                ← EmailService ABC + FilesystemEmailService
       vision.py               ← VisionService ABC + LLMVisionService
       search.py               ← SearchService ABC + LLMSearchService
 
     intrinsics/
       __init__.py
-      read.py                 ← read file contents
-      edit.py                 ← string-replacement file edit
-      write.py                ← create/overwrite file
-      glob.py                 ← find files by pattern
-      grep.py                 ← search file contents by regex
-      email.py                ← fire-and-forget message
+      file.py                 ← unified read/edit/write/glob/grep actions
+      email.py                ← disk-backed mailbox messaging
       vision.py               ← image understanding
-      web_search.py           ← web search
+      web.py                  ← web search + browse
 
     layers/
       __init__.py
@@ -452,12 +457,13 @@ lingtai/
       gemini/                 ← adapter + defaults
       openai/
       anthropic/
+      claude_code/
       minimax/
       deepseek/
-      grok/
-      qwen/
-      glm/
-      kimi/
+      mimo/
+      kimi_code/
+      openrouter/
+      zhipu/
       custom/
 
     # Supporting modules
@@ -536,7 +542,7 @@ Forum doesn't coordinate agents. Agents coordinate themselves. Forum just makes 
 ```toml
 [project]
 name = "lingtai"
-version = "0.1.0"
+version = "0.19.5"
 requires-python = ">=3.11"
 dependencies = []  # no hard deps
 

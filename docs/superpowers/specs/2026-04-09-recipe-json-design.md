@@ -1,5 +1,7 @@
 # recipe.json Manifest and Imported Recipe Picker Design
 
+> **Superseded — historical record (as of 2026-08-07).** Confirmed: `RecipeDotDir` (`tui/internal/preset/recipes.go:36`) is `.recipe`, matching this design; only the `.lingtai-recipe/` references in prose/changelog are stale. See `tui/internal/preset/skills/lingtai-recipe/reference/recipe-format/SKILL.md` for the current format.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a mandatory `recipe.json` manifest to every recipe, and surface auto-detected imported recipes (`.lingtai-recipe/` with valid `recipe.json`) as a first-class option in the recipe picker — separate from the manual "Custom" entry.

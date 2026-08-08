@@ -1,5 +1,7 @@
 # Lingtai Agora: Share Your Agent Network With the World
 
+> **Superseded — historical record (as of 2026-08-07).** `/agora` has been removed (guarded by `tui/internal/tui/agora_removed_test.go`), `/export network` is retired in favor of recipe-only export, and the recipe directory is `.recipe/`, not `.lingtai-recipe/`. See `tui/internal/preset/skills/lingtai-recipe/reference/recipe-format/SKILL.md` and the top-level `README.md` for current recipe/install behavior.
+
 *April 9, 2026*
 
 ---

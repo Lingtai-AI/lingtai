@@ -280,7 +280,7 @@ func FindAgentProcesses(agentDir string) []AgentProcess {
 // "nothing running" apart from "scan failed".
 func FindAllAgentProcesses() ([]AgentProcess, error) {
 	if runtime.GOOS == "windows" {
-		out, err := windowsAgentProcessOutput()
+		out, err := WindowsAgentProcessOutput()
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +294,7 @@ func FindAllAgentProcesses() ([]AgentProcess, error) {
 }
 
 func findAgentProcessesWindows(abs string) []AgentProcess {
-	out, err := windowsAgentProcessOutput()
+	out, err := WindowsAgentProcessOutput()
 	if err != nil {
 		return nil
 	}
@@ -305,7 +305,12 @@ func FindWindowsAgentProcesses(abs string) []AgentProcess {
 	return findAgentProcessesWindows(abs)
 }
 
-func windowsAgentProcessOutput() ([]byte, error) {
+// WindowsAgentProcessOutput returns raw `CommandLine=` / `ProcessId=` records
+// for candidate `lingtai run` processes. wmic is tried first and PowerShell's
+// Get-CimInstance is the fallback: wmic is no longer shipped on Windows 11
+// 24H2+ and Server 2025, where a wmic-only scan silently reports zero
+// processes. Exported so every Windows process count shares one fallback.
+func WindowsAgentProcessOutput() ([]byte, error) {
 	out, err := exec.Command(
 		"wmic",
 		"process",

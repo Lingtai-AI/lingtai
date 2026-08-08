@@ -1,5 +1,7 @@
 # Codex Credential Redesign — Patch Spec
 
+> **Superseded — historical record (as of 2026-08-07).** Superseded by a multi-account Codex auth pool. See `lingtai-kernel/src/lingtai/auth/codex_pool.py` and `codex_account_source.py`, plus `tui/internal/preset/preset.go` (`CredentialFamilyCodexSingle`/`CredentialFamilyCodexPool`).
+
 **Date:** 2026-05-03
 **Repo:** `lingtai` (TUI). All paths relative to repo root.
 

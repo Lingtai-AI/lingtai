@@ -1,5 +1,7 @@
 # Intrinsics & Capabilities Tool-Schema Strict-Mode Scan
 
+> **Superseded — historical record (as of 2026-08-07).** The `lingtai_kernel`/`core`/`capabilities` paths and the embedded lint script's `ROOTS_TO_SCAN` no longer exist (current layout is `src/lingtai/tools/{psyche,avatar,vision,...}` in the `lingtai-kernel` repo, and `scripts/lint_strict_tool_schemas.py` was never landed); `deepseek-flash` is now `deepseek-v4-pro`. Kept for provenance only, not as live guidance.
+
 **Date:** 2026-05-19
 **Repos affected:** upstream `lingtai` Python package + `lingtai_kernel`
 (installed at `~/.lingtai-tui/runtime/venv/lib/python3.13/site-packages/`,

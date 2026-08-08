@@ -1,5 +1,7 @@
 # Recipe-Shipped Skills Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** `recipe_skills.go` and the `LinkRecipeSkills`/`PruneStaleSkillSymlinks` functions proposed here were never built; skill application is copy-based via `tui/internal/preset/recipe_apply.go`, and the on-disk skills directory is `.library/` (`skills.go` was renamed `library.go`). The `/agora publish` step referenced here no longer exists.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Allow recipes to ship skills that are automatically symlinked into `.lingtai/.skills/` on TUI startup, with i18n resolution, collision detection, and stale symlink pruning.

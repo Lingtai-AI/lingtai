@@ -8,7 +8,7 @@ Key decisions from the brainstorming session that led to the current design.
 - User wanted a standalone identity, inspired by 百家争鸣 (A Hundred Schools of Thought Contend)
 - Explored Greek equivalents: stoa, agora, symposium, dialectic, polyphony
 - **Final name: 灵台** — Stoa (Greek philosophical porch) + AI
-- PyPI: available. GitHub: `huangzesen/lingtai` available.
+- PyPI: available. GitHub: `huangzesen/lingtai` available (since moved to `Lingtai-AI/lingtai`).
 
 ## Three-Tier Model
 

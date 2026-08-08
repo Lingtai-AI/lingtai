@@ -1,5 +1,7 @@
 # `/doctor` diagnostic-only + gated heal (PR 2 of 2)
 
+> **Superseded — historical record (as of 2026-08-07).** The kernel-version example in this design (`0.14.1 -> 0.15.0`) is illustrative and now far behind the current kernel version (0.19.5 in `pyproject.toml`); the `/doctor` diagnostic-only behavior it specifies still matches `tui/internal/config/venv.go`.
+
 **Date:** 2026-06-23
 **Status:** Design approved
 **Repo:** `lingtai` (TUI, Go)

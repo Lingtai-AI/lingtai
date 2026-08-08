@@ -1,5 +1,7 @@
 # Lingtai Preset Swap Silently Reverts — `api_compat` Lost + Cascading AED Bug
 
+> **Superseded — historical record (as of 2026-08-07).** The `lingtai_kernel` package cited throughout no longer exists (now `lingtai-kernel/src/lingtai/kernel/`), and both bugs described here are already fixed: `turn.py` uses `.interface.has_pending_tool_calls()` throughout, and `presets.go`'s `expand_inherit` copies `api_compat`.
+
 **Date:** 2026-05-19
 **Repo:** upstream `lingtai` Python package (installed at
 `~/.lingtai-tui/runtime/venv/lib/python3.13/site-packages/`, **not** the TUI

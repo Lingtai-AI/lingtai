@@ -24,7 +24,7 @@ func TestWriteCreatesMinimalArtifactsWithSchemaVersions(t *testing.T) {
 		},
 		LLM: LLMConfig{
 			Provider:      "custom",
-			Model:         "claude-sonnet-4",
+			Model:         "claude-sonnet-5",
 			BaseHost:      "api.example.com",
 			APICompat:     "anthropic",
 			APIKeyEnv:     "ANTHROPIC_API_KEY",
@@ -121,7 +121,7 @@ func TestWriteRedactsSecretsAcrossArtifacts(t *testing.T) {
 		},
 		LLM: LLMConfig{
 			Provider:      "custom",
-			Model:         "claude-sonnet-4",
+			Model:         "claude-sonnet-5",
 			BaseHost:      "fixtureuser:url-password@example.com",
 			APIKeyEnv:     "SECRET_ENV",
 			APIKeyPresent: true,

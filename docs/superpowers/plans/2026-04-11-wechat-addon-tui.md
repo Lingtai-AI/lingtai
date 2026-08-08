@@ -1,5 +1,7 @@
 # WeChat Addon (TUI Side) Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** The addon-to-MCP migration happened, but only `palette.addon` was renamed (to the generic `palette.mcp`) — `firstrun.addon_desc.wechat` still exists verbatim in `tui/i18n/en.json`. See `tui/i18n/en.json` for current keys.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add WeChat as a fourth addon option in the LingTai TUI, including the setup skill, config template, and i18n strings.

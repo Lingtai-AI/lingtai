@@ -49,12 +49,12 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `agentManifest` struct (`portal/internal/fs/agent.go:13-23`) — raw `.agent.json` JSON shape.
 - `ReadAgent(dir)` (`portal/internal/fs/agent.go:26-53`) — reads `.agent.json` → `AgentNode`. Derives `IsHuman` from `admin: null`.
 - `ParseCapabilities(raw)` (`portal/internal/fs/agent.go:56-81`) — handles `[]string` (TUI-generated) and `[[name, {}], ...]` (live agent) formats.
-- `ReadInitManifest(dir)` (`portal/internal/fs/agent.go:90-100`) — returns the agent's manifest, preferring the kernel-published resolved artifact `system/manifest.resolved.json` (`readResolvedManifest`, `portal/internal/fs/agent.go:104`; kernel issue #259) and falling back to raw `init.json` (`readRawInitManifest`, `portal/internal/fs/agent.go:121`) when the artifact is absent/malformed. Either way `flattenManifest` (`portal/internal/fs/agent.go:138`) hoists `llm.{model, provider, base_url}` and `soul.delay` to top-level.
-- `WritePrompt(agentDir, content)` (`portal/internal/fs/agent.go:157-159`) — writes `.prompt` signal file.
-- `DiscoverAgents(baseDir)` (`portal/internal/fs/agent.go:175-195`) — scans for subdirectories with `.agent.json`.
-- `AgentStatus` struct + `ReadStatus(dir)` (`portal/internal/fs/agent.go:197-224`) — runtime context/runtime from `.status.json`.
-- `TokenTotals` + `AggregateTokens(dirs)` (`portal/internal/fs/agent.go:227-248`) — sums token usage across agents.
-- `SumTokenLedger(path)` (`portal/internal/fs/agent.go:252-279`) — reads and sums a single `token_ledger.jsonl`.
+- `ReadInitManifest(dir)` (`portal/internal/fs/agent.go:90-100`) — returns the agent's manifest, preferring the kernel-published resolved artifact `system/manifest.resolved.json` (`readResolvedManifest`, `portal/internal/fs/agent.go:104`; kernel issue #259) and falling back to raw `init.json` (`readRawInitManifest`, `portal/internal/fs/agent.go:147`) when the artifact is absent/malformed. Either way `flattenManifest` (`portal/internal/fs/agent.go:164`) hoists `llm.{model, provider, base_url}` and `soul.delay` to top-level.
+- `WritePrompt(agentDir, content)` (`portal/internal/fs/agent.go:183-185`) — writes `.prompt` signal file.
+- `DiscoverAgents(baseDir)` (`portal/internal/fs/agent.go:201-220`) — scans for subdirectories with `.agent.json`.
+- `AgentStatus` struct + `ReadStatus(dir)` (`portal/internal/fs/agent.go:223-250`) — runtime context/runtime from `.status.json`.
+- `TokenTotals` + `AggregateTokens(dirs)` (`portal/internal/fs/agent.go:252-274`) — sums token usage across agents.
+- `SumTokenLedger(path)` (`portal/internal/fs/agent.go:277-305`) — reads and sums a single `token_ledger.jsonl`.
 
 ### Heartbeat (`heartbeat.go`)
 - `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (2.0s for the portal).
@@ -101,7 +101,7 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 ## Connections
 
 - **Called by** `portal/internal/api/` (handlers build `Network` payloads and replay calls `ReconstructTape`).
-- **Reads** `.lingtai/<agent>/.agent.json`, `.agent.heartbeat`, `.status.json`, `system/manifest.resolved.json` (preferred over `init.json` when present), `init.json`, `logs/events.jsonl`, `logs/token_ledger.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `mailbox/inbox/*/message.json`, `mailbox/archive/*/message.json`, `mailbox/sent/*/message.json`.
+- **Reads** `.lingtai/<agent>/.agent.json`, `.agent.heartbeat`, `.status.json`, `system/manifest.resolved.json` (preferred over `init.json` when present), `init.json`, `logs/events.jsonl`, `logs/token_ledger.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `mailbox/inbox/*/message.json`, `mailbox/archive/*/message.json`.
 - **Writes** signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`) and atomically updates human location in `.agent.json`; this package has no mail writer.
 - **Cross-reference** `tui/internal/fs/` shares the same read pattern for agent manifests, heartbeats, mail, and ledgers. The portal adds `reconstruct.go` (tape reconstruction — the TUI doesn't do this); address resolution and signal writing remain parallel across both binaries.
 

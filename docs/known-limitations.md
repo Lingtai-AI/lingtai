@@ -48,4 +48,4 @@ A PID-based kill mechanism was considered and intentionally rejected. `SIGTERM` 
 
 ## Heavy Optional Dependencies
 
-The `listen` capability depends on `faster-whisper` (~132 MB) and `librosa` (~202 MB). These are **not** installed with `pip install lingtai`. They are automatically installed on first use when an agent actually invokes the listen tool (transcription or music analysis). The first invocation will pause for a few seconds while the packages download.
+The `listen` capability was removed from the kernel — it is no longer a registered tool. `faster-whisper` (~132 MB) is now a core dependency of `lingtai-kernel`, installed unconditionally with `pip install lingtai` rather than downloaded on first use; `librosa` is not a dependency at all.

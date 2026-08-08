@@ -1,5 +1,7 @@
 # Email Scheduler Status — Explicit Lifecycle Refactor
 
+> **Superseded — historical record (as of 2026-08-07).** The email scheduler this spec refactors was removed entirely, not given explicit lifecycle states — see `test_email_schedule_removed_from_schema` in the kernel test suite. `src/lingtai/capabilities/` no longer exists.
+
 **Date:** 2026-04-06
 **Status:** Draft
 **Scope:** `lingtai-kernel/src/lingtai/capabilities/email.py` — schedule cancel/recover semantics

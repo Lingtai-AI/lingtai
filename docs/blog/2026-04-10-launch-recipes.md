@@ -1,5 +1,7 @@
 # Launch Recipes: Portable Agent Culture
 
+> **Superseded — historical record (as of 2026-08-07).** The recipe directory has moved from the flat `.lingtai-recipe/` layout described here to layered `.recipe/` subdirectories, and `/export network` (full-network publishing) is retired in favor of recipe-only export. See `tui/internal/preset/skills/lingtai-recipe/reference/recipe-format/SKILL.md` for the current format.
+
 *April 10, 2026*
 
 ---

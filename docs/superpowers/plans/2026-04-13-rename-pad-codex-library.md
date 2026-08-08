@@ -1,5 +1,7 @@
 # Rename: memory→pad, library→codex, skills→library
 
+> **Superseded — historical record (as of 2026-08-07).** The `knowledge→codex`, `skills→library` rename proposed here never shipped (current keys are still `palette.library`/`palette.skills`; `codex` in the current codebase refers to the Codex CLI LLM backend, not a knowledge archive). The migration that did land is `tui/internal/migrate/m016_rename_pad_codex_library.go`, not `m015` as stated, and `CurrentVersion` is now 39.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rename three core concepts to better reflect what they actually are: memory→pad (working notes), library→codex (personal knowledge archive), skills→library (skill library).
