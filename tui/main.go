@@ -403,7 +403,7 @@ func runCreatedProject(result tui.LauncherResult) {
 	lingtaiDir := filepath.Join(result.ProjectRoot, ".lingtai")
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 	needsFirstRun := len(orchestrators) == 0
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, orchestrators, tuiCfg, "", "")
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, false, orchestrators, tuiCfg, "", "")
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1438,6 +1438,35 @@ func runVersionPreflightWithOptions(opts preflightOptions) bool {
 // real App without starting a second Bubble Tea program. When inProgram is
 // true, terminal-coupled prompts and fatal paths become typed outcomes for
 // the caller to handle after Bubble Tea has released the terminal.
+// startupDecision computes the launch mode from the R1/R2/R3 requirement
+// state (tui/CONTRACT.md).
+//   - R1  orchestrators present (zero agents → real first-run setup; also
+//        catches the `lingtai-tui clean` recreated-empty-.lingtai case)
+//   - R2  API keys resolvable (resolvedKeys = .env authoritative + config.json
+//        mirror fills gaps)
+//   - R3.1  the config.json keys mirror is present (configOK) and non-empty
+//
+// Returns:
+//   firstRun — no agents (or rehydration, applied by the caller)
+//   recovery — R2 fail: no API key anywhere → real setup wizard
+//   degraded — R3.1 loss while R2 ok → launch with banner, keys from .env
+//
+// Content-based (fable F7): a present-but-keyless config.json degrades exactly
+// like an absent one, so the original config-wipe incident cannot silently
+// recur through a keyless-but-present mirror.
+func startupDecision(orchestrators int, resolvedKeys map[string]string, configOK bool, mirrorKeys map[string]string) (firstRun, recovery, degraded bool) {
+	if orchestrators == 0 {
+		return true, false, false
+	}
+	if !config.HasAPIKeys(resolvedKeys) {
+		return false, true, false
+	}
+	if !configOK || !config.HasAPIKeys(mirrorKeys) {
+		return false, false, true
+	}
+	return false, false, false
+}
+
 func prepareApp(projectDir string, inProgram bool) startupResult {
 	// TUI + kernel version checks already ran once in main(), via
 	// runVersionPreflight, before any Bubble Tea program started and before
@@ -1560,41 +1589,24 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// startup. Agents reach these via the library.paths default in init.json.
 	preset.PopulateBundledLibrary(globalDir)
 
-	// First run = no config.json in ~/.lingtai-tui/
-	configPath := filepath.Join(globalDir, "config.json")
-	_, configErr := os.Stat(configPath)
-	needsFirstRun := os.IsNotExist(configErr)
+	// Compute launch mode from R1/R2/R3 requirement state (tui/CONTRACT.md).
+	// startupDecision is content-based (fable F7): a present-but-keyless
+	// config.json — e.g. only the legacy `language` key — is an R3.1 mirror
+	// loss and degrades exactly like an absent file, so the original incident
+	// cannot silently recur. Zero orchestrators force first-run (the
+	// `lingtai-tui clean` recreated-empty-.lingtai case).
+	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+	keys, configOK := config.ResolveKeys(globalDir)
+	mirror, _ := config.LoadConfigReadOnly(globalDir)
+	needsFirstRun, needsRecovery, degradedConfig := startupDecision(len(orchestrators), keys, configOK, mirror.Keys)
 
 	// Rehydration forces us into the first-run wizard regardless of whether
 	// the user has a global config.json — cloned networks always need to be
 	// walked through setup before they can launch.
 	if needsRehydration {
 		needsFirstRun = true
-	}
-
-	// tuiCfg and the UI language were loaded earlier (right after globalDir is
-	// resolved) so startup banners render in the configured locale.
-
-	orchestrators := tui.DetectOrchestrators(lingtaiDir)
-
-	// Reconcile needsFirstRun with actual orchestrator state.
-	// If there are zero orchestrators, force first-run. This catches the
-	// "user ran `lingtai-tui clean` and relaunched in the same folder"
-	// case: clean removed .lingtai/, so the invariant checks at the top
-	// of main() were skipped (they only run if .lingtai/ already exists),
-	// but process.InitProject then recreated an empty .lingtai/ with only
-	// human/ inside. Without this fallback, a returning user (global
-	// config.json exists, so needsFirstRun would otherwise be false) would
-	// reach NewApp with no orchestrator to launch.
-	needsRecovery := false
-	if len(orchestrators) == 0 {
-		needsFirstRun = true
-	} else if needsFirstRun && !needsRehydration {
-		// Existing orchestrators found in .lingtai/ but global config is
-		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real
-		// and must not be duplicated — show setup for API keys only.
-		needsFirstRun = false
-		needsRecovery = true
+		needsRecovery = false
+		degradedConfig = false
 	}
 
 	if !needsFirstRun {
@@ -1673,6 +1685,6 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// startup is the FirstRunDoneMsg handler in app.go, which fires when the
 	// user creates a new agent through the first-run wizard.
 
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, degradedConfig, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
 	return startupResult{kind: startupReady, app: app}
 }

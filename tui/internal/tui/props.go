@@ -605,7 +605,10 @@ func (m PropsModel) renderLeft(maxW int) string {
 			}
 
 			if len(allowedRefs) > 0 {
-				cfg, _ := config.LoadConfig(m.globalDir)
+				// ResolveKeys: .env is authoritative (agents' source), config.json
+				// mirror fills gaps — /props must show the keys the TUI will
+				// actually use, including after a degraded launch (fable F3).
+				keys, _ := config.ResolveKeys(m.globalDir)
 				poolEligible, poolEligibleModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
 				auth := preset.AuthState{
 					CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
@@ -615,7 +618,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 					CodexPoolFallbackEligible: poolFallback,
 					ClaudeCodeAuthConfigured:  claudeCodeAuthConfigured(),
 				}
-				resolved := preset.ResolveRefsWithAuth(allowedRefs, cfg.Keys, auth)
+				resolved := preset.ResolveRefsWithAuth(allowedRefs, keys, auth)
 				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
 				for _, rr := range resolved {
 					marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")

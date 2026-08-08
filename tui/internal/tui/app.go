@@ -83,8 +83,13 @@ type App struct {
 	tuiConfig        config.TUIConfig
 	pendingRecipe    string
 	pendingCustomDir string
-	recoveryMode     bool   // global config lost, agents intact — setup then propagate
-	startupBanner    string // non-empty warning shown on first render
+	recoveryMode     bool // global config lost, agents intact — setup then propagate
+	// degradedConfig is true when ~/.lingtai-tui/config.json is missing but API
+	// keys were derived from .env (the agents' source of truth). The app launches
+	// normally with a persistent banner instead of a hard recovery gate;
+	// key-dependent features are gated and a self-heal is offered.
+	degradedConfig bool
+	startupBanner  string // non-empty warning shown on first render
 	// autoRefreshArmed is true while exactly one auto-refresh ticker is in
 	// flight. It guards against starting a second concurrent ticker when the
 	// feature is re-enabled or a view is re-entered. The autoRefreshTickMsg
@@ -217,7 +222,7 @@ func (a App) openProjectsView() (App, tea.Cmd) {
 // enters first-run view with a FirstRunModel constructed via
 // NewRehydrateModel, which prefills the orchestrator's name/dir and adds
 // a final stepPropagate page to copy the new init.json to every worker.
-func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orchestrators []string, tuiCfg config.TUIConfig, rehydrateOrchDir, rehydrateOrchName string) App {
+func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery, degradedConfig bool, orchestrators []string, tuiCfg config.TUIConfig, rehydrateOrchDir, rehydrateOrchName string) App {
 	// Apply persisted theme (or default).
 	SetThemeByName(tuiCfg.Theme)
 
@@ -261,6 +266,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets, "")
 		}
 	} else {
+		app.degradedConfig = degradedConfig
 		// Determine orchestrator
 		localSettings := LoadSettings(projectDir)
 		if len(orchestrators) == 1 {

@@ -840,5 +840,9 @@
   "agent_selector.omitted": "已省略 %d 个不安全的智能体条目",
   "agent_selector.unread_failed": "无法更新智能体未读状态",
   "agent_selector.title": "选择智能体",
-  "agent_selector.hint": "↑↓ 移动 · enter 选择 · esc 取消"
+  "agent_selector.hint": "↑↓ 移动 · enter 选择 · esc 取消",
+  "firstrun.self_heal_proposal": "⚠ 检测到 ~/.lingtai-tui/.env 中有 %d 个 API key（agent 仍在运行）— 按 [s] 从这些 key 自愈 config.json",
+  "firstrun.self_heal_done": "已从 .env 的 %d 个 key 自愈 config.json。继续即可同步给 agent。",
+  "firstrun.self_heal_failed": "自愈失败：%v",
+  "degraded.banner": "⚠ config.json key 缺失 — 已从 .env 推导; /setup 恢复"
 }

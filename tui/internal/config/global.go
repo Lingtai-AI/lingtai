@@ -350,6 +350,95 @@ func readEnvLines(path string) ([]string, error) {
 	return strings.Split(content, "\n"), nil
 }
 
+// ReadEnvKeys parses ~/.lingtai-tui/.env for `KEY=VALUE` assignments and
+// returns them as an env-var-name → value map. A missing or empty file
+// returns an empty map; comment lines and empty values are ignored.
+//
+// The setup/recovery wizard uses this to propose self-healing config.json
+// from keys that already exist in .env — the .env is loaded by agents at
+// boot via init.json's env_file, so it commonly survives a partial wipe of
+// ~/.lingtai-tui while agents keep running.
+func ReadEnvKeys(globalDir string) map[string]string {
+	keys := map[string]string{}
+	lines, err := readEnvLines(EnvFilePath(globalDir))
+	if err != nil {
+		return keys
+	}
+	for _, line := range lines {
+		name, isAssign := parseEnvKey(line)
+		if !isAssign {
+			continue
+		}
+		// Normalize common .env forms (fable F5): strip a leading `export `
+		// prefix so the startup gate sees the real key name, strip one pair
+		// of surrounding quotes from the value, and for unquoted values
+		// drop a trailing ` # comment`. Without these, an `export KEY=...`
+		// .env silently re-creates the recovery-wizard incident (the parsed
+		// name fails the _API_KEY suffix) and quoted keys self-heal into
+		// config.json with their quotes intact.
+		name = strings.TrimSpace(strings.TrimPrefix(name, "export "))
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		val := strings.TrimSpace(line[eq+1:])
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		} else if idx := strings.Index(val, " #"); idx >= 0 {
+			val = strings.TrimSpace(val[:idx])
+		}
+		if val == "" {
+			continue
+		}
+		keys[name] = val
+	}
+	return keys
+}
+
+// ResolveKeys returns the effective API keys the TUI should use, aligned with
+// the agents' source of truth: ~/.lingtai-tui/.env (agents load it at boot via
+// init.json env_file). config.json keys fill gaps but never override .env, so
+// the two stores cannot drift. The bool result reports whether config.json was
+// present and readable (false = keys derived purely from .env / degraded).
+func ResolveKeys(globalDir string) (keys map[string]string, configOK bool) {
+	keys = map[string]string{}
+	// LoadConfigReadOnly: identical read+parse+legacy-migration behavior to
+	// LoadConfig but never chmods config.json, so resolving keys is safe on
+	// read-only paths (draft wizard, /props render) before project creation.
+	cfg, err := LoadConfigReadOnly(globalDir)
+	// config.json presence is checked explicitly: LoadConfigReadOnly
+	// intentionally returns a nil error for a missing file, so err alone
+	// cannot distinguish "config.json exists" from "config.json absent".
+	_, statErr := os.Stat(filepath.Join(globalDir, "config.json"))
+	// configOK reports present AND readable (fable F6): a corrupt file must
+	// not report healthy, or the mirror contributes nothing while a future
+	// doctor check built on this bool reports the surface OK.
+	configOK = statErr == nil && err == nil
+	for name, val := range ReadEnvKeys(globalDir) {
+		keys[name] = val
+	}
+	if err == nil {
+		for name, val := range cfg.Keys {
+			if _, ok := keys[name]; !ok {
+				keys[name] = val
+			}
+		}
+	}
+	return keys, configOK
+}
+
+// HasAPIKeys reports whether the given key map contains at least one *_API_KEY
+// value. Used by startup to decide between "recoverable degraded launch" (keys
+// exist somewhere the agents already use) and "real setup" (no keys at all).
+func HasAPIKeys(keys map[string]string) bool {
+	for name, val := range keys {
+		if strings.HasSuffix(name, "_API_KEY") && val != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // writeEnvLines writes lines back to the .env file with a single
 // trailing newline and 0600 permissions. When the file already exists
 // its existing permission bits are preserved rather than reset to 0600,

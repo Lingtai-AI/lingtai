@@ -23,6 +23,7 @@ related_files:
   - docs/discussion-log.md
   - docs/example-role.md
   - docs/headless-runtime-contract.md
+  - docs/tui-agent-alignment.md
   - docs/plans/2026-04-18-lingtai-p2p-spec.md
   - docs/plans/design-postman-ipv6-mesh.md
   - docs/plans/tui-image-clipboard-paste.md
