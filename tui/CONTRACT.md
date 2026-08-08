@@ -72,6 +72,10 @@ validates each item; the TUI launches regardless of its state.
 | R3.2 | TUI preferences | `~/.lingtai-tui/tui_config.json` | `language: en`, `theme: ink-dark`, `mail_page_size: 200`, `insights: false`, `tool_call_truncate: 0` (no truncation), `auto_refresh: on` | Loaded defaults replace the file silently; no banner (fable F9). |
 | R3.3 | Legacy `language` | `~/.lingtai-tui/config.json` `language` | n/a (deprecated) | Migrated to `tui_config.json` by `MigrateLegacyLanguage`; ignored once migrated. |
 
+Other files under `~/.lingtai-tui/` (`utilities/`, `registry.jsonl`) are
+self-healing caches regenerated or tolerated on startup — implementation
+details, never requirements, never launch gates.
+
 ## Startup decision table
 
 The table gates **only** on R1/R2. R3 loss never appears as a launch gate; it
