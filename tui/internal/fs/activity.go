@@ -214,12 +214,16 @@ func readNetworkStatusSnapshot(agentDir string) (networkStatusSnapshot, time.Tim
 
 // LastProgressAt returns the agent's clamped runtime.last_progress_at from its
 // .status.json, or zero + false when the file is missing, the field is absent/
-// invalid, or the timestamp is beyond the future grace window. This mirrors the
-// kernel taskcard footer semantics: while state==active, the elapsed display is
-// seconds since this timestamp (age of the last progress).
+// invalid, the runtime state is not active, or the timestamp is beyond the
+// future grace window. Requiring state==active on the SAME snapshot mirrors the
+// kernel taskcard footer semantics and avoids seeding the elapsed badge from a
+// stale timestamp after a restart (Jason 2026-08-08, fable review).
 func LastProgressAt(agentDir string, now time.Time) (time.Time, bool) {
 	status, _, ok := readNetworkStatusSnapshot(agentDir)
 	if !ok || !status.Runtime.LastProgressAt.OK {
+		return time.Time{}, false
+	}
+	if !strings.EqualFold(status.Runtime.State, NetworkStatusActive) {
 		return time.Time{}, false
 	}
 	return statusFreshnessTime(now, unixSeconds(status.Runtime.LastProgressAt.Value))
