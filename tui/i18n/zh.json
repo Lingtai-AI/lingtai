@@ -499,8 +499,8 @@
   "doctor.d4_no_addons": "✓ 未声明 addons (R1)",
   "doctor.d4_init_unreadable": "⚠ 无法读取 init.json 以校验 addon 密钥：%v",
   "doctor.d4_secrets_ok": "✓ %s 密钥齐全",
-  "doctor.d4_secrets_missing": "✗ %s 已在 init.json 声明但缺少 .secrets/%s.json",
-  "doctor.d4_secrets_hint": "→ 在 /setup 中配置 %s 或恢复 .secrets/%s.json，然后 /refresh。",
+  "doctor.d4_secrets_missing": "✗ %s 已在 init.json 声明但缺少 %s",
+  "doctor.d4_secrets_hint": "→ 在 /setup 中配置 %s 或恢复 %s，然后 /refresh。",
   "doctor.d5_release": "✓ TUI 发布版本：%s",
   "doctor.d5_untagged": "⚠ TUI 二进制是未打标签的开发版 — 版本诊断可能误导",
   "doctor.d5_untagged_hint": "→ 从发布标签重新构建，/doctor 才能报告可信版本。",
@@ -865,5 +865,6 @@
   "firstrun.self_heal_proposal": "⚠ 检测到 ~/.lingtai-tui/.env 中有 %d 个 API key（agent 仍在运行）— 按 [s] 从这些 key 自愈 config.json",
   "firstrun.self_heal_done": "已从 .env 的 %d 个 key 自愈 config.json。继续即可同步给 agent。",
   "firstrun.self_heal_failed": "自愈失败：%v",
-  "degraded.banner": "⚠ config.json key 缺失 — 已从 .env 推导; /setup 恢复"
+  "degraded.banner": "⚠ config.json key 缺失 — 已从 .env 推导; /setup 恢复",
+  "doctor.d4_no_agent_cli": "→ 未选择 agent — CLI 跳过 D4 (addon 密钥) 检查；请在 TUI 中运行 /doctor 查看每 agent 检查。"
 }

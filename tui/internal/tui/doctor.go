@@ -701,23 +701,30 @@ func doctorLineFromConfig(line config.DoctorLine) doctorLine {
 // the project's .lingtai directory (parent of the orchestrator agent dirs);
 // globalDir is ~/.lingtai-tui. It is the CLI counterpart of the /doctor view's
 // checkStartupDecision so the TUI-can't-start diagnostic set is reachable when
-// the interactive UI cannot start (fable F5).
+// the interactive UI cannot start (fable F5). The CLI has no selected agent, so
+// D4 inspects the first detected orchestrator (deterministic order); with none
+// detected, D1 already reports the missing-orchestrator state and D4 states why
+// it is skipped rather than asserting OK (fable R2 #1).
 func CheckStartupDecisionCLI(lingtaiDir, globalDir string) []string {
-	lines := checkStartupDecision(lingtaiDir, globalDir)
+	// Resolve the agent dir the way the launcher would for a selected agent:
+	// DetectOrchestrators scans lingtaiDir directly (NOT its parent) and
+	// returns directory names, so the CLI passes lingtaiDir itself and joins
+	// the first detected orchestrator to form the agent dir for D4 (fable R2 #1).
+	orchDir := ""
+	if orchs := DetectOrchestrators(lingtaiDir); len(orchs) > 0 {
+		sort.Strings(orchs)
+		orchDir = filepath.Join(lingtaiDir, orchs[0])
+	}
+	lines := checkStartupDecisionAt(lingtaiDir, orchDir, globalDir)
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		prefix := "  "
-		switch {
-		case line.Section:
+		// The i18n strings embed their own status glyph (fable R2 #3); only
+		// structural prefixes are added here so both surfaces read the same.
+		prefix := ""
+		if line.Section {
 			prefix = "== "
-		case line.Hint:
+		} else if line.Hint {
 			prefix = "   "
-		case line.Warn:
-			prefix = "! "
-		case line.OK:
-			prefix = "✓ "
-		default:
-			prefix = "✗ "
 		}
 		out = append(out, prefix+line.Text)
 	}
@@ -725,8 +732,19 @@ func CheckStartupDecisionCLI(lingtaiDir, globalDir string) []string {
 }
 
 // checkStartupDecision emits the D1-D5 TUI-can't-start diagnostic set for the
-// given orchestrator directory and global (~/.lingtai-tui) directory.
+// given orchestrator directory and global (~/.lingtai-tui) directory. It is the
+// /doctor view entry point: orchDir is the selected agent dir, and the network
+// root is its parent (the .lingtai directory), exactly as the launcher scans it.
 func checkStartupDecision(orchDir, globalDir string) []doctorLine {
+	return checkStartupDecisionAt(filepath.Dir(orchDir), orchDir, globalDir)
+}
+
+// checkStartupDecisionAt emits the D1-D5 set given the network root
+// (lingtaiDir, the .lingtai directory) and the agent dir to inspect for D4.
+// Splitting the two levels is what makes the CLI escape hatch correct: D1 must
+// scan lingtaiDir (the launcher's DetectOrchestrators argument, main.go:1615),
+// while D4 needs the agent dir that holds init.json (fable R2 #1).
+func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine {
 	var lines []doctorLine
 
 	// The real startup gate (main.go startupDecision) consumes resolved keys
@@ -739,7 +757,7 @@ func checkStartupDecision(orchDir, globalDir string) []doctorLine {
 	envKeys := config.ReadEnvKeys(globalDir)
 
 	// D1: agents running / orchestrators detected (R1).
-	orchestrators := DetectOrchestrators(filepath.Dir(orchDir))
+	orchestrators := DetectOrchestrators(lingtaiDir)
 	if len(orchestrators) == 0 {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d1_no_agents"),
@@ -800,8 +818,17 @@ func checkStartupDecision(orchDir, globalDir string) []doctorLine {
 		})
 	}
 
-	// D4: addon .secrets present for declared addons (R1).
-	lines = append(lines, checkAddonSecrets(orchDir)...)
+	// D4: addon .secrets present for declared addons (R1). The CLI path has no
+	// selected agent; when orchDir is empty, D1 already reported the missing
+	// orchestrator and D4 states why it is skipped rather than asserting OK
+	// (fable R2 #1).
+	if orchDir != "" {
+		lines = append(lines, checkAddonSecrets(orchDir)...)
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d4_no_agent_cli"), Hint: true,
+		})
+	}
 
 	// D5: runtime/version skew (R1).
 	lines = append(lines, checkVersionSkew()...)
@@ -861,24 +888,42 @@ func checkAddonSecrets(orchDir string) []doctorLine {
 	var lines []doctorLine
 	for _, addon := range addons {
 		// Resolve the declared config path, falling back to the convention.
+		// Only a declared path is authoritative: the convention's alternate
+		// layout form (file vs directory) is accepted as a secondary candidate
+		// so setups that used the other form do not false-fail (fable R2 #5).
 		relPath := defaultAddonConfigRel(addon)
-		if cfgPath := declaredAddonConfigPath(mcpRaw, raw, addon); cfgPath != "" {
-			relPath = cfgPath
+		declared := declaredAddonConfigPath(mcpRaw, raw, addon)
+		if declared != "" {
+			relPath = declared
 		}
-		candidate := relPath
-		if !filepath.IsAbs(candidate) {
-			candidate = filepath.Join(orchDir, candidate)
+		candidates := []string{relPath}
+		if declared == "" {
+			if alt := alternateAddonConfigRel(addon, relPath); alt != "" && alt != relPath {
+				candidates = append(candidates, alt)
+			}
 		}
-		if fileExists(candidate) {
+		found := false
+		for _, cand := range candidates {
+			if !filepath.IsAbs(cand) {
+				cand = filepath.Join(orchDir, cand)
+			}
+			if fileExists(cand) {
+				found = true
+				break
+			}
+		}
+		if found {
 			lines = append(lines, doctorLine{
 				Text: i18n.TF("doctor.d4_secrets_ok", addon), OK: true,
 			})
 		} else {
+			// The failure line names the path actually checked (declared or
+			// conventional), not a hardcoded convention (fable R2 #4).
 			lines = append(lines, doctorLine{
-				Text: i18n.TF("doctor.d4_secrets_missing", addon, addon),
+				Text: i18n.TF("doctor.d4_secrets_missing", addon, relPath),
 			})
 			lines = append(lines, doctorLine{
-				Text: i18n.TF("doctor.d4_secrets_hint", addon, addon), Hint: true,
+				Text: i18n.TF("doctor.d4_secrets_hint", addon, relPath), Hint: true,
 			})
 		}
 	}
@@ -895,18 +940,50 @@ func defaultAddonConfigRel(addon string) string {
 	return filepath.Join(".secrets", addon+".json")
 }
 
+// alternateAddonConfigRel returns the non-canonical convention layout form for
+// an addon (file <-> directory), or "" when the primary path is not a
+// convention path (e.g. a declared custom path). This keeps pre-F4 setups that
+// used the other layout form valid (fable R2 #5).
+func alternateAddonConfigRel(addon, primary string) string {
+	fileForm := filepath.Join(".secrets", addon+".json")
+	dirForm := filepath.Join(".secrets", addon, "config.json")
+	switch primary {
+	case fileForm:
+		return dirForm
+	case dirForm:
+		return fileForm
+	}
+	return ""
+}
+
 // declaredAddonConfigPath returns the config file path an init.json actually
 // declares for an addon, or "" when only the convention applies. It checks the
 // new mcp.<addon>.env.<VAR> shape first, then the legacy addons.<name>.config
 // shape. Relative paths are resolved against the agent dir by the caller.
+//
+// The env lookup uses the CANONICAL env var name from preset.DefaultMCPSpec,
+// never an arbitrary map entry: Go map iteration is randomized, so picking the
+// first string value produced intermittent false "secrets missing" on
+// customized specs with extra env vars (fable R2 #2).
 func declaredAddonConfigPath(mcpRaw, raw map[string]interface{}, addon string) string {
 	// New shape: mcp.<addon>.env.<LINGTAI_<NAME>_CONFIG>.
 	if mcpRaw != nil {
 		if entry, _ := mcpRaw[addon].(map[string]interface{}); entry != nil {
 			if envRaw, _ := entry["env"].(map[string]interface{}); envRaw != nil {
-				for _, val := range envRaw {
-					if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+				if _, envVar, _, supported := preset.DefaultMCPSpec(addon); supported {
+					if s, ok := envRaw[envVar].(string); ok && strings.TrimSpace(s) != "" {
 						return s
+					}
+				} else {
+					// Non-curated addon: fall back to a *_CONFIG-suffixed key so
+					// arbitrary secret values are never treated as a path.
+					for k, v := range envRaw {
+						if !strings.HasSuffix(k, "_CONFIG") {
+							continue
+						}
+						if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+							return s
+						}
 					}
 				}
 			}

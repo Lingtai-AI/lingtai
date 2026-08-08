@@ -269,3 +269,101 @@ func assertNotContains(t *testing.T, lines []doctorLine, substr string) {
 		}
 	}
 }
+func TestCheckStartupDecisionCLI_HealthyProject(t *testing.T) {
+	// Real project layout: <root>/.lingtai/<orch> — the exact shape
+	// main.go:1035 passes to CheckStartupDecisionCLI. This exercises the
+	// argument-level contract that the in-TUI tests cannot: D1 must scan
+	// lingtaiDir itself (not its parent) and D4 must inspect a real agent
+	// dir, so the CLI never reports a healthy project as first-run
+	// (fable R2 #1, #6).
+	root := t.TempDir()
+	lingtaiDir := filepath.Join(root, ".lingtai")
+	orchDir := filepath.Join(lingtaiDir, "alice")
+	writeTestFile(t, filepath.Join(orchDir, "init.json"), `{"addons": ["telegram"]}`)
+	writeTestFile(t, filepath.Join(orchDir, ".agent.json"), `{"admin": {"karma": true}}`)
+	writeTestFile(t, filepath.Join(orchDir, ".secrets", "telegram.json"), `{"bot_token": "x"}`)
+	globalDir := filepath.Join(root, "global")
+	writeTestFile(t, filepath.Join(globalDir, "config.json"), `{"keys": {"ANTHROPIC_API_KEY": "sk-mirror"}}`)
+	writeTestFile(t, filepath.Join(globalDir, ".env"), `ANTHROPIC_API_KEY=sk-env`)
+
+	out := CheckStartupDecisionCLI(lingtaiDir, globalDir)
+	joined := strings.Join(out, "\n")
+	if !strings.Contains(joined, "orchestrator(s) detected") {
+		t.Fatalf("CLI D1 should detect the orchestrator; got:\n%s", joined)
+	}
+	if strings.Contains(joined, "No agents detected") {
+		t.Fatalf("CLI D1 inverted: reports no agents on a healthy project:\n%s", joined)
+	}
+	if !strings.Contains(joined, "telegram secrets present") {
+		t.Fatalf("CLI D4 should verify addon secrets; got:\n%s", joined)
+	}
+	// The i18n strings embed their own glyph, so the CLI must not prepend
+	// another (fable R2 #3).
+	if strings.Contains(joined, "✓ ✓") || strings.Contains(joined, "✗ ✗") {
+		t.Fatalf("CLI output double-prints the status glyph:\n%s", joined)
+	}
+}
+
+func TestCheckStartupDecisionCLI_NoAgents(t *testing.T) {
+	// No orchestrators → D1 reports the missing-orchestrator state and D4
+	// states why it is skipped rather than asserting a false OK
+	// (fable R2 #1).
+	root := t.TempDir()
+	lingtaiDir := filepath.Join(root, ".lingtai")
+	writeTestFile(t, filepath.Join(lingtaiDir, "human", "init.json"), `{}`)
+	writeTestFile(t, filepath.Join(lingtaiDir, "human", ".agent.json"), `{"admin": null}`)
+	globalDir := filepath.Join(root, "global")
+
+	out := CheckStartupDecisionCLI(lingtaiDir, globalDir)
+	joined := strings.Join(out, "\n")
+	if !strings.Contains(joined, "No agents detected") {
+		t.Fatalf("CLI D1 should report no agents; got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "No agent selected") {
+		t.Fatalf("CLI D4 should state why it is skipped; got:\n%s", joined)
+	}
+}
+
+func TestCheckAddonSecrets_DeclaredMCPPath_MultiEnv(t *testing.T) {
+	// The declared mcp.<addon>.env path wins, resolved by the CANONICAL env
+	// var name, never by arbitrary map iteration order (fable R2 #2): extra
+	// env vars must not produce intermittent false "secrets missing".
+	orchDir, _ := startupFixture(t,
+		`{"addons": ["imap"], "mcp": {"imap": {"type": "stdio", "env": {
+			"LINGTAI_IMAP_CONFIG": ".secrets/custom/imap-mail.json",
+			"PYTHONPATH": "/opt/lingtai/lib",
+			"IMAP_DEBUG": "1"}}}}`,
+		"", "",
+	)
+	writeTestFile(t, filepath.Join(orchDir, ".secrets", "custom", "imap-mail.json"), `{"host": "x"}`)
+
+	for i := 0; i < 50; i++ {
+		lines := checkAddonSecrets(orchDir)
+		assertLineFlag(t, lines, "imap secrets present", true, false)
+	}
+}
+
+func TestCheckAddonSecrets_AlternateConventionForm(t *testing.T) {
+	// Convention fallback accepts BOTH layout forms (file vs directory) for
+	// every curated addon, so pre-F4 setups using the alternate form still
+	// pass (fable R2 #5). imap's canonical form is file; the dir form must
+	// also be accepted.
+	orchDir, _ := startupFixture(t, `{"addons": ["imap"]}`, "", "")
+	writeTestFile(t, filepath.Join(orchDir, ".secrets", "imap", "config.json"), `{"host": "x"}`)
+
+	lines := checkAddonSecrets(orchDir)
+	assertLineFlag(t, lines, "imap secrets present", true, false)
+}
+
+func TestCheckAddonSecrets_FailureNamesCheckedPath(t *testing.T) {
+	// The failure line must name the path actually checked (declared or
+	// conventional), not a hardcoded convention (fable R2 #4).
+	orchDir, _ := startupFixture(t,
+		`{"addons": ["imap"], "mcp": {"imap": {"type": "stdio", "env": {"LINGTAI_IMAP_CONFIG": ".secrets/custom/imap.json"}}}}`,
+		"", "",
+	)
+
+	lines := checkAddonSecrets(orchDir)
+	assertLineContains(t, lines, ".secrets/custom/imap.json missing")
+	assertNotContains(t, lines, ".secrets/imap.json missing")
+}

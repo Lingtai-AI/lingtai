@@ -499,8 +499,8 @@
   "doctor.d4_no_addons": "✓ 未宣 addons (R1)",
   "doctor.d4_init_unreadable": "⚠ 不克读 init.json 以验 addon 钥：%v",
   "doctor.d4_secrets_ok": "✓ %s 钥全",
-  "doctor.d4_secrets_missing": "✗ %s 已宣于 init.json 而缺 .secrets/%s.json",
-  "doctor.d4_secrets_hint": "→ /setup 配 %s 或复 .secrets/%s.json，后 /refresh。",
+  "doctor.d4_secrets_missing": "✗ %s 已宣于 init.json 而缺 %s",
+  "doctor.d4_secrets_hint": "→ /setup 配 %s 或复 %s，后 /refresh。",
   "doctor.d5_release": "✓ TUI 版：%s",
   "doctor.d5_untagged": "⚠ TUI 二进制乃未签之开发版 — 版诊或误",
   "doctor.d5_untagged_hint": "→ 自发布签重筑，/doctor 方报可信之版。",
@@ -865,5 +865,6 @@
   "firstrun.self_heal_proposal": "⚠ 察見 ~/.lingtai-tui/.env 載有 %d 枚 API key（靈使尚在運行）— 按 [s] 自 .env 自癒 config.json",
   "firstrun.self_heal_done": "已自 .env %d 枚鑰自癒 config.json。續行以佈達諸靈使。",
   "firstrun.self_heal_failed": "自癒不成：%v",
-  "degraded.banner": "⚠ config.json key 缺失 — 已自 .env 推衍; /setup 復原"
+  "degraded.banner": "⚠ config.json key 缺失 — 已自 .env 推衍; /setup 復原",
+  "doctor.d4_no_agent_cli": "→ 未择 agent — CLI 略 D4 (addon 钥) 检；请在 TUI 行 /doctor 察每 agent。"
 }
