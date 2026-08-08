@@ -350,6 +350,38 @@ func readEnvLines(path string) ([]string, error) {
 	return strings.Split(content, "\n"), nil
 }
 
+// ReadEnvKeys parses ~/.lingtai-tui/.env for `KEY=VALUE` assignments and
+// returns them as an env-var-name → value map. A missing or empty file
+// returns an empty map; comment lines and empty values are ignored.
+//
+// The setup/recovery wizard uses this to propose self-healing config.json
+// from keys that already exist in .env — the .env is loaded by agents at
+// boot via init.json's env_file, so it commonly survives a partial wipe of
+// ~/.lingtai-tui while agents keep running.
+func ReadEnvKeys(globalDir string) map[string]string {
+	keys := map[string]string{}
+	lines, err := readEnvLines(EnvFilePath(globalDir))
+	if err != nil {
+		return keys
+	}
+	for _, line := range lines {
+		name, isAssign := parseEnvKey(line)
+		if !isAssign {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		val := strings.TrimSpace(line[eq+1:])
+		if val == "" {
+			continue
+		}
+		keys[name] = val
+	}
+	return keys
+}
+
 // writeEnvLines writes lines back to the .env file with a single
 // trailing newline and 0600 permissions. When the file already exists
 // its existing permission bits are preserved rather than reset to 0600,

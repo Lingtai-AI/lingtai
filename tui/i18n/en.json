@@ -840,5 +840,8 @@
   "agent_selector.unread_failed": "Agent unread status could not be updated",
   "agent_selector.title": "Choose an agent",
   "agent_selector.hint": "↑↓ move · enter select · esc cancel",
-  "firstrun.cap_desc.web": "Search the web and read pages in one capability.\nSearch for current information, then browse a result to read its content."
+  "firstrun.cap_desc.web": "Search the web and read pages in one capability.\nSearch for current information, then browse a result to read its content.",
+  "firstrun.self_heal_proposal": "⚠ Detected %d API key(s) in ~/.lingtai-tui/.env (agents keep running) — press [s] to self-heal config.json from them",
+  "firstrun.self_heal_done": "Self-healed config.json from %d key(s) in .env. Continue to propagate to your agents.",
+  "firstrun.self_heal_failed": "Self-heal failed: %v"
 }

@@ -840,5 +840,8 @@
   "agent_selector.omitted": "已略 %d 不安靈使列",
   "agent_selector.unread_failed": "靈使未讀之狀未能更新",
   "agent_selector.title": "擇靈使",
-  "agent_selector.hint": "↑↓ 移 · enter 擇 · esc 罷"
+  "agent_selector.hint": "↑↓ 移 · enter 擇 · esc 罷",
+  "firstrun.self_heal_proposal": "⚠ 察見 ~/.lingtai-tui/.env 載有 %d 枚 API key（靈使尚在運行）— 按 [s] 自 .env 自癒 config.json",
+  "firstrun.self_heal_done": "已自 .env %d 枚鑰自癒 config.json。續行以佈達諸靈使。",
+  "firstrun.self_heal_failed": "自癒不成：%v"
 }

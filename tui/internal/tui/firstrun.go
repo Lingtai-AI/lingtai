@@ -244,6 +244,12 @@ type FirstRunModel struct {
 	// in setup mode to pre-fill runtime fields with the user's previously-saved
 	// values instead of the preset's defaults.
 	setupKeepInitJSON map[string]interface{}
+	// selfHealKeys are API keys recovered from ~/.lingtai-tui/.env that are
+	// missing from config.json. Populated in setup/recovery mode when the
+	// global config was lost but agents keep running; non-empty enables the
+	// 's' self-heal proposal on the preset-pick step (restores config.json
+	// from these keys instead of forcing the user to retype them).
+	selfHealKeys map[string]string
 	// Rehydration mode (agora cloned network): runs the normal first-run wizard
 	// but prefills the orchestrator name/dir from .agent.json, locks the dir
 	// (can't be edited), and adds stepPropagate at the end to propagate the
@@ -857,6 +863,27 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	}
 	if state.Recipe == preset.RecipeCustom && state.CustomDir != "" {
 		m.recipeCustomInput.SetValue(state.CustomDir)
+	}
+
+	// Self-heal proposal: when config.json is missing (or lacks keys) but
+	// ~/.lingtai-tui/.env still carries API keys — the running agents read
+	// them at boot via env_file — offer to restore config.json from .env
+	// instead of forcing the user to retype every key (recovery scenario:
+	// a partial wipe of ~/.lingtai-tui while agents kept running).
+	cfg, _ := config.LoadConfig(globalDir)
+	if len(cfg.Keys) == 0 {
+		for envName, val := range config.ReadEnvKeys(globalDir) {
+			if !strings.HasSuffix(envName, "_API_KEY") {
+				continue
+			}
+			if _, already := cfg.Keys[envName]; already {
+				continue
+			}
+			if m.selfHealKeys == nil {
+				m.selfHealKeys = map[string]string{}
+			}
+			m.selfHealKeys[envName] = val
+		}
 	}
 
 	return m
@@ -1758,6 +1785,29 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						}
 					}
 				}
+				return m, nil
+			case "s", "S":
+				// Self-heal proposal (setup/recovery mode): restore config.json
+				// from API keys already present in ~/.lingtai-tui/.env (they
+				// survived a partial wipe while agents kept running) instead of
+				// forcing the user to retype them.
+				if len(m.selfHealKeys) == 0 {
+					return m, nil
+				}
+				cfg, _ := config.LoadConfig(m.globalDir)
+				if cfg.Keys == nil {
+					cfg.Keys = map[string]string{}
+				}
+				for envName, val := range m.selfHealKeys {
+					cfg.Keys[envName] = val
+				}
+				if err := config.SaveConfig(m.globalDir, cfg); err != nil {
+					m.message = fmt.Sprintf(i18n.T("firstrun.self_heal_failed"), err)
+					return m, nil
+				}
+				m.existingKeys = cfg.Keys
+				m.message = fmt.Sprintf(i18n.T("firstrun.self_heal_done"), len(m.selfHealKeys))
+				m.selfHealKeys = nil
 				return m, nil
 			case "esc":
 				// Esc while a Codex login is mid-flight (or the method
@@ -2795,6 +2845,10 @@ func (m FirstRunModel) View() string {
 			header = i18n.T("setup.pick_default_preset")
 		}
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
+		if len(m.selfHealKeys) > 0 {
+			proposal := fmt.Sprintf(i18n.T("firstrun.self_heal_proposal"), len(m.selfHealKeys))
+			b.WriteString("  " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render(proposal) + "\n\n")
+		}
 		if m.setupMode {
 			cursor := "  "
 			style := lipgloss.NewStyle()

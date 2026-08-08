@@ -1004,3 +1004,54 @@ func TestPresetEditorCommit_KeySaveErrorSurfacesAndDoesNotSavePreset(t *testing.
 		t.Fatalf("key save failure must not persist the preset; stat %q err = %v", savedPath, err)
 	}
 }
+
+func TestSetupModeSelfHealFromEnv(t *testing.T) {
+	i18n.SetLang("en")
+	baseDir := filepath.Join(t.TempDir(), ".lingtai")
+	globalDir := t.TempDir()
+
+	// .env carries an API key (it survived the partial wipe) plus an
+	// unrelated flag that must NOT be treated as a recoverable key.
+	envContent := "DEEPSEEK_API_KEY=sk-self-heal-test\nLINGTAI_SOUL_FLOW_ENABLED=1\n"
+	if err := os.WriteFile(filepath.Join(globalDir, ".env"), []byte(envContent), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	m := NewSetupModeModel(baseDir, globalDir, "", "test")
+	if len(m.selfHealKeys) != 1 {
+		t.Fatalf("selfHealKeys = %#v, want exactly the DEEPSEEK_API_KEY entry", m.selfHealKeys)
+	}
+	if got := m.selfHealKeys["DEEPSEEK_API_KEY"]; got != "sk-self-heal-test" {
+		t.Fatalf("DEEPSEEK_API_KEY = %q, want sk-self-heal-test", got)
+	}
+	if _, ok := m.selfHealKeys["LINGTAI_SOUL_FLOW_ENABLED"]; ok {
+		t.Fatalf("selfHealKeys must not include non-key env vars: %#v", m.selfHealKeys)
+	}
+
+	// The proposal renders on the preset-pick view.
+	m.width = 120
+	m.height = 40
+	if view := m.View(); !strings.Contains(view, "self-heal config.json") {
+		t.Fatalf("preset-pick view should render the self-heal proposal:\n%s", view)
+	}
+
+	// Press 's' → config.json is restored from .env, .env stays intact.
+	m, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	cfg, err := config.LoadConfig(globalDir)
+	if err != nil {
+		t.Fatalf("load config after self-heal: %v", err)
+	}
+	if got := cfg.Keys["DEEPSEEK_API_KEY"]; got != "sk-self-heal-test" {
+		t.Fatalf("config.json DEEPSEEK_API_KEY = %q, want sk-self-heal-test; keys=%#v", got, cfg.Keys)
+	}
+	if len(m.selfHealKeys) != 0 {
+		t.Fatalf("selfHealKeys should clear after self-heal; got %#v", m.selfHealKeys)
+	}
+	envAfter, err := os.ReadFile(filepath.Join(globalDir, ".env"))
+	if err != nil {
+		t.Fatalf("read .env after self-heal: %v", err)
+	}
+	if !strings.Contains(string(envAfter), "LINGTAI_SOUL_FLOW_ENABLED=1") {
+		t.Fatalf(".env lost the unmanaged soul-flow flag:\n%s", envAfter)
+	}
+}
