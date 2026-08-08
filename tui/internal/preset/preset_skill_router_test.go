@@ -324,7 +324,7 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"minimax":    "tui/internal/preset/preset.go:979-1004",
 		"zhipu":      "tui/internal/preset/preset.go:1006-1023",
 		"mimo":       "tui/internal/preset/preset.go:1025-1050",
-		"deepseek":   "tui/internal/preset/preset.go:1052-1061",
+		"deepseek":   "tui/internal/preset/preset.go:1127-1136",
 		"gemini":     "tui/internal/preset/preset.go:1063-1090",
 		"kimi":       "tui/internal/preset/preset.go:1092-1104",
 		"nvidia":     "tui/internal/preset/preset.go:1106-1125",
@@ -333,7 +333,6 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"codex-pool": "tui/internal/preset/preset.go:1178-1208",
 		"claude":     "tui/internal/preset/preset.go:1212-1241",
 		"custom":     "tui/internal/preset/preset.go:1242-1264",
-		"opencode-go": "tui/internal/preset/preset.go:534-560",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {

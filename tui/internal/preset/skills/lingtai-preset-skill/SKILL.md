@@ -1,7 +1,7 @@
 ---
 name: lingtai-preset-skill
 description: >
-  Thin dual-axis router for preset questions: which of the 13 TUI-shipped
+  Thin dual-axis router for preset questions: which of the 12 TUI-shipped
   built-in preset templates (provider axis), and which cross-cutting preset
   lifecycle mechanic (operation axis) — saving, checking availability,
   activating/refreshing, endpoint/capability facts, or troubleshooting. Read
@@ -27,7 +27,6 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/opencode-go/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/availability-save-gate/SKILL.md
@@ -58,7 +57,7 @@ endpoint, protocol, and plan facts and route to the relevant operation
 child instead of restating shared mechanics; operation pages own the shared
 lifecycle mechanics and never encode provider-specific facts.
 
-## Provider catalog (13 direct children)
+## Provider catalog (12 direct children)
 
 ```yaml
 - name: preset-skill-minimax
@@ -85,8 +84,6 @@ lifecycle mechanics and never encode provider-specific facts.
   location: reference/claude/SKILL.md
 - name: preset-skill-custom
   location: reference/custom/SKILL.md
-- name: preset-skill-opencode-go
-  location: reference/opencode-go/SKILL.md
 ```
 
 | Preset | Child manual | Stable routing hint |
@@ -103,7 +100,6 @@ lifecycle mechanics and never encode provider-specific facts.
 | `codex-pool` | `reference/codex-pool/SKILL.md` | pooled ChatGPT OAuth Codex route |
 | `claude` | `reference/claude/SKILL.md` | local Claude Code login |
 | `custom` | `reference/custom/SKILL.md` | user-supplied compatible endpoint |
-| `opencode-go` | `reference/opencode-go/SKILL.md` | OpenCode Go subscription, OpenAI-compatible |
 
 ## Operation catalog (5 nested children)
 

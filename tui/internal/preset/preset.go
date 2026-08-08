@@ -510,16 +510,31 @@ func RefreshTemplates() error {
 }
 
 // RegionURL pairs a human-readable label with an API base URL.
+// Env, when non-empty, is the api_key_env slot the option implies (e.g.
+// "DEEPSEEK_API_KEY") and is applied to the preset when the option is
+// selected. Empty Env means "don't touch api_key_env".
 type RegionURL struct {
-	Label string // e.g. "CN", "INTL"
+	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
+	Env   string // optional credential env-var name; empty = leave api_key_env alone
 }
 
 // ProviderRegionURLs maps provider names to their regional endpoint
 // options. Providers not in this map have a single endpoint (or none)
 // and their base_url is free-text in the editor. The first entry is
-// the default for new presets.
+// the default for new presets. An entry with an empty URL is the free-text
+// "Custom" sentinel: selecting it clears base_url so the editor opens an
+// inline edit for any user-typed endpoint. At most one entry per provider
+// may carry an empty URL.
 var ProviderRegionURLs = map[string][]RegionURL{
+	"deepseek": {
+		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
+		// OpenCode Go is scoped to DeepSeek models served through the OpenCode Go
+		// subscription (provider stays "deepseek"); other Go models are reached via
+		// a Custom preset.
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
+	},
 	"zhipu": {
 		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
 		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
@@ -531,34 +546,6 @@ var ProviderRegionURLs = map[string][]RegionURL{
 }
 
 // BuiltinPresets returns the built-in presets.
-func opencodeGoPreset() Preset {
-	// OpenCode Go subscription (https://opencode.ai/docs/go/) — curated open
-	// coding models served through the cloud Zen Go endpoint. It is a plain
-	// OpenAI-compatible endpoint, so it reuses the generic `custom` provider
-	// with an explicit base_url — no kernel-side provider registration needed.
-	// Leave model blank on purpose: users fill in a Go model id themselves
-	// (see https://opencode.ai/docs/go/ for the current model list, or call
-	// GET https://opencode.ai/zen/go/v1/models with their API key).
-	return Preset{
-		Name:        "opencode-go",
-		Description: PresetDescription{Summary: "OpenCode Go subscription — curated open coding models; fill in a Go model id", Tier: "3"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "custom", "model": "",
-				"api_key": nil, "api_key_env": "OPENCODE_GO_API_KEY",
-				"base_url": "https://opencode.ai/zen/go/v1", "api_compat": "openai",
-				// Expose chat/completions only — the Responses API is supported for
-				// some Go models, but surfacing both wires would be confusing.
-				"wire_api": "chat_completions",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
@@ -573,7 +560,6 @@ func BuiltinPresets() []Preset {
 		codexPoolPreset(),
 		claudePreset(),
 		customPreset(),
-		opencodeGoPreset(),
 	}
 }
 
@@ -599,8 +585,6 @@ var builtinNames = map[string]bool{
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
-	"opencode-go":      true,
-	"opencode_go":      true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.
