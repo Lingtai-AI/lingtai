@@ -219,7 +219,8 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 	return nodes, nil
 }
 
-// AgentStatus holds live runtime status from .status.json (same as system("show")).
+// AgentStatus holds live runtime status from .status.json, the same snapshot
+// the agent writes for itself each turn.
 type AgentStatus struct {
 	Tokens struct {
 		Context struct {

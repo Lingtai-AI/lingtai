@@ -1,5 +1,7 @@
 # Design: Distribute lingtai-tui via Homebrew, Python via pip
 
+> **Superseded — historical record (as of 2026-08-07).** The kernel auto-upgrade this spec describes now gates on explicit user consent (`tui/internal/config/venv.go`), not an unconditional upgrade on every launch. The release pipeline now targets `Lingtai-AI/homebrew-lingtai` under Apache-2.0 with a tarball formula, and `install.sh` remains the current installer.
+
 **Date:** 2026-03-30
 **Status:** Approved
 

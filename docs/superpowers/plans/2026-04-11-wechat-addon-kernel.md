@@ -1,5 +1,7 @@
 # WeChat Addon (Kernel Side) Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** `lingtai.addons.wechat` and the `_BUILTIN` addon registry described here were never built this way; WeChat is now the MCP server `lingtai-kernel/src/lingtai/mcp_servers/wechat/`, registered in `mcp_catalog.json`. There is no `lingtai_kernel` top-level package — kernel imports are `lingtai.kernel.*`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement `lingtai.addons.wechat` — a Python addon that connects LingTai agents to WeChat via the iLink Bot API, with full media support (text, images, voice, video, files).

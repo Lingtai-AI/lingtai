@@ -1,15 +1,15 @@
-# Canonical Vocabulary — en / zh / lzh
+# Canonical Vocabulary — en / zh / wen
 
 This table defines the canonical translations for lingtai concepts across all three supported languages. Use this as the authoritative reference when writing or reviewing translations.
 
 **zh (中文)** should be direct, modern, technical Chinese.
-**lzh (文言)** uses literary/classical style with domain-specific metaphors.
+**wen (文言)** uses literary/classical style with domain-specific metaphors.
 
-Never mix lzh vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into zh translations.
+Never mix wen vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into zh translations.
 
 ## Core Concepts
 
-| Concept | en | zh (中文) | lzh (文言) |
+| Concept | en | zh (中文) | wen (文言) |
 |---|---|---|---|
 | agent | agent | 智能体 | 器灵 |
 | avatar (spawned agent) | avatar | 子智能体 | 他我 |
@@ -19,7 +19,7 @@ Never mix lzh vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into z
 
 ## Identity & Knowledge
 
-| Concept | en | zh (中文) | lzh (文言) |
+| Concept | en | zh (中文) | wen (文言) |
 |---|---|---|---|
 | character (psyche) | character | 修行志 | 心印 |
 | memory | memory | 记忆 | 记忆 |
@@ -29,7 +29,7 @@ Never mix lzh vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into z
 
 ## Lifecycle
 
-| Concept | en | zh (中文) | lzh (文言) |
+| Concept | en | zh (中文) | wen (文言) |
 |---|---|---|---|
 | molt | molt | 蜕皮 | 蜕凡 |
 | shutdown | shutdown | 关闭 | 归寂 |
@@ -39,14 +39,14 @@ Never mix lzh vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into z
 
 ## Communication
 
-| Concept | en | zh (中文) | lzh (文言) |
+| Concept | en | zh (中文) | wen (文言) |
 |---|---|---|---|
 | mail | mail | 消息 | 书信/传书 |
 | email | email | 邮件 | 飞鸽/飞鸽传书 |
 
 ## Tools & System
 
-| Concept | en | zh (中文) | lzh (文言) |
+| Concept | en | zh (中文) | wen (文言) |
 |---|---|---|---|
 | capability | capability | 能力 | 能/器用 |
 | intrinsic | intrinsic | 内置工具 | 固有之器 |

@@ -1,5 +1,7 @@
 # Firstrun Step 2 — Include Built-in Default Preset
 
+> **Superseded — historical record (as of 2026-08-07).** The builtin preset names cited here (`mimo-pro`, `deepseek_flash`) are gone; current names are `mimo`/`mimo-v2.5` and `deepseek`/`deepseek-v4-pro`. See `tui/internal/preset/preset.go` (`builtinNames`).
+
 **Date:** 2026-05-03
 **Repo:** `lingtai` (TUI). All paths relative to repo root.
 

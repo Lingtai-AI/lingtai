@@ -12,8 +12,8 @@ import (
 
 // newMailboxID builds a sortable, human-scannable mailbox id. The format
 // (`YYYYMMDDTHHMMSS-xxxx`, 20 chars, UTC) matches the kernel helper
-// `_new_mailbox_id` in `lingtai.kernel/intrinsics/email/primitives.py` so
-// records read by either binary retain the same mailbox identity shape.
+// `_new_mailbox_id` in lingtai-kernel `src/lingtai/kernel/services/mail.py`
+// so records read by either binary retain the same mailbox identity shape.
 // The 4-hex suffix is drawn from a UUID4.
 var mailboxIDSource = func() string {
 	ts := time.Now().UTC().Format("20060102T150405")

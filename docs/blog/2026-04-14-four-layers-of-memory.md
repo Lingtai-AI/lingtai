@@ -1,5 +1,7 @@
 # Seven Layers of Memory
 
+> **Superseded — historical record (as of 2026-08-07).** The `codex` tool no longer exists — reads now go through `psyche(action='knowledge')` — and the injected catalog is YAML, not XML. The `web`/`web_read` capability split described here has been unified into a single `web` capability. See `lingtai-kernel/src/lingtai/tools/knowledge/__init__.py` and `docs/tool-descriptions.md` for the current tool surface.
+
 *Zesen Huang — April 14, 2026*
 
 ---

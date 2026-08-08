@@ -1,5 +1,7 @@
 # Preset Editor — Codex OAuth Gate (Patch Spec)
 
+> **Superseded — historical record (as of 2026-08-07).** Shipped in the opposite direction from this patch: the Codex row in the preset editor is read-only (`preset_editor.api_key_codex_readonly`), not editable as proposed here. See `tui/internal/preset/preset_editor.go` for the current behavior.
+
 **Date:** 2026-05-03
 **Repo:** `lingtai` (TUI). All paths are relative to repo root unless absolute.
 

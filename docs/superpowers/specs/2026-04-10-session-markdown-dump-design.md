@@ -1,5 +1,7 @@
 # Session.jsonl Hourly Markdown Dump
 
+> **Superseded — historical record (as of 2026-08-07).** This design was never implemented — no `DumpHourlyMarkdown`/`session_dump.go` exists. The secretary agent this feature was meant to serve was itself removed (see migration `m011`), and `m035` strips the related brief plumbing.
+
 **Date:** 2026-04-10
 **Status:** Draft
 

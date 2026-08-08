@@ -1,5 +1,7 @@
 # Homebrew Distribution + Auto-Upgrade Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** The GitHub org has moved from `huangzesen` to `Lingtai-AI`, and `install.sh` (which this plan's Task 3 said to delete) is still the current installer. See the top-level `README.md` for current install instructions.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Distribute lingtai-tui via Homebrew and auto-upgrade the Python package on every TUI launch.

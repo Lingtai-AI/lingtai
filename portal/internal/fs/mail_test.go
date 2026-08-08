@@ -7,7 +7,7 @@ import (
 )
 
 // mailboxIDPattern matches the short mailbox id shape produced by
-// newMailboxID and the kernel's `_new_mailbox_id`: 14 digits, a `T`, 6
+// newMailboxID and the kernel's `_new_mailbox_id`: 8 digits, a `T`, 6
 // digits, a dash, then 4 lowercase hex chars (20 chars total).
 var mailboxIDPattern = regexp.MustCompile(`^\d{8}T\d{6}-[0-9a-f]{4}$`)
 

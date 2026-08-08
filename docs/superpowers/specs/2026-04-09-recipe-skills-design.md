@@ -1,5 +1,7 @@
 # Recipe-Shipped Skills Design
 
+> **Superseded — historical record (as of 2026-08-07).** `LinkRecipeSkills`/`PruneStaleSkillSymlinks` were never built; `ResolveSkillDir` is now legacy, and `skills.go` was replaced by `tui/internal/preset/skill_files.go` and `skill_remote.go`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Allow recipes to ship skills that are automatically symlinked into `.lingtai/.skills/` on TUI startup, making recipes a full capability profile (greet + comment + skills) rather than just a greeting and behavioral prompt.

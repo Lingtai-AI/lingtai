@@ -1,35 +1,13 @@
 # 灵台 — Implementation Status
 
 ## Core
-- [x] `agent.py` — BaseAgent (full lifecycle, tool dispatch, compaction, loop guard, streaming, session save/restore, 6-service architecture)
-- [x] `types.py` — UnknownToolError
-- [x] `config.py` — AgentConfig dataclass
-- [x] `prompt.py` — system prompt builder
-- [x] `__init__.py` — public API exports
 
-## Intrinsics (8)
-- [x] `intrinsics/read.py` — read file contents (backed by FileIOService)
-- [x] `intrinsics/edit.py` — string-replacement edit (backed by FileIOService)
-- [x] `intrinsics/write.py` — create/overwrite file (backed by FileIOService)
-- [x] `intrinsics/glob.py` — find files by pattern (backed by FileIOService)
-- [x] `intrinsics/grep.py` — search file contents (backed by FileIOService)
-- [x] `intrinsics/email.py` — fire-and-forget inter-agent messaging (backed by EmailService)
-- [x] `intrinsics/vision.py` — image understanding (backed by VisionService, falls back to LLM)
-- [x] `intrinsics/web_search.py` — web search (backed by SearchService, falls back to LLM)
-- [x] `intrinsics/manage_system_prompt.py` — Python API for system prompt sections
+The original prototype layout below (`intrinsics/`, `services/file_io.py` + friends, `layers/`) has since been restructured. The current kernel organizes tools under `tools/` (one package per capability/intrinsic, composed via `registry.py`'s `INTRINSICS`/`BUILTIN_TOOLS`) and keeps a much smaller `services/` directory:
 
-## Services (5 + LLM)
-- [x] `services/file_io.py` — FileIOService ABC + LocalFileIOService (wired into BaseAgent)
-- [x] `services/email.py` — EmailService ABC + TCPEmailService (wired into BaseAgent)
-- [x] `services/vision.py` — VisionService ABC + LLMVisionService (wired into BaseAgent)
-- [x] `services/search.py` — SearchService ABC + LLMSearchService (wired into BaseAgent)
-- [x] `services/logging.py` — LoggingService ABC + JSONLLoggingService (wired into BaseAgent)
-
-## Layers (4)
-- [x] `layers/diary.py` — immutable agent log (save, catalogue, view)
-- [x] `layers/plan.py` — file-based planning (create, read, update, check_off)
-- [x] `layers/bash.py` — shell command execution
-- [x] `layers/delegate.py` — agent spawning + role injection + MCP injection (stub — needs full implementation)
+- [x] `tools/` — `file` (read/edit/write/glob/grep, replaces the old separate intrinsics), `shell` (was `bash`), `web` (replaces `web_search`), `email`, `vision`, `knowledge`, `skills`, `avatar`, `daemon`, `mcp`, `task_card`, `notification`, `psyche`, `soul`, `system`, `context` — no standalone `layers/` package; the old layer concepts (diary/plan/bash/delegate) are folded into these tools or the kernel itself.
+- [x] `services/` — `file_io.py`, `file_io_sidecar.py`, `mail.py`, `mcp.py`, `mcp_inbox.py`, `mcp_licc.py`, `mcp_registry.py`, `vision/`, `websearch/`
+- [x] `kernel/services/` — `logging.py`, `mail.py`
+- [x] `kernel/` — BaseAgent lifecycle, tool dispatch, compaction, loop guard, streaming, session save/restore
 
 ## LLM
 - [x] `llm/base.py` — LLMAdapter, ChatSession, LLMResponse, ToolCall, FunctionSchema
@@ -37,7 +15,7 @@
 - [x] `llm/interface.py` — ChatInterface (canonical conversation history)
 - [x] `llm/interface_converters.py` — format converters
 - [x] `llm/rate_limiter.py` — rate limiting
-- [x] 10 provider adapters: gemini, openai, anthropic, minimax, deepseek, grok, qwen, glm, kimi, custom
+- [x] 11 provider adapters: anthropic, claude_code, custom, deepseek, gemini, kimi_code, mimo, minimax, openai, openrouter, zhipu
 
 ## Supporting Modules
 - [x] `loop_guard.py` — repetitive tool call detection
@@ -64,11 +42,7 @@
 
 ## What Remains
 
-### Delegate layer — full implementation
-- [ ] Wire `agent_factory` to actually spawn BaseAgent instances
-- [ ] Connect spawned agents via EmailService
-- [ ] Implement `stop` (lifecycle management)
-- [ ] Add `allowed_contacts` / `blocked_senders` to spawn args
+Delegate/avatar spawning is implemented: `tools/avatar/` spawns agents through `AvatarLauncherPort`/`AvatarLaunchRequest`, and every spawn is recorded in `delegates/ledger.jsonl`.
 
 ### Forum package (future)
 - [ ] Registry — agents register, others discover by capability
