@@ -73,15 +73,15 @@ type App struct {
 	nirvana       NirvanaModel
 	login         LoginModel
 
-	globalDir        string
-	projectDir       string // .lingtai/ directory
-	orchDir          string // full path to orchestrator dir
-	orchName         string
-	lingtaiCmd       string
-	width            int
-	height           int
-	tuiConfig        config.TUIConfig
-	recoveryMode     bool // global config lost, agents intact — setup then propagate
+	globalDir    string
+	projectDir   string // .lingtai/ directory
+	orchDir      string // full path to orchestrator dir
+	orchName     string
+	lingtaiCmd   string
+	width        int
+	height       int
+	tuiConfig    config.TUIConfig
+	recoveryMode bool // global config lost, agents intact — setup then propagate
 	// degradedConfig is true when ~/.lingtai-tui/config.json is missing but API
 	// keys were derived from .env (the agents' source of truth). The app launches
 	// normally with a persistent banner instead of a hard recovery gate;

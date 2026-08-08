@@ -22,9 +22,27 @@ import (
 // recipes tree.
 func copyRecipeBundle(lingtaiDir, globalDir, recipeName string) (projectRoot string, err error) {
 	projectRoot = filepath.Dir(lingtaiDir)
+
+	// A project that ships its own .recipe/ (a cloned recipe repo, an
+	// imported network, or any pre-existing project) owns that bundle.
+	// Re-staging would RemoveAll the user-authored tree and replace it
+	// with adaptive; leave the local bundle in place instead, exactly as
+	// base did via ProjectLocalRecipeDir detection.
+	if preset.ProjectLocalRecipeDir(projectRoot) != "" {
+		return projectRoot, nil
+	}
+
 	src := preset.RecipeDir(globalDir, recipeName)
 	if src == "" {
-		return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
+		// Fresh home: preset.Bootstrap has never run, so there is no
+		// <globalDir>/recipes tree. Fall back to the compiled-in bundle.
+		// Adaptive is now the only recipe, so the deleted RecipeEmbedded
+		// provenance bit ("disappeared disk recipe must fail rather than
+		// silently become a compiled bundle") guards no ambiguity anymore.
+		if err := preset.CopyEmbeddedBundle(recipeName, projectRoot); err != nil {
+			return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
+		}
+		return projectRoot, nil
 	}
 	if err := preset.CopyBundle(src, projectRoot); err != nil {
 		return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)

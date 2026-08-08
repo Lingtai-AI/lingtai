@@ -103,8 +103,8 @@ const (
 	stepCapabilities
 	stepAgentPresets // pick default + multi-toggle allowed
 	stepAgentNameDir
-	stepReview            // draftMode only — final "Start project" confirmation before staging/commit
-	stepPropagate         // rehydration only — runs after orchestrator save, before launch
+	stepReview    // draftMode only — final "Start project" confirmation before staging/commit
+	stepPropagate // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -133,9 +133,12 @@ type capInfo struct {
 // — its callers pass hasPresets||draftMode so the picker honestly reads
 // "Step 1/4" even on a machine with no presets yet.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
-	if setupMode {		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
-	} else if hasPresets {		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
-	} else {		total = 4 // api key • library • presets-config • details
+	if setupMode {
+		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
+	} else if hasPresets {
+		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
+	} else {
+		total = 4 // api key • library • presets-config • details
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -4492,7 +4495,17 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 // choice, so Enter on the details page commits adaptive directly. In draft
 // mode the choice is staged into m.draft and the wizard moves to stepReview
 // instead of writing init.json/.recipe/.prompt now.
+//
+// /setup keeps the current recipe (base's recipeIdx=-1 "keep current"
+// default): it must NOT re-apply adaptive, which would RemoveAll the
+// project's .recipe/ and rewrite every agent's .prompt. setupMode therefore
+// routes to the settings-only save (init.json only) and both stepAgentNameDir
+// exits in setup mode land here. setupMode and draftMode are mutually
+// exclusive purposes, so checking setupMode first is exact.
 func (m FirstRunModel) applyDefaultRecipeAndAdvance() (FirstRunModel, tea.Cmd) {
+	if m.setupMode {
+		return m.performSetupSaveOnly()
+	}
 	if m.draftMode {
 		return m.enterReviewStep(preset.DefaultRecipe)
 	}
