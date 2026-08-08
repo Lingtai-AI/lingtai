@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,12 @@ import (
 // tuiVersion is set once at startup by main via SetTUIVersion.
 // Used by /doctor for the version-skew check.
 var tuiVersion = "dev"
+
+// gitDescribeRe matches a git-describe dev build stamp: a release-like
+// prefix followed by -N-g<short sha> (e.g. v0.4.36-20-g873af31). Such a
+// stamp means the binary was built from a commit ahead of a tag (often a
+// fork), so the version string cannot be trusted as a release identity.
+var gitDescribeRe = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]+$`)
 
 // SetTUIVersion records the running TUI binary version for doctor diagnostics.
 func SetTUIVersion(v string) {
@@ -436,6 +443,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	kernelOK := checkKernelHealth(orchDir, globalDir, &lines)
 	_ = kernelOK // intentionally not short-circuiting: LLM probe is still useful info
 
+	// Phase 0.7: startup decision table — D1–D5 from tui/CONTRACT.md. Validates
+	// the startup decision table programmatically (fable F8): agents present (R1),
+	// config.json presence (R3.1), .env API keys (R2), addon .secrets (R1),
+	// runtime/version skew (R1).
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_startup"), Section: true})
+	lines = append(lines, checkStartupDecision(orchDir, globalDir)...)
+
 	// Phase 1: read events.jsonl for recent errors
 	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_llm"), Section: true})
 	lastErr := findLastAPIError(orchDir)
@@ -668,6 +682,164 @@ func doctorLineFromConfig(line config.DoctorLine) doctorLine {
 	}
 	converted.Text = prefix + " " + line.Text
 	return converted
+}
+
+// --- Startup decision table (D1-D5) ---
+//
+// The checks below validate tui/CONTRACT.md's startup decision table
+// programmatically (fable F8): agents present (R1), config.json presence
+// (R3.1), .env API keys (R2), addon .secrets for declared addons (R1), and
+// runtime/version skew (R1). Each check is emitted under the
+// "doctor.section_startup" header so /doctor's output maps one-to-one onto
+// the contract's D1-D5 list.
+
+// checkStartupDecision emits the D1-D5 TUI-can't-start diagnostic set for the
+// given orchestrator directory and global (~/.lingtai-tui) directory.
+func checkStartupDecision(orchDir, globalDir string) []doctorLine {
+	var lines []doctorLine
+
+	// D1: agents running / orchestrators detected (R1).
+	orchestrators := DetectOrchestrators(filepath.Dir(orchDir))
+	if len(orchestrators) == 0 {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d1_no_agents"),
+		})
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.d1_agents", len(orchestrators)), OK: true,
+		})
+	}
+
+	// D2: config.json present & readable (R3.1). ResolveKeys returns the
+	// configOK bool exactly as the startup decision table consumes it (present
+	// AND readable — a corrupt file must not report healthy, fable F6).
+	_, configOK := config.ResolveKeys(globalDir)
+	if configOK {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_ok"), OK: true,
+		})
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_missing"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_hint"), Hint: true,
+		})
+	}
+
+	// D3: .env API keys present (R2). HasAPIKeys is the same predicate the
+	// startup gate uses to choose degraded launch vs recovery wizard.
+	envKeys := config.ReadEnvKeys(globalDir)
+	if config.HasAPIKeys(envKeys) {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_ok"), OK: true,
+		})
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_missing"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_hint"), Hint: true,
+		})
+	}
+
+	// D4: addon .secrets present for declared addons (R1).
+	lines = append(lines, checkAddonSecrets(orchDir)...)
+
+	// D5: runtime/version skew (R1).
+	lines = append(lines, checkVersionSkew()...)
+
+	return lines
+}
+
+// checkAddonSecrets verifies that every addon declared in the orchestrator's
+// init.json has a matching secrets file under <orchDir>/.secrets/. Both
+// init.json addon shapes are supported (list post-v0.7.3 and legacy dict).
+func checkAddonSecrets(orchDir string) []doctorLine {
+	initPath := filepath.Join(orchDir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return []doctorLine{{
+			Text: i18n.TF("doctor.d4_init_unreadable", err), Warn: true,
+		}}
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return []doctorLine{{
+			Text: i18n.TF("doctor.d4_init_unreadable", err), Warn: true,
+		}}
+	}
+	var addons []string
+	switch v := raw["addons"].(type) {
+	case []interface{}:
+		for _, item := range v {
+			if name, ok := item.(string); ok && name != "" {
+				addons = append(addons, name)
+			}
+		}
+	case map[string]interface{}:
+		for name := range v {
+			addons = append(addons, name)
+		}
+	}
+	if len(addons) == 0 {
+		return []doctorLine{{
+			Text: i18n.T("doctor.d4_no_addons"), OK: true,
+		}}
+	}
+
+	var lines []doctorLine
+	for _, addon := range addons {
+		// Secrets convention: <addon>.json file, or <addon>/config.json
+		// directory form (wechat uses a directory).
+		filePath := filepath.Join(orchDir, ".secrets", addon+".json")
+		dirPath := filepath.Join(orchDir, ".secrets", addon, "config.json")
+		if fileExists(filePath) || fileExists(dirPath) {
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_ok", addon), OK: true,
+			})
+		} else {
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_missing", addon),
+			})
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_hint", addon), Hint: true,
+			})
+		}
+	}
+	return lines
+}
+
+// checkVersionSkew reports whether the running TUI binary's version stamp is
+// trustworthy. TUI and kernel ship from separate repos and are NOT meant to
+// track each other (an earlier mismatch warning was wrong and removed), so D5
+// does not compare TUI↔kernel. Instead it flags the one skew that does matter:
+// an untagged/dev/git-describe build stamp, which makes version diagnostics
+// misleading (a fork build once reported v0.4.36-20-g873af31 while release was
+// v0.12.0).
+func checkVersionSkew() []doctorLine {
+	v := strings.TrimSpace(tuiVersion)
+	if v == "" || v == "dev" {
+		return []doctorLine{
+			{Text: i18n.T("doctor.d5_untagged"), Warn: true},
+			{Text: i18n.T("doctor.d5_untagged_hint"), Hint: true},
+		}
+	}
+	if gitDescribeBuild(v) {
+		return []doctorLine{
+			{Text: i18n.TF("doctor.d5_git_describe", v), Warn: true},
+			{Text: i18n.T("doctor.d5_git_describe_hint"), Hint: true},
+		}
+	}
+	return []doctorLine{
+		{Text: i18n.TF("doctor.d5_release", v), OK: true},
+	}
+}
+
+// gitDescribeBuild reports whether v looks like a git-describe dev stamp
+// (e.g. "v0.4.36-20-g873af31"): a release prefix followed by -N-g<short sha>.
+func gitDescribeBuild(v string) bool {
+	return gitDescribeRe.MatchString(v)
 }
 
 // --- Event log scanning ---

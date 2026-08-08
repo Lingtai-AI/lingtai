@@ -98,16 +98,15 @@ appears as the degraded state below.
    self-heal for the regenerable mirror (R3.1). Losing `tui_config.json`
    (R3.2) is the same class but degrades silently: defaults are loaded with
    no banner (fable F9).
-3. The doctor *will* validate the startup decision table programmatically
-   (fable F8: D2/D3 are currently unbuilt — see the checks below): check
-   agents present (R1), `config.json`/`tui_config.json` presence (R3),
-   `.env` API keys (R2), `.secrets` for declared addons (R1), runtime/version
-   (R1).
+3. The doctor validates the startup decision table programmatically
+   (fable F8, D1-D5 below): check agents present (R1), `config.json`
+   presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
+   (R1), runtime/version (R1).
 
 ## Doctor checks (TUI-can't-start diagnostic set)
 
 - [x] D1 agents running / orchestrators detected (R1)
-- [ ] D2 config.json present — `ResolveKeys` configOK (R3.1, not yet built)
-- [ ] D3 .env API keys present — `HasAPIKeys` (R2, not yet built)
-- [ ] D4 addon `.secrets` present for declared addons (R1 follow-up)
-- [ ] D5 runtime/version skew reported (R1 follow-up, extends existing doctor)
+- [x] D2 config.json present — `ResolveKeys` configOK (R3.1)
+- [x] D3 .env API keys present — `HasAPIKeys` (R2)
+- [x] D4 addon `.secrets` present for declared addons (R1)
+- [x] D5 runtime/version skew reported (R1, extends existing doctor)
