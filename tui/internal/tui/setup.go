@@ -59,12 +59,10 @@ func NewSetupModel(globalDir string) SetupModel {
 	ti.CharLimit = 128
 	ti.SetWidth(50)
 
-	// Load existing keys for display
-	existingKeys := make(map[string]string)
-	cfg, err := config.LoadConfig(globalDir)
-	if err == nil && cfg.Keys != nil {
-		existingKeys = cfg.Keys
-	}
+	// Load existing keys via ResolveKeys: .env is authoritative and config.json
+	// fills gaps, so a partial wipe still prefills the wizard from the agents'
+	// actual key source (fable F3). ResolveKeys reads without chmod.
+	existingKeys, _ := config.ResolveKeys(globalDir)
 
 	return SetupModel{
 		input:        ti,

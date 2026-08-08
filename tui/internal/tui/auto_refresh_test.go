@@ -162,13 +162,13 @@ func TestAppAutoRefreshTickDisabledDropsAndUnarms(t *testing.T) {
 }
 
 func TestNewAppMarksStartupAutoRefreshArmed(t *testing.T) {
-	a := NewApp(t.TempDir(), t.TempDir(), false, false, nil, config.DefaultTUIConfig(), "", "")
+	a := NewApp(t.TempDir(), t.TempDir(), false, false, false, nil, config.DefaultTUIConfig(), "", "")
 	if !a.autoRefreshArmed {
 		t.Fatal("NewApp should mark auto refresh armed when Init will start the startup ticker")
 	}
 	cfg := config.DefaultTUIConfig()
 	cfg.AutoRefreshOff = true
-	disabled := NewApp(t.TempDir(), t.TempDir(), false, false, nil, cfg, "", "")
+	disabled := NewApp(t.TempDir(), t.TempDir(), false, false, false, nil, cfg, "", "")
 	if disabled.autoRefreshArmed {
 		t.Fatal("NewApp should not mark auto refresh armed when disabled")
 	}

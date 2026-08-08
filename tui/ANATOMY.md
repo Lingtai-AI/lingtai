@@ -9,8 +9,10 @@ related_files:
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/preset/ANATOMY.md
   - tui/internal/processscan/ANATOMY.md
+  - tui/CONTRACT.md
   - tui/main.go
   - tui/main_no_project_gate_test.go
+  - tui/main_startup_decision_test.go
   - tui/internal/tui/launcher.go
   - tui/internal/tui/app.go
   - tui/internal/process/launcher.go
@@ -83,7 +85,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 ## Components
 
 - **`tui/main.go:33-1332`** — single-file `package main`. The version stamp (`tui/main.go:31`, set via `-ldflags`), welcome/help text, Rust toolchain startup guidance, and interactive entry (`tui/main.go:33-397`). After parsing subcommands, `main()` runs the no-project decision gate (below), then global housekeeping, checks invariants (init.json all-or-nothing, exactly-one-orchestrator), handles upgrade prompts and first-run wizard routing, then launches Bubble Tea. Existing-project handoff keeps the launcher, canonical Bodhi-leaf loading view, and prepared App in one program.
-- **No-project decision gate** — the pure probe runs before eager-write startup work. When no project exists, one root program owns launcher navigation, the canonical loading view, and Open Existing preparation; a typed ready result installs the real App. Create remains the existing committed-project path and cancellation remains zero-write. Gate ordering and subcommand isolation are covered by `tui/main_no_project_gate_test.go`.
+- **No-project decision gate** — the pure probe runs before eager-write startup work. When no project exists, one root program owns launcher navigation, the canonical loading view, and Open Existing preparation; a typed ready result installs the real App. Create remains the existing committed-project path and cancellation remains zero-write. Gate ordering and subcommand isolation are covered by `tui/main_no_project_gate_test.go`. The R1/R2/R3 launch-mode decision table (tui/CONTRACT.md) is covered by `tui/main_startup_decision_test.go` (pure function over the requirement state).
 - **No-project launcher Open Existing** — the pre-App launcher embeds the established registry-mode `ProjectsModel` instead of maintaining a second project catalog. Its validated selection becomes `DecisionOpenExisting`; the same Bubble Tea root then renders the canonical Bodhi-leaf loading view while preparation runs and installs the real App only after a typed ready outcome. Create remains draft-only until the existing staging/rename commit path.
 - **`tui/main.go:35-96`** — subcommand dispatch. Each subcommand returns early; the fallthrough path starts the interactive TUI.
 - **`list_common.go` / `list_unix.go` / `list_windows.go`** — `lingtai-tui list` process discovery and decentralized running-agent inventory rendering. Platform files call shared `processscan` discovery and fail loud with a nonzero exit when the scan command itself fails (`tui/list_unix.go:19-24`, `tui/list_windows.go:19-24`); `internal/inventory` converts process rows into typed, enriched, grouped records (`tui/internal/inventory/inventory.go:105-167`), and `list_common.go` keeps CLI parsing plus table/JSON rendering (`tui/list_common.go:47-181`). `--admin` is a detail mode that adds admin, IM, and state columns; it is not an admin-only filter.

@@ -50,6 +50,9 @@ func (a App) topChromeRows() int {
 	if a.startupBanner != "" {
 		rows++
 	}
+	if a.degradedConfig {
+		rows++
+	}
 	if a.selectModeIndicatorActive() {
 		rows++
 	}
@@ -137,6 +140,17 @@ func (a App) topChrome() string {
 	var rows []string
 	if a.startupBanner != "" {
 		rows = append(rows, "  "+lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner))
+	}
+	if a.degradedConfig {
+		// Clamp like the sibling selectModeIndicator so the banner can never
+		// wrap the reserved single row (fable F4): a long localized string in
+		// an 80-column terminal would push the bottom of every screen
+		// off-window for the entire degraded session.
+		banner := "  " + i18n.T("degraded.banner")
+		if a.width > 0 {
+			banner = ansi.Truncate(banner, a.width-1, "…")
+		}
+		rows = append(rows, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render(banner))
 	}
 	if a.selectModeIndicatorActive() {
 		rows = append(rows, a.selectModeIndicator())

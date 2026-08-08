@@ -351,12 +351,11 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			if m.cursor < 0 || m.cursor >= len(m.presets) {
 				return m, nil
 			}
-			// Load existing keys so the editor can prefill api_key.
+			// Load existing keys so the editor can prefill api_key. ResolveKeys:
+			// .env authoritative, config.json mirror fills gaps (fable F3).
 			var keys map[string]string
 			if globalDir, err := config.GlobalDir(); err == nil {
-				if cfg, err := config.LoadConfig(globalDir); err == nil {
-					keys = cfg.Keys
-				}
+				keys, _ = config.ResolveKeys(globalDir)
 			}
 			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang, keys, m.globalDir)
 			// Forward the current size so the editor renders immediately.

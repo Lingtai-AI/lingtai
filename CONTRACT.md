@@ -6,6 +6,7 @@ related_files:
   - README.md
   - dev-guide-skill/SKILL.md
   - tui/architecture_documents_test.go
+  - tui/CONTRACT.md
 maintenance: |
   This file is the normative root of the distributed code interface definition
   system and the contract-of-contract for the LingTai Go repository (the two
