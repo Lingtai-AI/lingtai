@@ -1024,6 +1024,23 @@ func doctorMain() {
 	tui.ExportCommandsJSON(globalDir)
 	fmt.Println("✓ commands.json refreshed")
 
+	// The startup decision table (D1-D5, tui/CONTRACT.md) is the
+	// TUI-can't-start diagnostic set. The interactive /doctor view emits it;
+	// the CLI `lingtai-tui doctor` path (the escape hatch when the TUI cannot
+	// start) must surface it too, otherwise D1/D3 — the checks whose failure
+	// forces the first-run/recovery wizards — are unreachable exactly when
+	// they matter (fable F5). Resolve the project's .lingtai dir the same way
+	// prepareApp does; when no project is present, only the global checks run.
+	if projectDir, err := os.Getwd(); err == nil {
+		lingtaiDir := filepath.Join(projectDir, ".lingtai")
+		if _, statErr := os.Stat(lingtaiDir); statErr == nil {
+			fmt.Println()
+			for _, line := range tui.CheckStartupDecisionCLI(lingtaiDir, globalDir) {
+				fmt.Printf("%s\n", line)
+			}
+		}
+	}
+
 	if report.Healthy {
 		fmt.Println()
 		fmt.Println("Doctor completed: no unrecoverable update/bootstrap failures detected.")
