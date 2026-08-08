@@ -843,5 +843,6 @@
   "agent_selector.hint": "↑↓ 移动 · enter 选择 · esc 取消",
   "firstrun.self_heal_proposal": "⚠ 检测到 ~/.lingtai-tui/.env 中有 %d 个 API key（agent 仍在运行）— 按 [s] 从这些 key 自愈 config.json",
   "firstrun.self_heal_done": "已从 .env 的 %d 个 key 自愈 config.json。继续即可同步给 agent。",
-  "firstrun.self_heal_failed": "自愈失败：%v"
+  "firstrun.self_heal_failed": "自愈失败：%v",
+  "degraded.banner": "⚠ config.json 丢失 — 已从 .env 推导 API key（agents 的真源）。依赖 key 的功能受限; 跑 lingtai-tui doctor 或 /setup 恢复 config.json"
 }

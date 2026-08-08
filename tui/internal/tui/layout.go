@@ -50,6 +50,9 @@ func (a App) topChromeRows() int {
 	if a.startupBanner != "" {
 		rows++
 	}
+	if a.degradedConfig {
+		rows++
+	}
 	if a.selectModeIndicatorActive() {
 		rows++
 	}
@@ -137,6 +140,9 @@ func (a App) topChrome() string {
 	var rows []string
 	if a.startupBanner != "" {
 		rows = append(rows, "  "+lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner))
+	}
+	if a.degradedConfig {
+		rows = append(rows, "  "+lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render(i18n.T("degraded.banner")))
 	}
 	if a.selectModeIndicatorActive() {
 		rows = append(rows, a.selectModeIndicator())

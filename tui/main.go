@@ -403,7 +403,7 @@ func runCreatedProject(result tui.LauncherResult) {
 	lingtaiDir := filepath.Join(result.ProjectRoot, ".lingtai")
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 	needsFirstRun := len(orchestrators) == 0
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, orchestrators, tuiCfg, "", "")
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, false, orchestrators, tuiCfg, "", "")
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1587,14 +1587,27 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// config.json exists, so needsFirstRun would otherwise be false) would
 	// reach NewApp with no orchestrator to launch.
 	needsRecovery := false
+	degradedConfig := false
 	if len(orchestrators) == 0 {
 		needsFirstRun = true
 	} else if needsFirstRun && !needsRehydration {
 		// Existing orchestrators found in .lingtai/ but global config is
-		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real
-		// and must not be duplicated — show setup for API keys only.
-		needsFirstRun = false
-		needsRecovery = true
+		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real and
+		// must not be duplicated. Alignment: ~/.lingtai-tui/config.json is
+		// purely additive — agents are defined by init.json + .env. If .env
+		// (the agents' actual key source) still carries API keys, launch
+		// degraded instead of forcing the API-key recovery wizard: keys are
+		// derived from .env and a self-heal banner is shown. Only when NO key
+		// exists anywhere do we run the recovery wizard (real setup).
+		envKeys := config.ReadEnvKeys(globalDir)
+		if config.HasAPIKeys(envKeys) {
+			needsFirstRun = false
+			needsRecovery = false
+			degradedConfig = true
+		} else {
+			needsFirstRun = false
+			needsRecovery = true
+		}
 	}
 
 	if !needsFirstRun {
@@ -1673,6 +1686,6 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// startup is the FirstRunDoneMsg handler in app.go, which fires when the
 	// user creates a new agent through the first-run wizard.
 
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, degradedConfig, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
 	return startupResult{kind: startupReady, app: app}
 }

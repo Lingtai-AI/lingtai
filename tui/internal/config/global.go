@@ -382,6 +382,44 @@ func ReadEnvKeys(globalDir string) map[string]string {
 	return keys
 }
 
+// ResolveKeys returns the effective API keys the TUI should use, aligned with
+// the agents' source of truth: ~/.lingtai-tui/.env (agents load it at boot via
+// init.json env_file). config.json keys fill gaps but never override .env, so
+// the two stores cannot drift. The bool result reports whether config.json was
+// present and readable (false = keys derived purely from .env / degraded).
+func ResolveKeys(globalDir string) (keys map[string]string, configOK bool) {
+	keys = map[string]string{}
+	// config.json presence is checked explicitly: LoadConfig intentionally
+	// returns a nil error for a missing file, so err alone cannot distinguish
+	// "config.json exists" from "config.json absent".
+	_, statErr := os.Stat(filepath.Join(globalDir, "config.json"))
+	configOK = statErr == nil
+	cfg, err := LoadConfig(globalDir)
+	for name, val := range ReadEnvKeys(globalDir) {
+		keys[name] = val
+	}
+	if err == nil {
+		for name, val := range cfg.Keys {
+			if _, ok := keys[name]; !ok {
+				keys[name] = val
+			}
+		}
+	}
+	return keys, configOK
+}
+
+// HasAPIKeys reports whether the given key map contains at least one *_API_KEY
+// value. Used by startup to decide between "recoverable degraded launch" (keys
+// exist somewhere the agents already use) and "real setup" (no keys at all).
+func HasAPIKeys(keys map[string]string) bool {
+	for name, val := range keys {
+		if strings.HasSuffix(name, "_API_KEY") && val != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // writeEnvLines writes lines back to the .env file with a single
 // trailing newline and 0600 permissions. When the file already exists
 // its existing permission bits are preserved rather than reset to 0600,

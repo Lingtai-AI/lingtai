@@ -368,3 +368,69 @@ func TestLoadConfigReadOnlyPreservesModeWhileLoadConfigTightensMalformed(t *test
 		t.Fatalf("LoadConfig mode = %o, want historical 0600 migration", got)
 	}
 }
+
+func TestResolveKeysEnvAuthoritative(t *testing.T) {
+	dir := t.TempDir()
+	// .env is the agent source; config.json has a STALE value for the same key
+	// plus a key only it knows.
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("DEEPSEEK_API_KEY=env-correct\nLINGTAI_SOUL_FLOW_ENABLED=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Write config.json directly (not via SaveConfig, which would merge/sync
+	// .env and mask the drift scenario we are testing).
+	cfgJSON := `{"keys": {"DEEPSEEK_API_KEY": "cfg-stale", "ZHIPU_API_KEY": "cfg-only"}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfgJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys, configOK := ResolveKeys(dir)
+	if !configOK {
+		t.Fatalf("configOK = false, want true (config.json exists)")
+	}
+	// .env wins for the shared key; config.json fills gaps; non-key env vars excluded.
+	if keys["DEEPSEEK_API_KEY"] != "env-correct" {
+		t.Fatalf("DEEPSEEK_API_KEY = %q, want env-correct (env authoritative)", keys["DEEPSEEK_API_KEY"])
+	}
+	if keys["ZHIPU_API_KEY"] != "cfg-only" {
+		t.Fatalf("ZHIPU_API_KEY = %q, want cfg-only (config fills gaps)", keys["ZHIPU_API_KEY"])
+	}
+	// ResolveKeys returns the full resolved env (including non-key vars);
+	// callers filter API keys via HasAPIKeys or the *_API_KEY suffix.
+	if keys["LINGTAI_SOUL_FLOW_ENABLED"] != "1" {
+		t.Fatalf("LINGTAI_SOUL_FLOW_ENABLED = %q, want 1 (env vars preserved)", keys["LINGTAI_SOUL_FLOW_ENABLED"])
+	}
+	if !HasAPIKeys(keys) {
+		t.Fatalf("HasAPIKeys(%v) = false, want true", keys)
+	}
+}
+
+func TestResolveKeysMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("DEEPSEEK_API_KEY=only-env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys, configOK := ResolveKeys(dir)
+	if configOK {
+		t.Fatalf("configOK = true, want false (config.json missing)")
+	}
+	if keys["DEEPSEEK_API_KEY"] != "only-env" {
+		t.Fatalf("DEEPSEEK_API_KEY = %q, want only-env", keys["DEEPSEEK_API_KEY"])
+	}
+}
+
+func TestHasAPIKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		keys map[string]string
+		want bool
+	}{
+		{"api key present", map[string]string{"DEEPSEEK_API_KEY": "sk-x"}, true},
+		{"api key empty", map[string]string{"DEEPSEEK_API_KEY": ""}, false},
+		{"no keys", map[string]string{}, false},
+		{"non-key vars only", map[string]string{"LINGTAI_SOUL_FLOW_ENABLED": "1"}, false},
+	}
+	for _, tc := range cases {
+		if got := HasAPIKeys(tc.keys); got != tc.want {
+			t.Errorf("%s: HasAPIKeys(%v) = %v, want %v", tc.name, tc.keys, got, tc.want)
+		}
+	}
+}

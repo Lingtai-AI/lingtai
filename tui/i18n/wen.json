@@ -843,5 +843,6 @@
   "agent_selector.hint": "↑↓ 移 · enter 擇 · esc 罷",
   "firstrun.self_heal_proposal": "⚠ 察見 ~/.lingtai-tui/.env 載有 %d 枚 API key（靈使尚在運行）— 按 [s] 自 .env 自癒 config.json",
   "firstrun.self_heal_done": "已自 .env %d 枚鑰自癒 config.json。續行以佈達諸靈使。",
-  "firstrun.self_heal_failed": "自癒不成：%v"
+  "firstrun.self_heal_failed": "自癒不成：%v",
+  "degraded.banner": "⚠ config.json 也失 — 已自 .env 推衍 API key（靈使之真源）。依賴 key 功能受限; 行 lingtai-tui doctor 或 /setup 以復 config.json"
 }

@@ -346,3 +346,29 @@ func TestNonMailViewKeepsFullTerminalWidth(t *testing.T) {
 		t.Fatalf("non-mail child width = %d, want full terminal width 73", got)
 	}
 }
+
+// TestDegradedConfigReservesChromeRow: when the app launches degraded
+// (config.json missing but API keys derived from .env), the persistent
+// warning banner reserves one top chrome row and renders the i18n text.
+func TestDegradedConfigReservesChromeRow(t *testing.T) {
+	a := App{
+		currentView:    appViewHelp,
+		help:           NewHelpModel(),
+		degradedConfig: true,
+	}
+	a.width = 80
+	a.height = 24
+
+	b := a.layoutBudget()
+	if b.TopChromeRows != 1 {
+		t.Fatalf("degraded: TopChromeRows = %d, want 1", b.TopChromeRows)
+	}
+	if b.ChildHeight != 23 {
+		t.Fatalf("degraded: ChildHeight = %d, want 23", b.ChildHeight)
+	}
+
+	chrome := a.topChrome()
+	if !strings.Contains(chrome, "config.json") {
+		t.Fatalf("degraded banner should mention config.json, got: %q", chrome)
+	}
+}
