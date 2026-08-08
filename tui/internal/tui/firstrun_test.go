@@ -77,7 +77,7 @@ func TestFirstRunAndSetupViewsOmitObsoletePrincipleControl(t *testing.T) {
 			if tc.setupMode {
 				m = NewSetupModeModel(baseDir, globalDir, "", "test")
 			} else {
-				m = NewFirstRunModel(baseDir, globalDir, true, "")
+				m = NewFirstRunModel(baseDir, globalDir, true)
 				m.presets = []preset.Preset{{
 					Name:     "test",
 					Manifest: map[string]interface{}{"language": "en"},
@@ -680,7 +680,7 @@ func TestEnterAgentNameDirLanguageFollowsTUIConfig(t *testing.T) {
 			if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: tt.tuiLang, MailPageSize: 200}); err != nil {
 				t.Fatalf("save TUI config: %v", err)
 			}
-			m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+			m := NewFirstRunModel(t.TempDir(), globalDir, true)
 			m.enterAgentNameDir(preset.Preset{
 				Name: "tutorial-test",
 				Manifest: map[string]interface{}{
@@ -703,7 +703,7 @@ func TestEnterAgentNameDirLanguageFallsBackToPresetWhenTUIConfigInvalid(t *testi
 	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "bogus", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
-	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m := NewFirstRunModel(t.TempDir(), globalDir, true)
 	m.enterAgentNameDir(preset.Preset{
 		Name: "fallback-test",
 		Manifest: map[string]interface{}{
@@ -725,7 +725,7 @@ func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "en", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
-	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m := NewFirstRunModel(t.TempDir(), globalDir, true)
 	m.setupMode = true
 	m.setupKeepInitJSON = map[string]interface{}{
 		"manifest": map[string]interface{}{

@@ -44,7 +44,6 @@ related_files:
   - tui/internal/tui/project_draft.go
   - tui/internal/tui/project_create.go
   - tui/internal/tui/project_create_test.go
-  - tui/internal/tui/recipe_draft_test.go
   - tui/internal/tui/mail_generation_test.go
   - tui/internal/tui/mail_window_test.go
   - tui/internal/tui/settings_page_size_test.go
@@ -154,8 +153,6 @@ related_files:
   - tui/internal/tui/props_soul_flow_test.go
   - tui/internal/tui/props_test.go
   - tui/internal/tui/rebuild_separator_test.go
-  - tui/internal/tui/recipe_entries.go
-  - tui/internal/tui/recipe_entries_test.go
   - tui/internal/tui/recipe_location_test.go
   - tui/internal/tui/recipe_save.go
   - tui/internal/tui/refresh_test.go
@@ -280,8 +277,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`tui/internal/tui/knowledge_entries.go:33-118`** — `buildAgentKnowledgeCatalogEntries`: scans `knowledge/<name>/KNOWLEDGE.md` folders (after a one-time migration of legacy `codex/codex.json` / `knowledge/knowledge.json` stores via `migrateLegacyJSONStores`), converts to `MarkdownEntry` slices for the `KnowledgeModel`.
 - **`tui/internal/tui/mailbox_entries.go:17-321`** — `buildMailboxEntries`: reads per-agent mailbox folders, converts to `MarkdownEntry` slices for the `MailboxModel`.
 - **`tui/internal/tui/daemons.go`** — daemon artifact readers, split into a lightweight list path and a lazy detail path so opening `/daemons` (and Ctrl+R refresh) with many runs stays cheap. `loadDaemonSummaries` → `readDaemonSummary` reads only each run's `daemon.json` + directory stat (plus the cheap daemon.json token snapshot). The heavy per-run files — `logs/events.jsonl`, `history/chat_history.jsonl`, `result.txt`, and the authoritative `logs/token_ledger.jsonl` — are read by `loadDaemonDetail` only for the selected run, triggered from `ensureDetailLoaded` inside `syncContent`; results cache on `daemonSummary.DetailLoaded` so each run is read at most once per reload.
-- **`tui/internal/tui/recipe_entries.go:15-154`** — `buildRecipeEntries` resolves canonical disk `.recipe/` files and `buildEmbeddedRecipeEntries` renders compiled fallback files through `MarkdownEntry.Content` without a fabricated path.
-- **`tui/internal/tui/recipe_save.go:14-202`** — Recipe save helpers: `recipeUsesCustomDir`, `sourceBundleDir`, `copyRecipeBundleWithEmbedded`, `saveCustomRecipe`, `ApplyRecipeToAgent`.
+- **`tui/internal/tui/recipe_save.go`** — Recipe apply helpers: `copyRecipeBundle`/`applyRecipeBundle` write the adaptive `.recipe/` bundle and resolve recipe comment/covenant/procedures; `SubstituteGreetPlaceholders` fills `{{AGENT_NAME}}`-style placeholders. The recipe picker UI was removed; the kernel-side recipe write (adaptive default) remains.
 - **`tui/internal/tui/skill_files.go:1-188`** — `SkillFilesModel`: embedded sub-model for browsing `.library/` skill directories within the wizard.
 - **`tui/internal/tui/oauth.go:35-705`** — Codex auth transport helpers shared by first-run and `/login` (the single OAuth entrypoint both paths use — see the unification note on `login.go` below): browser OAuth uses the allowlisted localhost ports and automatic callback completion (`startOAuthFlow`, `tui/internal/tui/oauth.go:169-314`). The browser launch goes through the process-global `oauthBrowserOpener` var (`tui/internal/tui/oauth.go:648`, defaults to `openBrowser`) so tests can stub it — without that seam the OAuth tests called `startOAuthFlow`→`openBrowser` directly and `go test ./...` opened real `auth.openai.com` pages (issue #474 comment 1); `TestStartOAuthFlow_DoesNotLaunchRealBrowser` guards the seam and `stubOAuthBrowserOpener` is used by every `startOAuthFlow` test. device-code login follows the official Codex endpoints (`requestCodexDeviceCode`, `tui/internal/tui/oauth.go:373-425`; `pollCodexDeviceAuth`, `tui/internal/tui/oauth.go:456-517`) before exchanging the issued authorization code with the normal token endpoint (`exchangeCodeForTokens`, `tui/internal/tui/oauth.go:553-595`). `buildAuthorizeURL` (`tui/internal/tui/oauth.go:532-549`) takes a `forceLogin bool`: when true it adds `prompt=login` so OpenAI's auth server shows the login page instead of silently reusing the active ChatGPT session — required for "Add another Codex account" (without it the second add re-adds the already-signed-in account). `startOAuthFlow` forwards it; only `LoginModel.codexForceLogin` (add-new-account-while-one-exists) passes true — first-run and existing-account re-auth pass false. Pinned by `TestBuildAuthorizeURL` (no prompt) and `TestBuildAuthorizeURL_ForceLogin` (prompt=login).
 - **`tui/internal/tui/claude_auth.go:11-84`** — Claude Code auth/account detector for the `claude` preset: runs `claude auth status --json` with a short timeout, parses `loggedIn` plus the current account email, falls back to conservative text parsing, and never reads/stores Claude credentials.

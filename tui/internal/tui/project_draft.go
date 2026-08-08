@@ -8,14 +8,14 @@ import (
 // ProjectDraft is the single in-memory holder for every choice made while
 // creating a NEW project through the no-project launcher. Until confirmation,
 // it is the only source of truth for theme/language, credential material,
-// preset edits, agent options, and recipe selection, and those choices cause no
-// writes. After confirmation, project-local state is built and validated only
-// in the owned sibling staging directory. RunProjectCreate then persists and
-// verifies the exact launch-critical preset/API-key/Codex dependencies before
-// the atomic rename; theme/language, registry, utility refresh, runtime checks,
-// and launch remain post-commit best effort. No final .lingtai path exists
-// before rename. See Invariant 3/4 of the launcher design
-// (reports/design/lingtai-tui-no-project-launcher-2026-07-14).
+// preset edits, agent options, and the adaptive recipe choice, and those
+// choices cause no writes. After confirmation, project-local state is built
+// and validated only in the owned sibling staging directory. RunProjectCreate
+// then persists and verifies the exact launch-critical preset/API-key/Codex
+// dependencies before the atomic rename; theme/language, registry, utility
+// refresh, runtime checks, and launch remain post-commit best effort. No
+// final .lingtai path exists before rename. See Invariant 3/4 of the
+// launcher design (reports/design/lingtai-tui-no-project-launcher-2026-07-14).
 //
 // Secret hygiene: DraftAPIKey and DraftCodexTokens hold credential material
 // that must never appear in a String()/Sprintf("%+v", ...)/error-wrapping
@@ -79,14 +79,10 @@ type ProjectDraft struct {
 	// preset.AgentOpts already models them for GenerateInitJSONWithOpts.
 	AgentOpts preset.AgentOpts
 
-	// RecipeName/RecipeCustomDir select which recipe bundle to apply.
-	// RecipeEmbedded records that the reviewed picker row came from the
-	// compiled zero-write fallback. Creation must never infer this from the
-	// recipe name: a missing disk-backed recipe must fail, not silently switch
-	// to a compiled recipe with the same ID.
-	RecipeName      string
-	RecipeCustomDir string
-	RecipeEmbedded  bool
+	// RecipeName records the recipe the new project stages and applies. The
+	// wizard always commits "adaptive" (preset.DefaultRecipe) — the recipe
+	// picker was removed, so no other value is ever produced.
+	RecipeName string
 
 	// ExistingKeys is a PRESENCE-ONLY mirror of FirstRunModel.existingKeys'
 	// key set — it never carries real secret values, by TYPE, not just by

@@ -81,8 +81,6 @@ type App struct {
 	width            int
 	height           int
 	tuiConfig        config.TUIConfig
-	pendingRecipe    string
-	pendingCustomDir string
 	recoveryMode     bool // global config lost, agents intact — setup then propagate
 	// degradedConfig is true when ~/.lingtai-tui/config.json is missing but API
 	// keys were derived from .env (the agents' source of truth). The app launches
@@ -263,7 +261,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery, degraded
 		if rehydrateOrchDir != "" && rehydrateOrchName != "" {
 			app.firstRun = NewRehydrateModel(projectDir, globalDir, rehydrateOrchDir, rehydrateOrchName, hasPresets)
 		} else {
-			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets, "")
+			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets)
 		}
 	} else {
 		app.degradedConfig = degradedConfig
@@ -627,15 +625,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
-	case RecipeFreshStartMsg:
-		a.pendingRecipe = msg.Recipe
-		a.pendingCustomDir = msg.CustomDir
-		a.nirvanaCleanupPending = false
-		a.nirvanaCleanupStarted = false
-		a.currentView = appViewNirvana
-		a.nirvana = NewNirvanaModel(a.projectDir)
-		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
-
 	case NirvanaDoneMsg:
 		// Nirvana complete: .lingtai/ wiped, go to first-run.
 		// Re-init project to recreate the human folder so agents can
@@ -647,14 +636,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.orchName = ""
 		a.currentView = appViewFirstRun
 		hasPresets := preset.HasAny()
-		preselected := a.pendingRecipe
-		a.pendingRecipe = ""
-		pendingCustom := a.pendingCustomDir
-		a.pendingCustomDir = ""
-		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, hasPresets, preselected)
-		if preselected == preset.RecipeCustom && pendingCustom != "" {
-			a.firstRun.recipeCustomInput.SetValue(pendingCustom)
-		}
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, hasPresets)
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 
 	case AddonSavedMsg:
@@ -1913,15 +1895,6 @@ func (a App) visitEscEligible() bool {
 		!a.mail.input.IsPaletteActive()
 }
 
-// RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
-// chooses "Fresh start (wipe .lingtai/ and reconfigure)". The app routes
-// this to NirvanaModel and stores the recipe so post-nirvana first-run
-// can pre-select it.
-type RecipeFreshStartMsg struct {
-	Recipe    string
-	CustomDir string
-}
-
 type refreshDoneMsg struct {
 	generation uint64
 	err        error
@@ -2052,7 +2025,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "welcome":
 		a.currentView = appViewFirstRun
-		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true, "")
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true)
 		a.firstRun.welcomeOnly = true
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 	case "help":

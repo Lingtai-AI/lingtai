@@ -11,43 +11,18 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// recipeUsesCustomDir returns true for recipe types that carry their own
-// on-disk bundle path rather than being resolved by name under the
-// bundled-presets tree. Retained as a UI-level helper for the recipe
-// picker; the apply flow itself treats all recipes uniformly.
-func recipeUsesCustomDir(name string) bool {
-	return name == preset.RecipeCustom || name == preset.RecipeImported || name == preset.RecipeAgora
-}
-
-// sourceBundleDir returns the on-disk recipe bundle directory for a given
-// picker selection. For named/bundled recipes (greeter, tutorial, etc.)
-// this resolves via the global preset tree; for custom/imported/agora
-// recipes the caller-provided customDir is authoritative.
-func sourceBundleDir(globalDir, recipeName, customDir string) string {
-	if recipeUsesCustomDir(recipeName) {
-		return customDir
-	}
-	return preset.RecipeDir(globalDir, recipeName)
-}
-
 // copyRecipeBundle stages the selected recipe bundle into the project
 // root. After this call, <project>/.recipe/ contains the authoritative
 // copy of the recipe and is the source of truth for all subsequent
 // behavioral-layer resolution. Returns the project root so callers can
 // chain path resolution.
-func copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir string) (projectRoot string, err error) {
-	return copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir, false)
-}
-
-func copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir string, useEmbedded bool) (projectRoot string, err error) {
+//
+// The recipe picker was removed: the wizard only ever stages
+// preset.DefaultRecipe ("adaptive"), resolved by name from the global
+// recipes tree.
+func copyRecipeBundle(lingtaiDir, globalDir, recipeName string) (projectRoot string, err error) {
 	projectRoot = filepath.Dir(lingtaiDir)
-	if useEmbedded {
-		if err := preset.CopyEmbeddedBundle(recipeName, projectRoot); err != nil {
-			return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
-		}
-		return projectRoot, nil
-	}
-	src := sourceBundleDir(globalDir, recipeName, customDir)
+	src := preset.RecipeDir(globalDir, recipeName)
 	if src == "" {
 		return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
 	}
@@ -82,15 +57,15 @@ func copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir s
 // library path entries).
 func applyRecipe(
 	lingtaiDir, orchDir, globalDir, humanDir, humanAddr string,
-	recipeName, customDir, lang, soulDelay string,
+	recipeName, lang, soulDelay string,
 ) error {
 	_ = orchDir // ApplyRecipe iterates every agent under lingtaiDir itself
 
-	projectRoot, err := copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir)
+	projectRoot, err := copyRecipeBundle(lingtaiDir, globalDir, recipeName)
 	if err != nil {
 		return err
 	}
-	return applyRecipeBundle(projectRoot, lingtaiDir, humanDir, humanAddr, recipeName, customDir, lang, soulDelay)
+	return applyRecipeBundle(projectRoot, lingtaiDir, humanDir, humanAddr, recipeName, lang, soulDelay)
 }
 
 // applyRecipeBundle materializes an already-copied project-root recipe into
@@ -98,7 +73,7 @@ func applyRecipe(
 // Create finish the future .lingtai tree in its sibling staging directory.
 func applyRecipeBundle(
 	projectRoot, lingtaiDir, humanDir, humanAddr string,
-	recipeName, customDir, lang, soulDelay string,
+	recipeName, lang, soulDelay string,
 ) error {
 	greetSubst := func(tmpl string) string {
 		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, soulDelay)
@@ -107,15 +82,11 @@ func applyRecipeBundle(
 		return fmt.Errorf("applyRecipe: %w", err)
 	}
 
-	// Persist the picker selection (type + custom path) so /setup can
-	// redisplay the last choice. The authoritative "what's applied" is
+	// Persist the applied recipe name so /setup and startup reconciliation can
+	// read what's applied. The authoritative "what's applied" is
 	// the directory snapshot at .lingtai/.tui-asset/.recipe/ which
 	// ApplyRecipeToLingTaiDir already wrote; this JSON file is purely UI state.
-	state := preset.RecipeState{Recipe: recipeName}
-	if recipeUsesCustomDir(recipeName) {
-		state.CustomDir = customDir
-	}
-	return preset.SaveRecipeState(lingtaiDir, state)
+	return preset.SaveRecipeState(lingtaiDir, preset.RecipeState{Recipe: recipeName})
 }
 
 // resolveRecipeComment returns the comment.md path inside the project's

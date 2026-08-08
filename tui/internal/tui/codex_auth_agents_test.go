@@ -241,7 +241,7 @@ func syntheticPickerPreset(provider, model string) preset.Preset {
 
 func firstRunPickerModel(t *testing.T, globalDir string, p preset.Preset) FirstRunModel {
 	t.Helper()
-	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m := NewFirstRunModel(t.TempDir(), globalDir, true)
 	m.step = stepPickPreset
 	m.presets = []preset.Preset{p}
 	m.cursor = 0

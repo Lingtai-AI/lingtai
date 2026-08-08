@@ -126,12 +126,14 @@ func TestRunProjectCreate_Success(t *testing.T) {
 func TestRunProjectCreate_AppliesRecipeInsideStagingBeforeRename(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
-	recipeRoot := t.TempDir()
-	writeRecipeFile(t, filepath.Join(recipeRoot, ".recipe", "recipe.json"),
-		`{"id":"staged","name":"Staged Recipe","description":"d","library_name":null}`)
-	writeRecipeFile(t, filepath.Join(recipeRoot, ".recipe", "greet", "greet.md"), "hello {{addr}}")
-	draft.RecipeName = preset.RecipeCustom
-	draft.RecipeCustomDir = recipeRoot
+	// The wizard always stages the adaptive recipe, resolved by name from the
+	// global recipes tree. Seed that bundle under the isolated global dir so
+	// the staging phase finds it by name.
+	draft.RecipeName = preset.DefaultRecipe
+	adaptiveRoot := filepath.Join(opts.GlobalDir, "recipes", "intrinsic", preset.DefaultRecipe)
+	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
+		`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
+	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "greet", "greet.md"), "hello {{addr}}")
 
 	var checkedBeforeRename bool
 	opts.InjectFailure = func(phase CreatePhase) error {
@@ -982,11 +984,6 @@ func invalidDraftCases() []invalidDraftCase {
 				d.DraftPreset.Description = preset.PresetDescription{}
 			},
 			wantInErr: "invalid",
-		},
-		{
-			name:      "custom_recipe_without_dir",
-			mutate:    func(d *ProjectDraft) { d.RecipeName = preset.RecipeCustom; d.RecipeCustomDir = "" },
-			wantInErr: "custom recipe",
 		},
 	}
 }
