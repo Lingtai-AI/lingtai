@@ -80,6 +80,8 @@ type mailRefreshMsg struct {
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
 	directStates         map[string]string // stable direct-thread key -> target lifecycle state
+	lastProgressAt       time.Time            // orchestrator .status.json runtime.last_progress_at (zero when absent)
+	directLastProgress   map[string]time.Time // stable direct-thread key -> target last_progress_at
 	alive                bool
 	state                string // active, idle, stuck, asleep, suspended, or ""
 	activity             fs.NetworkActivity
@@ -698,6 +700,20 @@ func (m MailModel) refreshMail() tea.Msg {
 
 	alive, state, orchestrator := resolveAgentLifecycle(m.orchestrator)
 	directStates := resolveDirectLifecycleStates(selectorRows)
+	lastProgressAt, _ := fs.LastProgressAt(m.orchestrator, time.Now())
+	directLastProgress := make(map[string]time.Time, len(directStates))
+	for _, row := range selectorRows {
+		if row.Main {
+			continue
+		}
+		key := fs.DirectThreadKey(row.Target)
+		if key == "" {
+			continue
+		}
+		if lp, ok := fs.LastProgressAt(row.Target.Directory, time.Now()); ok {
+			directLastProgress[key] = lp
+		}
+	}
 	var activity fs.NetworkActivity
 	if m.baseDir != "" {
 		if a, err := fs.ComputeNetworkActivity(m.baseDir); err == nil {
@@ -719,6 +735,8 @@ func (m MailModel) refreshMail() tea.Msg {
 		selectorRows:         selectorRows,
 		directPublication:    directPublication,
 		directStates:         directStates,
+		lastProgressAt:       lastProgressAt,
+		directLastProgress:   directLastProgress,
 		alive:                alive,
 		state:                state,
 		activity:             activity,
@@ -1140,7 +1158,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.cache = msg.cache
 				m.acceptedSnapshot = msg.acceptedSnapshot
 				m = m.installSelectorRows(msg.selectorRows)
-				m = m.installDirectLifecycleStates(msg.directStates)
+				m = m.installDirectLifecycleStates(msg.directStates, msg.directLastProgress)
 				m.directPublication = msg.directPublication
 				m = m.clampAgentRail()
 				m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
@@ -1162,7 +1180,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.quoteIdx++
 				m.pulseTick = 0
 				m.insightPending = false
-				m.activeSince = time.Now()
+				m.activeSince = msg.lastProgressAt
+				if m.activeSince.IsZero() {
+					m.activeSince = time.Now()
+				}
+			} else if isActive && !msg.lastProgressAt.IsZero() && !msg.lastProgressAt.Equal(m.activeSince) {
+				// Still active but the kernel reports a different last progress —
+				// adopt it so "active N sec" measures seconds since the last tool
+				// call (matches the kernel taskcard footer semantics).
+				m.activeSince = msg.lastProgressAt
 			} else if !isActive {
 				// Not active — stop the elapsed timer so the badge drops it
 				m.activeSince = time.Time{}
@@ -2153,14 +2179,21 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
-func (m MailModel) installDirectLifecycleStates(states map[string]string) MailModel {
+func (m MailModel) installDirectLifecycleStates(states map[string]string, lastProgress map[string]time.Time) MailModel {
 	now := time.Now()
 	next := make(map[string]directAgentLifecycle, len(states))
 	for key, state := range states {
 		status := m.directLifecycles[key]
 		if strings.EqualFold(state, "ACTIVE") {
 			if !strings.EqualFold(status.state, "ACTIVE") || status.activeSince.IsZero() {
-				status.activeSince = now
+				status.activeSince = lastProgress[key]
+				if status.activeSince.IsZero() {
+					status.activeSince = now
+				}
+			} else if lp, ok := lastProgress[key]; ok && !lp.IsZero() && !lp.Equal(status.activeSince) {
+				// Still active but the target reports a different last progress —
+				// adopt it (matches kernel taskcard footer semantics).
+				status.activeSince = lp
 			}
 		} else {
 			status.activeSince = time.Time{}
