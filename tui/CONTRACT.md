@@ -64,7 +64,9 @@ event and not a surprise.
 ### R3 · Purely additive (user-level, loss must not block launch)
 
 Every item below has a default and a defined degradation. The doctor
-validates each item; the TUI launches regardless of its state.
+validates the launch-relevant subset (R1/R2/R3.1) programmatically via the
+D1-D5 checks below; R3.2/R3.3 load defaults silently by design and are not
+examined by the doctor.
 
 | ID | Item | Location | Default | Degradation when missing |
 |---|---|---|---|---|
@@ -98,16 +100,19 @@ appears as the degraded state below.
    self-heal for the regenerable mirror (R3.1). Losing `tui_config.json`
    (R3.2) is the same class but degrades silently: defaults are loaded with
    no banner (fable F9).
-3. The doctor *will* validate the startup decision table programmatically
-   (fable F8: D2/D3 are currently unbuilt — see the checks below): check
-   agents present (R1), `config.json`/`tui_config.json` presence (R3),
-   `.env` API keys (R2), `.secrets` for declared addons (R1), runtime/version
-   (R1).
+3. The doctor validates the startup decision table programmatically
+   (fable F8, D1-D5 below): check agents present (R1), `config.json`
+   presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
+   (R1), runtime/version (R1).
 
 ## Doctor checks (TUI-can't-start diagnostic set)
 
 - [x] D1 agents running / orchestrators detected (R1)
-- [ ] D2 config.json present — `ResolveKeys` configOK (R3.1, not yet built)
-- [ ] D3 .env API keys present — `HasAPIKeys` (R2, not yet built)
-- [ ] D4 addon `.secrets` present for declared addons (R1 follow-up)
-- [ ] D5 runtime/version skew reported (R1 follow-up, extends existing doctor)
+- [x] D2 config.json present, readable, and keys mirror non-empty — `ResolveKeys` configOK + `HasAPIKeys(mirror)` (R3.1, content-based fable F7)
+- [x] D3 effective API keys present — `HasAPIKeys(resolved)` (.env + mirror gap-fill, matching the gate)
+- [x] D4 addon `.secrets`/config present for declared addons (R1; honors declared `mcp.<addon>.env` / legacy `addons.<name>.config` paths)
+- [x] D5 runtime/version skew reported (R1, extends existing doctor; plain-release stamps only)
+
+The set is reachable both from the interactive `/doctor` view and the
+`lingtai-tui doctor` CLI (fable F5) so the checks that force the first-run /
+recovery wizards can be surfaced when the TUI itself cannot start.

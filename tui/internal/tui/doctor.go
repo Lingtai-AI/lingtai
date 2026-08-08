@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,14 @@ import (
 // tuiVersion is set once at startup by main via SetTUIVersion.
 // Used by /doctor for the version-skew check.
 var tuiVersion = "dev"
+
+// plainReleaseRe matches a plain semver release stamp (optionally v-prefixed):
+// exactly major.minor.patch with no suffix. git-describe dev stamps
+// (v0.4.36-20-g873af31), --dirty suffixes, rc/pre-release tags, and
+// non-v-prefixed tags all fail this and are treated as untrustworthy build
+// identities (fable N11) — a fork build once reported v0.4.36-20-g873af31
+// while release was v0.12.0.
+var plainReleaseRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // SetTUIVersion records the running TUI binary version for doctor diagnostics.
 func SetTUIVersion(v string) {
@@ -436,6 +446,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	kernelOK := checkKernelHealth(orchDir, globalDir, &lines)
 	_ = kernelOK // intentionally not short-circuiting: LLM probe is still useful info
 
+	// Phase 0.7: startup decision table — D1–D5 from tui/CONTRACT.md. Validates
+	// the startup decision table programmatically (fable F8): agents present (R1),
+	// config.json presence (R3.1), .env API keys (R2), addon .secrets (R1),
+	// runtime/version skew (R1).
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_startup"), Section: true})
+	lines = append(lines, checkStartupDecision(orchDir, globalDir)...)
+
 	// Phase 1: read events.jsonl for recent errors
 	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_llm"), Section: true})
 	lastErr := findLastAPIError(orchDir)
@@ -668,6 +685,353 @@ func doctorLineFromConfig(line config.DoctorLine) doctorLine {
 	}
 	converted.Text = prefix + " " + line.Text
 	return converted
+}
+
+// --- Startup decision table (D1-D5) ---
+//
+// The checks below validate tui/CONTRACT.md's startup decision table
+// programmatically (fable F8): agents present (R1), config.json presence
+// (R3.1), .env API keys (R2), addon .secrets for declared addons (R1), and
+// runtime/version skew (R1). Each check is emitted under the
+// "doctor.section_startup" header so /doctor's output maps one-to-one onto
+// the contract's D1-D5 list.
+
+// CheckStartupDecisionCLI renders the D1-D5 startup decision table as plain
+// text lines for the non-interactive `lingtai-tui doctor` path. lingtaiDir is
+// the project's .lingtai directory (parent of the orchestrator agent dirs);
+// globalDir is ~/.lingtai-tui. It is the CLI counterpart of the /doctor view's
+// checkStartupDecision so the TUI-can't-start diagnostic set is reachable when
+// the interactive UI cannot start (fable F5). The CLI has no selected agent, so
+// D4 inspects the first detected orchestrator (deterministic order); with none
+// detected, D1 already reports the missing-orchestrator state and D4 states why
+// it is skipped rather than asserting OK (fable R2 #1).
+func CheckStartupDecisionCLI(lingtaiDir, globalDir string) []string {
+	// Resolve the agent dir the way the launcher would for a selected agent:
+	// DetectOrchestrators scans lingtaiDir directly (NOT its parent) and
+	// returns directory names, so the CLI passes lingtaiDir itself and joins
+	// the first detected orchestrator to form the agent dir for D4 (fable R2 #1).
+	orchDir := ""
+	if orchs := DetectOrchestrators(lingtaiDir); len(orchs) > 0 {
+		sort.Strings(orchs)
+		orchDir = filepath.Join(lingtaiDir, orchs[0])
+	}
+	lines := checkStartupDecisionAt(lingtaiDir, orchDir, globalDir)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		// The i18n strings embed their own status glyph (fable R2 #3); only
+		// structural prefixes are added here so both surfaces read the same.
+		prefix := ""
+		if line.Section {
+			prefix = "== "
+		} else if line.Hint {
+			prefix = "   "
+		}
+		out = append(out, prefix+line.Text)
+	}
+	return out
+}
+
+// checkStartupDecision emits the D1-D5 TUI-can't-start diagnostic set for the
+// given orchestrator directory and global (~/.lingtai-tui) directory. It is the
+// /doctor view entry point: orchDir is the selected agent dir, and the network
+// root is its parent (the .lingtai directory), exactly as the launcher scans it.
+func checkStartupDecision(orchDir, globalDir string) []doctorLine {
+	return checkStartupDecisionAt(filepath.Dir(orchDir), orchDir, globalDir)
+}
+
+// checkStartupDecisionAt emits the D1-D5 set given the network root
+// (lingtaiDir, the .lingtai directory) and the agent dir to inspect for D4.
+// Splitting the two levels is what makes the CLI escape hatch correct: D1 must
+// scan lingtaiDir (the launcher's DetectOrchestrators argument, main.go:1615),
+// while D4 needs the agent dir that holds init.json (fable R2 #1).
+func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine {
+	var lines []doctorLine
+
+	// The real startup gate (main.go startupDecision) consumes resolved keys
+	// (.env + config.json mirror gap-fill), configOK (present AND readable),
+	// and mirror keys together. The doctor must evaluate D2/D3 on the same
+	// predicates so /doctor never contradicts what the launcher actually does
+	// (fable F2/F3).
+	resolvedKeys, configOK := config.ResolveKeys(globalDir)
+	mirror, _ := config.LoadConfigReadOnly(globalDir)
+	envKeys := config.ReadEnvKeys(globalDir)
+
+	// D1: agents running / orchestrators detected (R1).
+	orchestrators := DetectOrchestrators(lingtaiDir)
+	if len(orchestrators) == 0 {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d1_no_agents"),
+		})
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.d1_agents", len(orchestrators)), OK: true,
+		})
+	}
+
+	// D2: config.json present, readable, and its keys mirror non-empty (R3.1).
+	// Content-based like the decision table (fable F7): a present-but-keyless
+	// mirror degrades exactly like an absent file, so the check must not report
+	// the surface OK while the launcher shows the degraded banner.
+	if configOK && config.HasAPIKeys(mirror.Keys) {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_ok"), OK: true,
+		})
+	} else if !configOK {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_missing"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_hint"), Hint: true,
+		})
+	} else {
+		// config.json exists and is readable but its keys mirror is empty.
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_no_keys"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_hint"), Hint: true,
+		})
+	}
+
+	// D3: effective API keys present (R2). The startup gate uses resolved keys
+	// (.env + mirror gap-fill), NOT .env alone — a legacy mirror-only setup is
+	// a supported real state. Report which store actually carries the keys as
+	// provenance so the line matches what the launcher decided.
+	switch {
+	case config.HasAPIKeys(resolvedKeys) && config.HasAPIKeys(envKeys):
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_ok"), OK: true,
+		})
+	case config.HasAPIKeys(resolvedKeys):
+		// Mirror-only setup: keys resolve, but .env is empty. The startup gate
+		// launches normally (resolved keys pass), so report the observable fact
+		// with provenance instead of predicting a wizard.
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_mirror_only"), OK: true,
+		})
+	default:
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_missing"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_env_keys_hint"), Hint: true,
+		})
+	}
+
+	// D4: addon .secrets present for declared addons (R1). The CLI path has no
+	// selected agent; when orchDir is empty, D1 already reported the missing
+	// orchestrator and D4 states why it is skipped rather than asserting OK
+	// (fable R2 #1).
+	if orchDir != "" {
+		lines = append(lines, checkAddonSecrets(orchDir)...)
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d4_no_agent_cli"), Hint: true,
+		})
+	}
+
+	// D5: runtime/version skew (R1).
+	lines = append(lines, checkVersionSkew()...)
+
+	return lines
+}
+
+// checkAddonSecrets verifies that every addon declared in the orchestrator's
+// init.json has a matching secrets/config file. Both init.json addon shapes are
+// supported (list post-v0.7.3 and legacy dict), and the declared config path is
+// honored: mcp.<addon>.env.<LINGTAI_<NAME>_CONFIG> (new shape), then
+// addons.<name>.config (legacy dict shape), then the defaultMCPSpec
+// convention (fable F4).
+func checkAddonSecrets(orchDir string) []doctorLine {
+	initPath := filepath.Join(orchDir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if os.IsNotExist(err) {
+		// No init.json → no addons to verify (normal no-agents state; D1
+		// already reported the missing orchestrator). Not a second fault.
+		return []doctorLine{{
+			Text: i18n.T("doctor.d4_no_addons"), OK: true,
+		}}
+	}
+	if err != nil {
+		return []doctorLine{{
+			Text: i18n.TF("doctor.d4_init_unreadable", err), Warn: true,
+		}}
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return []doctorLine{{
+			Text: i18n.TF("doctor.d4_init_unreadable", err), Warn: true,
+		}}
+	}
+	var addons []string
+	switch v := raw["addons"].(type) {
+	case []interface{}:
+		for _, item := range v {
+			if name, ok := item.(string); ok && name != "" {
+				addons = append(addons, name)
+			}
+		}
+	case map[string]interface{}:
+		for name := range v {
+			addons = append(addons, name)
+		}
+	}
+	if len(addons) == 0 {
+		return []doctorLine{{
+			Text: i18n.T("doctor.d4_no_addons"), OK: true,
+		}}
+	}
+	sort.Strings(addons) // deterministic report order (fable N8)
+
+	// Pre-extract declared mcp config paths (new shape): mcp.<addon>.env.<VAR>.
+	mcpRaw, _ := raw["mcp"].(map[string]interface{})
+	var lines []doctorLine
+	for _, addon := range addons {
+		// Resolve the declared config path, falling back to the convention.
+		// Only a declared path is authoritative: the convention's alternate
+		// layout form (file vs directory) is accepted as a secondary candidate
+		// so setups that used the other form do not false-fail (fable R2 #5).
+		relPath := defaultAddonConfigRel(addon)
+		declared := declaredAddonConfigPath(mcpRaw, raw, addon)
+		if declared != "" {
+			relPath = declared
+		}
+		candidates := []string{relPath}
+		if declared == "" {
+			if alt := alternateAddonConfigRel(addon, relPath); alt != "" && alt != relPath {
+				candidates = append(candidates, alt)
+			}
+		}
+		found := false
+		for _, cand := range candidates {
+			if !filepath.IsAbs(cand) {
+				cand = filepath.Join(orchDir, cand)
+			}
+			if fileExists(cand) {
+				found = true
+				break
+			}
+		}
+		if found {
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_ok", addon), OK: true,
+			})
+		} else {
+			// The failure line names the path actually checked (declared or
+			// conventional), not a hardcoded convention (fable R2 #4).
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_missing", addon, relPath),
+			})
+			lines = append(lines, doctorLine{
+				Text: i18n.TF("doctor.d4_secrets_hint", addon, relPath), Hint: true,
+			})
+		}
+	}
+	return lines
+}
+
+// defaultAddonConfigRel returns the default .secrets config path for a curated
+// addon (file form for most, directory form for wechat), or a fallback guess.
+func defaultAddonConfigRel(addon string) string {
+	_, _, configRel, supported := preset.DefaultMCPSpec(addon)
+	if supported {
+		return configRel
+	}
+	return filepath.Join(".secrets", addon+".json")
+}
+
+// alternateAddonConfigRel returns the non-canonical convention layout form for
+// an addon (file <-> directory), or "" when the primary path is not a
+// convention path (e.g. a declared custom path). This keeps pre-F4 setups that
+// used the other layout form valid (fable R2 #5).
+func alternateAddonConfigRel(addon, primary string) string {
+	fileForm := filepath.Join(".secrets", addon+".json")
+	dirForm := filepath.Join(".secrets", addon, "config.json")
+	switch primary {
+	case fileForm:
+		return dirForm
+	case dirForm:
+		return fileForm
+	}
+	return ""
+}
+
+// declaredAddonConfigPath returns the config file path an init.json actually
+// declares for an addon, or "" when only the convention applies. It checks the
+// new mcp.<addon>.env.<VAR> shape first, then the legacy addons.<name>.config
+// shape. Relative paths are resolved against the agent dir by the caller.
+//
+// The env lookup uses the CANONICAL env var name from preset.DefaultMCPSpec,
+// never an arbitrary map entry: Go map iteration is randomized, so picking the
+// first string value produced intermittent false "secrets missing" on
+// customized specs with extra env vars (fable R2 #2).
+func declaredAddonConfigPath(mcpRaw, raw map[string]interface{}, addon string) string {
+	// New shape: mcp.<addon>.env.<LINGTAI_<NAME>_CONFIG>.
+	if mcpRaw != nil {
+		if entry, _ := mcpRaw[addon].(map[string]interface{}); entry != nil {
+			if envRaw, _ := entry["env"].(map[string]interface{}); envRaw != nil {
+				if _, envVar, _, supported := preset.DefaultMCPSpec(addon); supported {
+					if s, ok := envRaw[envVar].(string); ok && strings.TrimSpace(s) != "" {
+						return s
+					}
+				} else {
+					// Non-curated addon: fall back to a *_CONFIG-suffixed key so
+					// arbitrary secret values are never treated as a path.
+					for k, v := range envRaw {
+						if !strings.HasSuffix(k, "_CONFIG") {
+							continue
+						}
+						if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+							return s
+						}
+					}
+				}
+			}
+		}
+	}
+	// Legacy dict shape: addons.<name>.config.
+	if addonsRaw, _ := raw["addons"].(map[string]interface{}); addonsRaw != nil {
+		if cfg, _ := addonsRaw[addon].(map[string]interface{}); cfg != nil {
+			if s, ok := cfg["config"].(string); ok && strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// checkVersionSkew reports whether the running TUI binary's version stamp is
+// trustworthy. TUI and kernel ship from separate repos and are NOT meant to
+// track each other (an earlier mismatch warning was wrong and removed), so D5
+// does not compare TUI↔kernel. Instead it flags the one skew that does matter:
+// an untagged/dev/git-describe build stamp, which makes version diagnostics
+// misleading (a fork build once reported v0.4.36-20-g873af31 while release was
+// v0.12.0).
+func checkVersionSkew() []doctorLine {
+	v := strings.TrimSpace(tuiVersion)
+	if v == "" || v == "dev" {
+		return []doctorLine{
+			{Text: i18n.T("doctor.d5_untagged"), Warn: true},
+			{Text: i18n.T("doctor.d5_untagged_hint"), Hint: true},
+		}
+	}
+	if !plainReleaseStamp(v) {
+		return []doctorLine{
+			{Text: i18n.TF("doctor.d5_git_describe", v), Warn: true},
+			{Text: i18n.T("doctor.d5_git_describe_hint"), Hint: true},
+		}
+	}
+	return []doctorLine{
+		{Text: i18n.TF("doctor.d5_release", v), OK: true},
+	}
+}
+
+// plainReleaseStamp reports whether v is a plain semver release stamp
+// (optionally v-prefixed): exactly major.minor.patch with no suffix. Anything
+// else — git-describe stamps, --dirty suffixes, rc/pre-release tags — is an
+// untrustworthy dev identity (fable N11).
+func plainReleaseStamp(v string) bool {
+	return plainReleaseRe.MatchString(v)
 }
 
 // --- Event log scanning ---

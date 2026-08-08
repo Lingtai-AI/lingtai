@@ -1530,6 +1530,14 @@ func defaultMCPSpec(name string) (module, envVar, configRel string, supported bo
 	return "", "", "", false
 }
 
+// DefaultMCPSpec is the exported form of defaultMCPSpec, so diagnostics
+// (e.g. /doctor's addon-secrets check) can resolve the canonical config path
+// without re-hardcoding the addon→path table (fable F4: the table must stay
+// single-sourced).
+func DefaultMCPSpec(name string) (module, envVar, configRel string, supported bool) {
+	return defaultMCPSpec(name)
+}
+
 // DefaultPreset returns the first built-in preset (minimax).
 func DefaultPreset() Preset {
 	return minimaxPreset()
