@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `codex-pool`
 
-`codexPoolPreset()` (`tui/internal/preset/preset.go:1281-1304`) ships
+`codexPoolPreset()` (`tui/internal/preset/preset.go:1320-1343`) ships
 provider `codex-pool`, exact model `gpt-5.6-sol`,
 `https://chatgpt.com/backend-api/codex`, `thinking: xhigh`, and an empty
 `api_key_env` because it selects from local ChatGPT OAuth token files. The
