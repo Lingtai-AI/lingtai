@@ -4,6 +4,11 @@
 
 ### 1. Commit and push all changes
 
+Bump [`migration/migration.md`](migration/migration.md)'s frontmatter
+(`release_version`, `release_tag`, `kernel_tag`) to the release being tagged
+and [`kernel-release.json`](kernel-release.json)'s pinned kernel — the exact
+tagged copy of that file is the migration record the update contract reads.
+
 ```bash
 git push origin main
 ```
