@@ -752,6 +752,21 @@ func TestAutoEnvVarName(t *testing.T) {
 			preset: pp("deepseek", "https://api.deepseek.com"),
 			want:   "DEEPSEEK_1_API_KEY",
 		},
+		// The OpenCode Go row is a distinct account on a shared endpoint,
+		// not a CN/INTL split. It must not borrow a region suffix — the
+		// substring classifier would otherwise call opencode.ai "CN" for
+		// zhipu and "INTL" for minimax, stamping a slot that lies about
+		// the endpoint it unlocks.
+		{
+			name:   "zhipu OpenCode Go gets no region suffix",
+			preset: pp("zhipu", "https://opencode.ai/zen/go/v1"),
+			want:   "ZHIPU_1_API_KEY",
+		},
+		{
+			name:   "minimax OpenCode Go gets no region suffix",
+			preset: pp("minimax", "https://opencode.ai/zen/go/v1"),
+			want:   "MINIMAX_1_API_KEY",
+		},
 		{
 			name:   "non-numeric existing entries (e.g. legacy) ignored",
 			preset: pp("deepseek", "https://api.deepseek.com"),
@@ -823,33 +838,66 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 }
 
-func TestDeepseekPresetDeclaresThreeBaseURLOptions(t *testing.T) {
-	// The deepseek preset must remain a builtin after the opencode-go preset
-	// was folded into it as an OpenCode base_url option.
-	found := false
-	for _, p := range BuiltinPresets() {
-		if p.Name == "deepseek" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("deepseek preset missing from BuiltinPresets")
+// TestProviderRegionURLTablesAreExact pins the full base_url option table for
+// every provider that offers one — order, Label, URL and Env. Order matters
+// beyond cosmetics: entry [0] is the template default (preset.go's
+// ProviderRegionURLs[...][0].URL), so a reorder silently repoints new presets
+// at a different region. The OpenCode Go row must stay byte-identical across
+// all three providers so one OPENCODE_GO_API_KEY serves all of them.
+func TestProviderRegionURLTablesAreExact(t *testing.T) {
+	openCodeGo := RegionURL{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"}
+
+	tests := []struct {
+		provider string
+		want     []RegionURL
+	}{
+		{"deepseek", []RegionURL{
+			{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
+			openCodeGo,
+			{Label: "Custom", URL: ""},
+		}},
+		{"zhipu", []RegionURL{
+			{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
+			{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
+			openCodeGo,
+		}},
+		{"minimax", []RegionURL{
+			{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
+			{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+			openCodeGo,
+		}},
 	}
 
-	regions, ok := ProviderRegionURLs["deepseek"]
-	if !ok || len(regions) != 3 {
-		t.Fatalf("ProviderRegionURLs[deepseek] = %#v, want 3 entries", regions)
+	if len(ProviderRegionURLs) != len(tests) {
+		t.Errorf("ProviderRegionURLs has %d providers, this test pins %d — add the new one here", len(ProviderRegionURLs), len(tests))
 	}
-	want := []RegionURL{
-		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-		{Label: "Custom", URL: ""},
-	}
-	for i, w := range want {
-		if regions[i] != w {
-			t.Errorf("ProviderRegionURLs[deepseek][%d] = %#v, want %#v", i, regions[i], w)
-		}
+
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			// Every region-table provider must remain a shipped builtin —
+			// deepseek in particular, after the opencode-go preset was
+			// folded into it as an OpenCode Go base_url option.
+			found := false
+			for _, p := range BuiltinPresets() {
+				if p.Name == tc.provider {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("%s preset missing from BuiltinPresets", tc.provider)
+			}
+
+			regions, ok := ProviderRegionURLs[tc.provider]
+			if !ok || len(regions) != len(tc.want) {
+				t.Fatalf("ProviderRegionURLs[%s] = %#v, want %d entries", tc.provider, regions, len(tc.want))
+			}
+			for i, w := range tc.want {
+				if regions[i] != w {
+					t.Errorf("ProviderRegionURLs[%s][%d] = %#v, want %#v", tc.provider, i, regions[i], w)
+				}
+			}
+		})
 	}
 }
 

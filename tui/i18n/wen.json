@@ -454,7 +454,7 @@
   "doctor.llm_oauth": "⚠ OAuth 之主 — 凭由 CLI 自掌，此不探。",
   "doctor.suggest_oauth": "→ 于外验登（如 `codex login`）；CLI 既通，则此可置。",
   "doctor.llm_no_base_url": "✗ %s 未设端",
-  "doctor.suggest_base_url": "→ 开预设编器选区域 (CN / INTL)，后 /refresh。",
+  "doctor.suggest_base_url": "→ 开预设编器选 base_url 项，后 /refresh。",
   "doctor.llm_unknown": "✗ 天误：%s",
   "doctor.llm_empty_response": "✗ 天应而无文：%s",
   "doctor.suggest_proxy_check": "→ 端纳其请而不达上。察代之录（譬 JoyCode），验模名与凭无误，后 /refresh。",

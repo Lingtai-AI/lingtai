@@ -541,7 +541,8 @@ func RefreshTemplates() error {
 // RegionURL pairs a human-readable label with an API base URL.
 // Env, when non-empty, is the api_key_env slot the option implies (e.g.
 // "DEEPSEEK_API_KEY") and is applied to the preset when the option is
-// selected. Empty Env means "don't touch api_key_env".
+// selected. Empty Env means "don't touch api_key_env"; the editor
+// restores the slot it memoized when cycling back off an Env row.
 //
 // Env is deliberately present ONLY where a region genuinely implies a
 // distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
@@ -549,8 +550,7 @@ func RefreshTemplates() error {
 // region rows (zhipu/minimax CN and INTL) declare none: their slots are
 // region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
 // MINIMAX_CN_1_API_KEY via AutoEnvVarName), and a flat Env on those rows
-// would make a CN<->INTL base_url cycle overwrite the user's
-// region-specific slot with a region-agnostic one.
+// would overwrite that slot on every CN<->INTL base_url cycle.
 type RegionURL struct {
 	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
@@ -1650,7 +1650,20 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 // splits, "" for everything else. Mirrors the wizard's existing
 // region-detection logic so a preset that says "minimaxi.com" gets
 // the same CN suffix the wizard would have applied.
+//
+// A region row that declares its own Env (OpenCode Go) is not a CN/INTL
+// split — it is a separate account reached through a shared endpoint. It
+// gets no suffix: the substring match below classifies by hostname, and
+// opencode.ai contains neither "api.z.ai" nor "minimaxi.com", so zhipu
+// would fall through to "CN" and minimax to "INTL" and the stamped slot
+// (MINIMAX_INTL_1_API_KEY for https://opencode.ai/zen/go/v1) would lie
+// about the endpoint it unlocks.
 func regionSuffix(provider, baseURL string) string {
+	for _, r := range ProviderRegionURLs[provider] {
+		if r.URL != "" && r.URL == baseURL && r.Env != "" {
+			return ""
+		}
+	}
 	switch provider {
 	case "minimax":
 		if strings.Contains(baseURL, "minimaxi.com") {

@@ -260,6 +260,17 @@ type PresetEditorModel struct {
 	apiKey       string
 	apiKeySet    bool
 
+	// regionEnvBeforeAdopt remembers the api_key_env the preset carried
+	// just before a base_url cycle landed on a region row that declares
+	// its own credential (OpenCode Go -> OPENCODE_GO_API_KEY). Cycling
+	// back off that row restores it, so adopting a region credential is
+	// a reversible move rather than a one-way door: the zhipu/minimax
+	// CN/INTL rows declare no Env of their own, so without this memo one
+	// extra → press would wrap to CN while still resolving through
+	// OPENCODE_GO_API_KEY and destroy the user's ZHIPU_INTL_1_API_KEY.
+	// Empty means "nothing to restore" (fall back to ProviderDefaultEnv).
+	regionEnvBeforeAdopt string
+
 	// Status
 	saveErr string
 }
@@ -1005,7 +1016,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		provider := asString(m.llmMap()["provider"])
 		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
 			idx := selectedRegionIndex(regions, m.fieldString(f))
-			var next preset.RegionURL
+			var next, prev preset.RegionURL
+			if idx >= 0 {
+				prev = regions[idx]
+			}
 			if idx < 0 {
 				// Off-list value on a provider with no Custom row: nothing is
 				// selected, so enter the list at its edge the way cycleString
@@ -1035,8 +1049,28 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			// one. The Custom option declares none, so landing on it leaves
 			// api_key_env untouched and the user keeps whatever credential
 			// slot their endpoint actually uses.
-			if next.Env != "" {
+			//
+			// The adoption must be REVERSIBLE. deepseek self-heals on the way
+			// out (its DeepSeek API row declares DEEPSEEK_API_KEY), but the
+			// zhipu/minimax CN/INTL rows deliberately declare no Env, so
+			// wrapping past OpenCode Go back to CN would otherwise leave the
+			// preset pointing at bigmodel.cn while resolving through
+			// OPENCODE_GO_API_KEY — silently destroying the user's
+			// ZHIPU_INTL_1_API_KEY. Memoize the slot on the way in and put it
+			// back on the way out.
+			switch {
+			case next.Env != "":
+				if prev.Env == "" {
+					m.regionEnvBeforeAdopt = asString(m.llmMap()["api_key_env"])
+				}
 				m.llmMap()["api_key_env"] = next.Env
+			case prev.Env != "":
+				restore := m.regionEnvBeforeAdopt
+				if restore == "" {
+					restore = preset.ProviderDefaultEnv[provider]
+				}
+				m.llmMap()["api_key_env"] = restore
+				m.regionEnvBeforeAdopt = ""
 			}
 		}
 	case feAPICompat:
@@ -1124,8 +1158,18 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		// Without this, the user's pasted key would overwrite the
 		// template's shared slot (e.g. MIMO_API_KEY), polluting any
 		// other preset that references it.
+		//
+		// Exception: a slot the *region row itself* declares (OpenCode Go ->
+		// OPENCODE_GO_API_KEY, DeepSeek API -> DEEPSEEK_API_KEY) is a shared
+		// account by definition — the whole point of picking that base_url
+		// option is to resolve through that one credential. Dropping it here
+		// would make stampAutoEnvVar mint an unrelated PROVIDER_N slot, so a
+		// user who already configured OpenCode Go on deepseek would have to
+		// paste the same key again for zhipu. Keep it.
 		if llm, ok := committed.Manifest["llm"].(map[string]interface{}); ok {
-			delete(llm, "api_key_env")
+			if !usesRegionDeclaredEnv(llm) {
+				delete(llm, "api_key_env")
+			}
 		}
 	}
 	normalizeLLMForCommit(committed.Manifest)
@@ -2027,6 +2071,27 @@ func maskAPIKey(key string) string {
 // positively something that is false. All consumers (openInline,
 // baseURLRadioStrip, cycleFocused) share this rule so the strip's
 // highlighted dot, the Enter no-op, and the cycle always agree.
+// usesRegionDeclaredEnv reports whether llm's current api_key_env is exactly
+// the credential slot its current base_url's region row declares (e.g.
+// base_url https://opencode.ai/zen/go/v1 with api_key_env
+// OPENCODE_GO_API_KEY). Those slots name a shared account rather than a
+// per-preset one, so commit() must not strip them from an edited built-in.
+// A free-typed URL, an Env-less region row (zhipu/minimax CN/INTL), or a
+// mismatched slot all return false.
+func usesRegionDeclaredEnv(llm map[string]interface{}) bool {
+	env := asString(llm["api_key_env"])
+	baseURL := asString(llm["base_url"])
+	if env == "" || baseURL == "" {
+		return false
+	}
+	for _, r := range preset.ProviderRegionURLs[asString(llm["provider"])] {
+		if r.URL == baseURL && r.Env != "" {
+			return r.Env == env
+		}
+	}
+	return false
+}
+
 func selectedRegionIndex(regions []preset.RegionURL, current string) int {
 	for i, r := range regions {
 		if r.URL != "" && r.URL == current {

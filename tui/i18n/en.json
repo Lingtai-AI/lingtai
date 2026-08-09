@@ -458,7 +458,7 @@
   "doctor.llm_oauth": "⚠ OAuth provider — credentials managed by the CLI, not probed here",
   "doctor.suggest_oauth": "→ Verify login externally (e.g. `codex login`); if the CLI works, ignore this notice.",
   "doctor.llm_no_base_url": "✗ No API endpoint (base_url) set for %s",
-  "doctor.suggest_base_url": "→ Open preset editor and select a region (CN / INTL), then /refresh.",
+  "doctor.suggest_base_url": "→ Open preset editor and choose a base_url option, then /refresh.",
   "doctor.llm_unknown": "✗ LLM error: %s",
   "doctor.llm_empty_response": "✗ LLM responded but envelope is empty: %s",
   "doctor.suggest_proxy_check": "→ The endpoint accepted your request but did not forward it upstream. Check the proxy/gateway logs (e.g. JoyCode), verify the model name and credentials are forwarded correctly, then /refresh.",
