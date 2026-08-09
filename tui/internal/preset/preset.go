@@ -546,11 +546,13 @@ func RefreshTemplates() error {
 //
 // Env is deliberately present ONLY where a region genuinely implies a
 // distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
-// OpenCode Go row on zhipu/minimax, are separate accounts). The plain
-// region rows (zhipu/minimax CN and INTL) declare none: their slots are
-// region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
-// MINIMAX_CN_1_API_KEY via AutoEnvVarName), and a flat Env on those rows
-// would overwrite that slot on every CN<->INTL base_url cycle.
+// OpenCode Go row on zhipu/minimax/kimi/mimo, are separate accounts). The
+// plain native rows (zhipu/minimax CN and INTL, Kimi Code, MiMo) declare
+// none: their slots are region-suffixed and host-stamped
+// (ZHIPU_INTL_1_API_KEY, MINIMAX_CN_1_API_KEY, KIMI_1_API_KEY via
+// AutoEnvVarName), and a flat Env on those rows would overwrite that slot
+// on every base_url cycle. Their provider default lives in
+// ProviderDefaultEnv instead.
 type RegionURL struct {
 	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
@@ -581,6 +583,19 @@ var ProviderRegionURLs = map[string][]RegionURL{
 	"minimax": {
 		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
 		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+	},
+	// OpenCode Go serves the Kimi K-series (kimi-k3, kimi-k2.7-code,
+	// kimi-k2.6, kimi-k2.5) under lowercase model ids; the native Kimi Code
+	// endpoint serves the subscription model `kimi-for-coding`.
+	"kimi": {
+		{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+	},
+	// OpenCode Go serves the MiMo V2 family (mimo-v2-pro, mimo-v2-omni,
+	// mimo-v2.5-pro, mimo-v2.5) alongside Xiaomi's own endpoint.
+	"mimo": {
+		{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
 		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
 }
@@ -1176,7 +1191,7 @@ func mimoPreset() Preset {
 			"llm": map[string]interface{}{
 				"provider": "mimo", "model": "mimo-v2.5",
 				"api_key": nil, "api_key_env": "XIAOMI_API_KEY",
-				"base_url": "https://api.xiaomimimo.com/v1", "api_compat": "openai",
+				"base_url": ProviderRegionURLs["mimo"][0].URL, "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
@@ -1238,7 +1253,7 @@ func kimiPreset() Preset {
 	return openAICompatNoVisionPreset(
 		"kimi",
 		"Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling",
-		"kimi-for-coding", "KIMI_CODE_API_KEY", "https://api.kimi.com/coding/v1", "3")
+		"kimi-for-coding", "KIMI_CODE_API_KEY", ProviderRegionURLs["kimi"][0].URL, "3")
 }
 
 func nvidiaPreset() Preset {

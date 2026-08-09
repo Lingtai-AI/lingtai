@@ -109,8 +109,19 @@ var providerModels = map[string][]string{
 		"MiniMax-M2.1", "MiniMax-M2.1-highspeed",
 		"MiniMax-M2",
 	},
-	"zhipu":    {"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
-	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro"},
+	// Zhipu: the native CN/INTL endpoints take the uppercase catalog ids;
+	// OpenCode Go only accepts lowercase ("Model GLM-5.2 is not supported"),
+	// so the lowercase aliases are appended for that base_url row.
+	"zhipu": {
+		"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air",
+		"glm-5.2", "glm-5.1", "glm-5",
+	},
+	// Kimi: `kimi-for-coding` is the native Kimi Code subscription model;
+	// the lowercase K-series ids are what OpenCode Go serves.
+	"kimi": {"kimi-for-coding", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5"},
+	// MiMo: the first two are Xiaomi's own endpoint; OpenCode Go additionally
+	// serves the V2 pro/omni ids.
+	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"},
 	"deepseek": {"deepseek-v4-pro", "deepseek-v4-flash"},
 	// NVIDIA NIM catalog IDs (build.nvidia.com) served on the free tier.
 	// Default flagship first; the rest are popular open-weight options.

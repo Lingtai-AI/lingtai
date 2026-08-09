@@ -843,7 +843,7 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 // beyond cosmetics: entry [0] is the template default (preset.go's
 // ProviderRegionURLs[...][0].URL), so a reorder silently repoints new presets
 // at a different region. The OpenCode Go row must stay byte-identical across
-// all three providers so one OPENCODE_GO_API_KEY serves all of them.
+// every provider that offers it so one OPENCODE_GO_API_KEY serves all of them.
 func TestProviderRegionURLTablesAreExact(t *testing.T) {
 	openCodeGo := RegionURL{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"}
 
@@ -864,6 +864,14 @@ func TestProviderRegionURLTablesAreExact(t *testing.T) {
 		{"minimax", []RegionURL{
 			{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
 			{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+			openCodeGo,
+		}},
+		{"kimi", []RegionURL{
+			{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
+			openCodeGo,
+		}},
+		{"mimo", []RegionURL{
+			{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
 			openCodeGo,
 		}},
 	}

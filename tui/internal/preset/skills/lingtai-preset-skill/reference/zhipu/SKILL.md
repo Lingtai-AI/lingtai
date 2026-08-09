@@ -1,14 +1,14 @@
 ---
 name: preset-skill-zhipu
 description: Official-source-led manual for the TUI `zhipu` template.
-version: 2.1.0
+version: 2.1.1
 last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `zhipu`
 
-`zhipuPreset()` (`tui/internal/preset/preset.go:1144-1161`) ships provider
+`zhipuPreset()` (`tui/internal/preset/preset.go:1159-1176`) ships provider
 `zhipu` with exact model `GLM-5.2`, `ZHIPU_API_KEY`, and the
 OpenAI-compatible regional endpoints
 `https://open.bigmodel.cn/api/coding/paas/v4` (CN) and
@@ -25,7 +25,10 @@ The TUI preset editor's `base_url` row offers three options
 - **OpenCode Go** — `https://opencode.ai/zen/go/v1`. This is the only row
   that implies a credential: selecting it sets `api_key_env` to
   `OPENCODE_GO_API_KEY` (the shared OpenCode Go account) and saving keeps
-  that slot instead of minting a region-suffixed one.
+  that slot instead of minting a region-suffixed one. Its model ids are
+  LOWERCASE (`glm-5.2`, `glm-5.1`, `glm-5`) — an uppercase id is rejected
+  with `Model GLM-5.2 is not supported`, even though the native CN/INTL
+  rows take the uppercase catalog names.
 
 CN and INTL imply no `api_key_env`, so cycling between them preserves
 whatever slot the host stamped (`ZHIPU_CN_1_API_KEY`,

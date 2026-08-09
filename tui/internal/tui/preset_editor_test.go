@@ -93,7 +93,9 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if got := providerModels["deepseek"][0]; got != "deepseek-v4-pro" {
 		t.Fatalf("deepseek default picker model = %q, want deepseek-v4-pro", got)
 	}
-	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro"}
+	// Xiaomi's own endpoint serves the first two; OpenCode Go additionally
+	// serves the V2 pro/omni ids, so both base_url rows are pickable.
+	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"}
 	if got := providerModels["mimo"]; !reflect.DeepEqual(got, wantMiMoModels) {
 		t.Fatalf("mimo provider models = %#v, want %#v", got, wantMiMoModels)
 	}
