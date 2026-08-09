@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `kimi`
 
-`kimiPreset()` (`tui/internal/preset/preset.go:1092-1104`) ships Kimi Code
+`kimiPreset()` (`tui/internal/preset/preset.go:1188-1200`) ships Kimi Code
 model `kimi-for-coding` at the exact OpenAI-compatible endpoint
 `https://api.kimi.com/coding/v1` with `KIMI_CODE_API_KEY`. The manifest has
 no built-in `vision` capability, so this shipped preset remains unwired for

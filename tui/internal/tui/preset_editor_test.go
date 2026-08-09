@@ -1793,3 +1793,88 @@ func TestPresetEditorDeepseekBaseURLStripRendering(t *testing.T) {
 		t.Fatalf("typed Custom strip = %q, want Custom selected with endpoint echoed", strip)
 	}
 }
+
+// TestPresetEditorNoCustomRowOffListBaseURLStrip covers the providers that have
+// no Custom row (zhipu, minimax): an off-list base_url must select nothing and
+// echo the raw value, never claim a region the preset does not point at.
+func TestPresetEditorNoCustomRowOffListBaseURLStrip(t *testing.T) {
+	style := lipgloss.NewStyle()
+	for _, provider := range []string{"zhipu", "minimax"} {
+		m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, provider), "en", nil, "", false)
+		m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+		strip := m.baseURLRadioStrip(false, style)
+		if strings.Contains(strip, "● ") {
+			t.Errorf("%s off-list strip = %q, want no filled dot", provider, strip)
+		}
+		if !strings.Contains(strip, "○ CN") || !strings.Contains(strip, "○ INTL") {
+			t.Errorf("%s off-list strip = %q, want both regions hollow", provider, strip)
+		}
+		if !strings.Contains(strip, "https://my-proxy.example/v4") {
+			t.Errorf("%s off-list strip = %q, want the raw endpoint echoed", provider, strip)
+		}
+
+		// The known region URLs still select normally.
+		m.llmMap()["base_url"] = preset.ProviderRegionURLs[provider][1].URL
+		if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● INTL") {
+			t.Errorf("%s INTL strip = %q, want INTL selected", provider, strip)
+		}
+	}
+}
+
+// TestPresetEditorNoCustomRowOffListCyclingAndEnter checks the other two
+// selectedRegionIndex consumers agree with the strip when nothing is selected:
+// cycling enters the list at its edge (never indexing -1), and Enter opens
+// inline edit so the value is correctable from the editor.
+func TestPresetEditorNoCustomRowOffListCyclingAndEnter(t *testing.T) {
+	regions := preset.ProviderRegionURLs["zhipu"]
+
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "zhipu"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	m.cycleFocused(+1)
+	if got := m.fieldString(feBaseURL); got != regions[0].URL {
+		t.Errorf("cycle +1 from off-list = %q, want first region %q", got, regions[0].URL)
+	}
+
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	m.cycleFocused(-1)
+	if got := m.fieldString(feBaseURL); got != regions[len(regions)-1].URL {
+		t.Errorf("cycle -1 from off-list = %q, want last region %q", got, regions[len(regions)-1].URL)
+	}
+
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	opened, _ := m.openInline()
+	if opened.mode != emInline {
+		t.Errorf("Enter on off-list base_url mode = %v, want emInline so the value is editable", opened.mode)
+	}
+}
+
+// TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv is the F3 regression:
+// a credential slot adopted from a base_url region must not follow the user
+// into the next provider.
+func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.cycleFocused(+1) // DeepSeek API -> OpenCode Go
+	if got := asString(m.llmMap()["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after base_url cycle api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+
+	// Switch the provider until it lands on each region-table provider and
+	// assert the stale OpenCode slot is gone every time.
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+	for i := 0; i < 24; i++ {
+		m.cycleFocused(+1)
+		provider := asString(m.llmMap()["provider"])
+		regions, ok := preset.ProviderRegionURLs[provider]
+		if !ok {
+			continue
+		}
+		if got := asString(m.llmMap()["api_key_env"]); got != regions[0].Env {
+			t.Fatalf("after switch to %s api_key_env = %q, want the region default %q", provider, got, regions[0].Env)
+		}
+		if got := asString(m.llmMap()["base_url"]); got != regions[0].URL {
+			t.Fatalf("after switch to %s base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+	}
+}

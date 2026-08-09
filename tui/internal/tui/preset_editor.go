@@ -536,11 +536,17 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		// URLs. The Custom option (empty-URL sentinel) and any free-typed URL
 		// open free-text inline edit instead. The selection rule is shared with
 		// cycleFocused and baseURLRadioStrip via selectedRegionIndex.
+		//
+		// selectedRegionIndex returns -1 for an off-list value on a provider
+		// with no Custom row; that opens inline edit too, which is the only
+		// way to correct such a value from the editor.
 		provider := asString(m.llmMap()["provider"])
 		current := asString(m.llmMap()["base_url"])
 		regions, hasRegions := preset.ProviderRegionURLs[provider]
-		if hasRegions && len(regions) > 0 && regions[selectedRegionIndex(regions, current)].URL != "" {
-			return *m, nil
+		if hasRegions && len(regions) > 0 {
+			if idx := selectedRegionIndex(regions, current); idx >= 0 && regions[idx].URL != "" {
+				return *m, nil
+			}
 		}
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
@@ -963,11 +969,20 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 				m.llmMap()["model"] = models[0]
 			}
 		}
-		// Reset base_url (and any region-declared credential env-var slot)
-		// to the new provider's default region when switching to a
-		// provider with known regional endpoints. DeepSeek's default
-		// DeepSeek API option declares DEEPSEEK_API_KEY, so a switch to
-		// deepseek lands on the right api_key_env.
+		// Reset base_url and the region-declared credential env-var slot to
+		// the new provider's default region when switching to a provider with
+		// known regional endpoints. The api_key_env reset is unconditional —
+		// it overwrites a slot the user is already carrying, on purpose.
+		// Cycling base_url adopts the selected region's Env (e.g. OpenCode Go
+		// -> OPENCODE_GO_API_KEY), and without this that slot would follow the
+		// user into the next provider: a zhipu preset resolving through
+		// OPENCODE_GO_API_KEY reports "no key" for someone who has
+		// ZHIPU_API_KEY set, or sends the wrong key to bigmodel.cn.
+		//
+		// Every first region in the table declares an Env, so this always
+		// fires for a region-table provider; the guard only protects a future
+		// entry that omits one. Providers absent from the table have no region
+		// default to reset from and keep their current api_key_env.
 		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
 			m.llmMap()["base_url"] = regions[0].URL
 			if regions[0].Env != "" {
@@ -987,7 +1002,19 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		provider := asString(m.llmMap()["provider"])
 		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
 			idx := selectedRegionIndex(regions, m.fieldString(f))
-			next := regions[(idx+dir+len(regions))%len(regions)]
+			var next preset.RegionURL
+			if idx < 0 {
+				// Off-list value on a provider with no Custom row: nothing is
+				// selected, so enter the list at its edge the way cycleString
+				// does — first option going right, last going left.
+				if dir < 0 {
+					next = regions[len(regions)-1]
+				} else {
+					next = regions[0]
+				}
+			} else {
+				next = regions[(idx+dir+len(regions))%len(regions)]
+			}
 			if next.URL == "" {
 				// Moving onto the Custom free-text sentinel: clear the value
 				// so Enter opens a blank inline edit. This branch is only
@@ -1582,6 +1609,9 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 // selected whenever the current base_url is empty or doesn't match any
 // known non-empty region URL, and the typed endpoint is appended after
 // the strip so it stays visible (the strip path hides the raw value).
+// A provider with no Custom row and an off-list base_url has nothing to
+// select: every dot renders hollow and the raw value is appended, so the
+// strip never claims an endpoint the preset does not point at.
 func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	provider := asString(m.llmMap()["provider"])
 	regions, ok := preset.ProviderRegionURLs[provider]
@@ -1604,13 +1634,16 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 		}
 	}
 	strip := strings.Join(parts, "  ")
-	// Custom (or an unknown typed URL) shows the actual endpoint after the
-	// strip so the user always sees exactly what will be saved.
-	if regions[selected].URL == "" && current != "" {
+	// Custom, an unknown typed URL, or an off-list value on a provider with no
+	// Custom row (selected < 0) shows the actual endpoint after the strip so
+	// the user always sees exactly what will be saved.
+	if (selected < 0 || regions[selected].URL == "") && current != "" {
 		strip += "  " + subtle.Render(current)
 	}
 	return strip
 }
+
+// wireAPIRadioStrip renders all three wire choices so Custom OpenAI users can see the selector rather than only the current raw manifest value.
 func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	current := m.fieldString(feWireAPI)
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -1981,11 +2014,16 @@ func maskAPIKey(key string) string {
 
 // selectedRegionIndex resolves which ProviderRegionURLs option is selected
 // for the given current base_url. A value matching a known non-empty URL
-// selects that option; the empty-URL Custom sentinel and any free-typed
-// value select the Custom row, falling back to the first option when the
-// provider has no Custom row. All consumers (openInline, baseURLRadioStrip,
-// cycleFocused) share this rule so the strip's highlighted dot, the Enter
-// no-op, and the cycle always agree.
+// selects that option; the empty-URL Custom sentinel absorbs an empty or
+// free-typed value.
+//
+// Returns -1 — "no region selected" — when the value matches nothing and the
+// provider has no Custom row (zhipu, minimax). Callers MUST handle that case
+// rather than index with it: falling back to index 0 would render a solid
+// dot on CN for a preset that points somewhere else entirely, stating
+// positively something that is false. All consumers (openInline,
+// baseURLRadioStrip, cycleFocused) share this rule so the strip's
+// highlighted dot, the Enter no-op, and the cycle always agree.
 func selectedRegionIndex(regions []preset.RegionURL, current string) int {
 	for i, r := range regions {
 		if r.URL != "" && r.URL == current {
@@ -1997,7 +2035,7 @@ func selectedRegionIndex(regions []preset.RegionURL, current string) int {
 			return i
 		}
 	}
-	return 0
+	return -1
 }
 
 // cycleString rotates `cur` through `opts` by `dir` steps. Unknown

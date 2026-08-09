@@ -377,6 +377,20 @@ func (p Preset) Validate() []error {
 		if s, _ := llm["model"].(string); s == "" {
 			errs = append(errs, fmt.Errorf("manifest.llm.model must be non-empty"))
 		}
+		// A provider with a region table reaches its API through an explicit
+		// endpoint — there is no implicit default in the kernel adapter. The
+		// editor's Custom sentinel deliberately clears base_url so Enter opens
+		// a blank inline edit, and nothing forces the user to type one (Esc
+		// leaves it empty), so without this check two arrow presses and a save
+		// persist a preset with no endpoint at all.
+		if provider, _ := llm["provider"].(string); provider != "" {
+			if _, hasRegions := ProviderRegionURLs[provider]; hasRegions {
+				if s, _ := llm["base_url"].(string); s == "" {
+					errs = append(errs, fmt.Errorf(
+						"manifest.llm.base_url must be non-empty for provider %q", provider))
+				}
+			}
+		}
 		if v, ok := llm["context_limit"]; ok && v != nil {
 			// JSON unmarshals numbers as float64; accept int-valued floats.
 			switch n := v.(type) {
@@ -526,6 +540,13 @@ type RegionURL struct {
 // "Custom" sentinel: selecting it clears base_url so the editor opens an
 // inline edit for any user-typed endpoint. At most one entry per provider
 // may carry an empty URL.
+//
+// Every entry with a URL declares the credential env-var slot that endpoint
+// authenticates through. That is load-bearing, not decoration: the editor
+// resets api_key_env from the new provider's first region on a provider
+// switch, so an entry missing Env would leak the previous provider's slot
+// (e.g. a zhipu preset left resolving through OPENCODE_GO_API_KEY). The
+// Custom sentinel declares none — the user's own endpoint decides.
 var ProviderRegionURLs = map[string][]RegionURL{
 	"deepseek": {
 		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
@@ -536,12 +557,12 @@ var ProviderRegionURLs = map[string][]RegionURL{
 		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
 	"zhipu": {
-		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
-		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
+		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4", Env: "ZHIPU_API_KEY"},
+		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4", Env: "ZHIPU_API_KEY"},
 	},
 	"minimax": {
-		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
-		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+		{Label: "CN", URL: "https://api.minimaxi.com/anthropic", Env: "MINIMAX_API_KEY"},
+		{Label: "INTL", URL: "https://api.minimax.io/anthropic", Env: "MINIMAX_API_KEY"},
 	},
 }
 
@@ -1132,7 +1153,7 @@ func deepseekPreset() Preset {
 	return openAICompatNoVisionPreset(
 		"deepseek",
 		"DeepSeek V4 Pro — OpenAI-compatible, 1M context window, tool calls",
-		"deepseek-v4-pro", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
+		"deepseek-v4-pro", "DEEPSEEK_API_KEY", ProviderRegionURLs["deepseek"][0].URL, "")
 }
 
 func geminiPreset() Preset {

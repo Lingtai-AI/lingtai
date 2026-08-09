@@ -17,7 +17,11 @@ import (
 // pass through preset.GenerateInitJSONWithOpts without a real LLM API key,
 // and a non-empty Description.Summary so it also passes Preset.Validate()
 // (required by validateDraftForCommit's commit-boundary check — see
-// project_create.go).
+// project_create.go). base_url is set because minimax has a region table,
+// and Validate requires a non-empty endpoint for those providers. It uses the
+// INTL endpoint specifically: that is what an absent base_url already resolved
+// to through preset.regionSuffix, so the api_key_env stamping these tests
+// assert on (MINIMAX_INTL_1_API_KEY) is unchanged.
 func minimalDraftPreset() preset.Preset {
 	return preset.Preset{
 		Name:        "test-preset",
@@ -26,6 +30,7 @@ func minimalDraftPreset() preset.Preset {
 			"llm": map[string]interface{}{
 				"provider": "minimax",
 				"model":    "test-model",
+				"base_url": preset.ProviderRegionURLs["minimax"][1].URL, // [1] = INTL
 			},
 		},
 	}

@@ -918,3 +918,53 @@ func TestResolvePresetWithAuthPreservesKeyedAndLocalBehavior(t *testing.T) {
 		t.Fatalf("keyless custom/local resolution = %#v, want unchanged no-key behavior", got)
 	}
 }
+
+// TestValidateRequiresBaseURLForRegionProviders is the F2 regression: the
+// editor's Custom sentinel clears base_url, and nothing forces the user to
+// type one, so Validate must refuse a region-table preset with no endpoint.
+func TestValidateRequiresBaseURLForRegionProviders(t *testing.T) {
+	presetWith := func(provider, baseURL string) Preset {
+		llm := map[string]interface{}{"provider": provider, "model": "some-model"}
+		if baseURL != "" {
+			llm["base_url"] = baseURL
+		}
+		return Preset{
+			Name:        provider,
+			Description: PresetDescription{Summary: "test preset"},
+			Manifest:    map[string]interface{}{"llm": llm},
+		}
+	}
+
+	for provider := range ProviderRegionURLs {
+		if errs := presetWith(provider, "").Validate(); len(errs) == 0 {
+			t.Errorf("%s with empty base_url validated clean, want a base_url violation", provider)
+		}
+		if errs := presetWith(provider, ProviderRegionURLs[provider][0].URL).Validate(); len(errs) != 0 {
+			t.Errorf("%s with its default endpoint = %v, want no violations", provider, errs)
+		}
+		if errs := presetWith(provider, "https://my-proxy.example/v1").Validate(); len(errs) != 0 {
+			t.Errorf("%s with an off-list endpoint = %v, want no violations", provider, errs)
+		}
+	}
+
+	// Providers with no region table have no endpoint requirement — the kernel
+	// adapter supplies its own (gemini, claude) or the user does (custom).
+	if errs := presetWith("gemini", "").Validate(); len(errs) != 0 {
+		t.Errorf("gemini with no base_url = %v, want no violations", errs)
+	}
+
+	// Every shipped builtin that has a region table must carry an endpoint,
+	// so the templates themselves cannot trip the new rule. (Builtins are not
+	// wholesale Validate-clean: `custom` deliberately ships an empty model for
+	// the user to fill in.)
+	for _, p := range BuiltinPresets() {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		provider, _ := llm["provider"].(string)
+		if _, ok := ProviderRegionURLs[provider]; !ok {
+			continue
+		}
+		if s, _ := llm["base_url"].(string); s == "" {
+			t.Errorf("builtin %s has provider %q with a region table but no base_url", p.Name, provider)
+		}
+	}
+}

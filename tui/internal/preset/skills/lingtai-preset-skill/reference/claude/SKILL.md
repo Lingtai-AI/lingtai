@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `claude`
 
-`claudePreset()` (`tui/internal/preset/preset.go:1212-1241`) uses canonical
+`claudePreset()` (`tui/internal/preset/preset.go:1306-1335`) uses canonical
 provider `claude-code`, displayed in the TUI as print-mode backend `claude-p`.
 It reuses the current Claude Code OAuth login and shows the account email
 reported by `claude auth status --json`; the TUI never reads or stores Claude

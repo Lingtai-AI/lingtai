@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `minimax`
 
-`minimaxPreset()` (`tui/internal/preset/preset.go:979-1004`) ships provider
+`minimaxPreset()` (`tui/internal/preset/preset.go:1075-1100`) ships provider
 `minimax`, exact model `MiniMax-M3`, and `MINIMAX_API_KEY` at the
 Anthropic-compatible regional endpoint `https://api.minimaxi.com/anthropic`
 (CN default) or `https://api.minimax.io/anthropic` (INTL). Its manifest

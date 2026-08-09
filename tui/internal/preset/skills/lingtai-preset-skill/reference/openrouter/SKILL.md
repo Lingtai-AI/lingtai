@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `openrouter`
 
-`openrouterPreset()` (`tui/internal/preset/preset.go:1127-1146`) ships
+`openrouterPreset()` (`tui/internal/preset/preset.go:1223-1242`) ships
 gateway model `z-ai/glm-5.1`, provider `openrouter`, a provider-resolved
 base URL, and `OPENROUTER_API_KEY`. The exact shipped slug is
 text-in/text-out, and the manifest has no `vision` capability.

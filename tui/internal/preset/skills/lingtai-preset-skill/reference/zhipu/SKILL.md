@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `zhipu`
 
-`zhipuPreset()` (`tui/internal/preset/preset.go:1006-1023`) ships provider
+`zhipuPreset()` (`tui/internal/preset/preset.go:1102-1119`) ships provider
 `zhipu` with exact model `GLM-5.2`, `ZHIPU_API_KEY`, and the
 OpenAI-compatible regional endpoints
 `https://open.bigmodel.cn/api/coding/paas/v4` (CN) and
