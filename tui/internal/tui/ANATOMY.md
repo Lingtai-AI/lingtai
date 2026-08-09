@@ -8,6 +8,7 @@ related_files:
   - tui/main.go
   - tui/internal/tui/app.go
   - tui/internal/tui/app_test.go
+  - tui/internal/tui/launch_heartbeat_test.go
   - tui/internal/tui/layout.go
   - tui/internal/tui/layout_test.go
   - tui/internal/tui/auto_refresh.go

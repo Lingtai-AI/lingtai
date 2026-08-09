@@ -20,6 +20,7 @@ related_files:
   - tui/internal/preset/state.go
   - tui/internal/preset/state_test.go
   - tui/internal/preset/preset_allowed_revoke_test.go
+  - tui/internal/preset/channel_examples_test.go
   - tui/internal/preset/preset_propagate_test.go
   - tui/internal/preset/preset_agent_json_merge_test.go
   - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md

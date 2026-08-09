@@ -140,7 +140,7 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		if err != nil {
 			continue
 		}
-		os.WriteFile(initPath, out, 0o644)
+		fs.WriteFileAtomic(initPath, out, 0o644)
 	}
 	return nil
 }

@@ -10,8 +10,17 @@
 //
 // For Gmail, use an App Password (not your regular password):
 //   https://myaccount.google.com/apppasswords
+//
+// This example ships LOCKED DOWN: only the senders listed in
+// "allowed_senders" below are processed. Inbound mail can carry
+// instructions to an agent with real side effects (prompt-injection
+// surface), so keep this allowlist populated.
 // =============================================================
 {
+  // Only accept emails from these senders.
+  // Replace with the addresses that may reach this agent.
+  "allowed_senders": ["boss@example.com", "team@example.com"],
+
   // Email address to poll.
   "email_address": "agent@example.com",
 
@@ -26,10 +35,10 @@
   "smtp_host": "smtp.gmail.com",
   "smtp_port": 587
 
-  // Optional: only accept emails from these senders.
-  // Omit for open access (all incoming mail is processed).
-  // "allowed_senders": ["boss@example.com", "team@example.com"]
-
   // Optional: seconds between inbox checks (default 60).
   // "poll_interval": 60
+
+  // UNSAFE variant — open access: all incoming mail is processed.
+  // Only for throwaway agents without bash/mail/file capabilities.
+  // To use: delete "allowed_senders" above.
 }
