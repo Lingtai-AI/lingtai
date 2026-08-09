@@ -47,10 +47,13 @@ you want:
 
 - Native Kimi Code row: the subscription model `kimi-for-coding` (the
   template default).
-- OpenCode Go row: LOWERCASE K-series ids, currently `kimi-k3` and
-  `kimi-k2.7-code`. Only these two generations are current; older K2.x ids
-  may have been retired on the Go endpoint. Verify against the OpenCode Go
-  model list before relying on one.
+- OpenCode Go row: LOWERCASE K-series ids. This manual documents `kimi-k3`
+  and `kimi-k2.7-code` — the latest two generations under the TUI's
+  model-curation rule (`tui/CONTRACT.md`), which is why no older K2.x id is
+  written down here. That is a TUI documentation decision, not a statement
+  about what the endpoint serves: other Moonshot ids remain typeable on this
+  free-text row. Check the OpenCode Go model list for what is currently
+  served.
 
 ## Template-specific settings
 

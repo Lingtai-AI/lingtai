@@ -44,17 +44,27 @@ The TUI preset editor's `base_url` row offers two options
 
 Because the template default row declares its own `Env`, `grok` is the one
 provider where `grokPreset()`'s declared `api_key_env` (`OPENCODE_GO_API_KEY`)
-deliberately differs from `ProviderDefaultEnv["grok"]` (`GROK_API_KEY`). The
-latter is the provider-generic slot the editor adopts when the user *switches
-provider to* grok from another template — it is not the shipped template's
-slot, and it is not applied by base_url cycling. Keeping the two different is
-also what makes the editor treat the OpenCode Go slot as a shared
+deliberately differs from `ProviderDefaultEnv["grok"]` (`GROK_API_KEY`).
+`GROK_API_KEY` is the provider-generic fallback name — it is not the shipped
+template's slot, and it is not applied by base_url cycling. Keeping the two
+different is what makes the editor treat the OpenCode Go slot as a shared
 cross-provider account worth preserving across a save, rather than as this
 template's own slot to be replaced by a numbered one.
 
+**Switching an existing preset's provider *to* grok adopts
+`OPENCODE_GO_API_KEY`, not `GROK_API_KEY`.** A provider switch resets
+`base_url` to the new provider's first region row, and for grok that row *is*
+OpenCode Go, so the row's own declared `Env` wins over the provider-generic
+default: the credential slot always matches the endpoint you land on. (Every
+other provider's first row declares no `Env`, so they adopt their
+`ProviderDefaultEnv` name as before.) If you then cycle `base_url` to
+**Custom** and your endpoint takes an xAI key, set `api_key_env` yourself —
+the editor leaves the slot alone on the Custom row by design.
+
 ## Template-specific settings
 
-Model ids are LOWERCASE. The picker ships `grok-4.5` only — that is the id
+Grok ids are lowercase, and there is no uppercase form to avoid. The picker
+ships `grok-4.5` only — that is the id
 the OpenCode Go model list serves, and per the TUI's model-curation rule
 (`tui/CONTRACT.md`) only the latest two generations of a family may ship, so
 no older Grok generation is offered. Read the official

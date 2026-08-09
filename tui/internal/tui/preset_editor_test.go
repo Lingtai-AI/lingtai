@@ -105,11 +105,12 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if got := providerModels["minimax"]; !reflect.DeepEqual(got, wantMiniMaxModels) {
 		t.Fatalf("minimax provider models = %#v, want %#v", got, wantMiniMaxModels)
 	}
-	// MiMo ships the latest generation and its text-only variant; both are
-	// served by Xiaomi's endpoint AND by OpenCode Go, so the picker is valid
-	// on either base_url row. The older mimo-v2-pro / mimo-v2-omni ids are a
-	// previous generation and are not shipped.
-	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro"}
+	// MiMo ships the latest TWO generations: v2.5 (+ its text-only -pro
+	// variant) and v2 (-pro, -omni). All four are served by Xiaomi's endpoint
+	// AND by OpenCode Go, so the picker is valid on either base_url row. The
+	// curation rule caps at two generations and does not require trimming to
+	// one, so v2 stays until something newer than v2.5 displaces it.
+	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"}
 	if got := providerModels["mimo"]; !reflect.DeepEqual(got, wantMiMoModels) {
 		t.Fatalf("mimo provider models = %#v, want %#v", got, wantMiMoModels)
 	}
@@ -126,8 +127,13 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
 		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
 	}
-	if !modelHasVision["mimo-v2.5"] || modelHasVision["mimo-v2.5-pro"] {
-		t.Fatal("MiMo picker must keep native vision only for mimo-v2.5")
+	if !modelHasVision["mimo-v2.5"] {
+		t.Fatal("MiMo picker must keep native vision for mimo-v2.5")
+	}
+	for _, model := range []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"} {
+		if modelHasVision[model] {
+			t.Fatalf("MiMo %s has no verified image route; it must stay text-only (a name is not evidence)", model)
+		}
 	}
 	for _, model := range providerModels["zhipu"] {
 		if modelHasVision[model] {
@@ -1926,6 +1932,12 @@ func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
 
 	// Switch the provider until it lands on each region-table provider and
 	// assert the stale OpenCode slot is gone every time.
+	//
+	// Coverage here is bounded by cycleFocused's `opts` list, NOT by
+	// ProviderRegionURLs: kimi is a region-table provider but is not on the
+	// provider cycle (it is reached only by opening its own template), so it
+	// is deliberately never seen by this loop. See the feProvider comment in
+	// preset_editor.go.
 	m.cursor = editorFieldOrderIndex(t, feProvider)
 	for i := 0; i < 24; i++ {
 		m.cycleFocused(+1)
@@ -1934,8 +1946,17 @@ func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if got := asString(m.llmMap()["api_key_env"]); got != preset.ProviderDefaultEnv[provider] {
-			t.Fatalf("after switch to %s api_key_env = %q, want the provider default %q", provider, got, preset.ProviderDefaultEnv[provider])
+		// The slot must match the row the switch lands on: the landing row's
+		// own declared Env wins over ProviderDefaultEnv when it has one. Only
+		// grok differs today — its regions[0] is OpenCode Go, so a switch to
+		// grok must adopt OPENCODE_GO_API_KEY, not GROK_API_KEY, or the user
+		// would be pointed at the Go endpoint holding a slot it does not use.
+		want := preset.ProviderDefaultEnv[provider]
+		if len(regions) > 0 && regions[0].Env != "" {
+			want = regions[0].Env
+		}
+		if got := asString(m.llmMap()["api_key_env"]); got != want {
+			t.Fatalf("after switch to %s api_key_env = %q, want %q (the slot declared by the landing base_url row, else the provider default)", provider, got, want)
 		}
 		if got := asString(m.llmMap()["base_url"]); got != regions[0].URL {
 			t.Fatalf("after switch to %s base_url = %q, want %q", provider, got, regions[0].URL)

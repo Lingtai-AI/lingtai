@@ -43,18 +43,19 @@ it was selected, so the choice is reversible.
 
 ## Template-specific settings
 
-The model picker ships `mimo-v2.5` and its text-only sibling
-`mimo-v2.5-pro`, and nothing else: per the TUI's model-curation rule
-(`tui/CONTRACT.md`) only the latest two generations of a family are shipped,
-so the older `mimo-v2-pro` / `mimo-v2-omni` ids and the retired V2 Flash IDs
-are not selectable. Both shipped ids are served by Xiaomi's own endpoint
-*and* by OpenCode Go, so the picker is valid on either `base_url` row — MiMo
-ids are lowercase on both, and there is no uppercase form to avoid.
+The model picker ships the latest two generations, per the TUI's
+model-curation rule (`tui/CONTRACT.md`): `mimo-v2.5` with its text-only
+sibling `mimo-v2.5-pro`, and the previous generation `mimo-v2-pro` /
+`mimo-v2-omni`. The retired V2 Flash ids and anything older are not
+selectable. All four shipped ids are served by Xiaomi's own endpoint *and* by
+OpenCode Go, so the picker is valid on either `base_url` row — MiMo ids are
+lowercase on both, and there is no uppercase form to avoid.
 
 LingTai-side vision is wired to `mimo-v2.5` on Xiaomi's own endpoint only.
-Switching to `mimo-v2.5-pro` or to the OpenCode Go row does not re-verify
-that path, and `modelHasVision` records `mimo-v2.5-pro` as an explicit
-`false` rather than leaving it undeclared.
+Switching to any other picker id, or to the OpenCode Go row, does not
+re-verify that path. `modelHasVision` records `mimo-v2.5-pro`, `mimo-v2-pro`,
+and `mimo-v2-omni` as explicit `false` rather than leaving them undeclared —
+including `-omni`, whose name is not evidence of a wired image route.
 
 Read the official [MiMo developer introduction](https://platform.xiaomimimo.com/llms.txt)
 and [OpenAI-compatible API page](https://platform.xiaomimimo.com/docs/zh-CN/api/chat/openai-api)

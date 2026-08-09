@@ -88,8 +88,8 @@ After editing `providerModels["codex"]` / `modelHasVision`:
 ## Cross-references
 
 - `preset_editor.go:108` — `providerModels` map
-- `preset_editor.go:215` — `modelHasVision` map
-- `preset_editor.go:1623` — `mandatoryCapRow` (fixed, informational capabilities rendering)
+- `preset_editor.go:217` — `modelHasVision` map
+- `preset_editor.go:1647` — `mandatoryCapRow` (fixed, informational capabilities rendering)
 - `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
 - `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
 - `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion

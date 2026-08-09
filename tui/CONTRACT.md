@@ -121,10 +121,25 @@ only ever grows rots into one.
 - `providerModels` (`tui/internal/tui/preset_editor.go`) — the ←/→ picker
   on the editor's model row;
 - the default `model` of every built-in preset constructor
-  (`tui/internal/preset/preset.go`), which must itself be one of the shipped
-  ids;
+  (`tui/internal/preset/preset.go`), which for a picker-bearing provider must
+  itself be one of that provider's shipped ids;
 - `modelHasVision` (`tui/internal/tui/preset_editor.go`), which carries one
-  entry per shipped id and no entry for a retired one.
+  entry per id in `providerModels` and no entry for a retired one. The
+  bijection is what `TestModelHasVisionDeclaresEveryShippedModel` enforces,
+  minus two deliberate exemptions it names: `nvidia` (a gateway catalog whose
+  per-vendor vision facts we do not verify) and the `claude*` CLI-alias
+  spellings. Adding an exemption is a change to that test, not a silent
+  omission;
+- **not** the providers whose model row is free text. `kimi`, `gemini`,
+  `openrouter`, and `custom` have no `providerModels` entry, so they have no
+  `modelHasVision` entries either and the bijection test never sees them.
+  Their default model is still expected to be a current generation
+  (`kimi-for-coding`, `gemini-3-flash-preview`, `z-ai/glm-5.1`, and `custom`'s
+  empty model), but the maps carry nothing for them and must not be given
+  entries to "complete" the table — for `kimi` in particular, adding a
+  `providerModels` entry flips its row from free text to picker-only and one
+  `→` silently overwrites a typed Moonshot id. That deletion is deliberate and
+  pinned by a negative assertion in `preset_editor_test.go`.
 
 Reading of the rule:
 
@@ -133,7 +148,7 @@ Reading of the rule:
 | family | one vendor's model line — `MiniMax-M*`, `GLM-*`, `mimo-v*`, `deepseek-v*`, `gpt-5.*`, `kimi-k*` |
 | generation | the version step within the family — `M3` vs `M2.7`; `GLM-5.2` vs `GLM-5.1`; `gpt-5.6` vs `gpt-5.5` |
 | **not** a generation | a variant inside one generation — `-highspeed`, `-pro`, `-flash`, `-mini`, `-Air`, the `gpt-5.6-sol/-terra/-luna` routes, or the same generation respelled for another endpoint (`GLM-5.2` / `glm-5.2`). All variants of a kept generation stay. |
-| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`), and gateway catalogs that list one current id per vendor (`nvidia`). The rule still applies per family inside such a list. |
+| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`), and gateway catalogs that list one current id per vendor (`nvidia`). The rule still applies per family inside such a list. Free-text model rows (`kimi`, `gemini`, `openrouter`, `custom`) are outside the `providerModels`/`modelHasVision` bindings entirely — see the fourth clause above. |
 
 **Standing obligation.** Adding a new generation is the same change that
 removes the third-newest one — from `providerModels`, from `modelHasVision`,

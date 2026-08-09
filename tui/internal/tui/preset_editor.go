@@ -135,11 +135,13 @@ var providerModels = map[string][]string{
 	// the free-text row it had before it gained a region table. The OpenCode Go
 	// ids to type are documented in reference/kimi/SKILL.md.
 	//
-	// MiMo: mimo-v2.5 and its text-only pro sibling — the latest generation
-	// plus its variant. Both are served by Xiaomi's endpoint AND by OpenCode
-	// Go; the older mimo-v2-pro / mimo-v2-omni ids are a previous generation
-	// and are not shipped.
-	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro"},
+	// MiMo: the latest TWO generations, per the curation rule — v2.5 (with
+	// its text-only -pro variant) and v2 (-pro, -omni). All four are served by
+	// Xiaomi's endpoint AND by OpenCode Go, so the picker is valid on either
+	// base_url row. The rule caps at two generations; it is not a floor, so v2
+	// stays until a generation newer than v2.5 ships and displaces it. The
+	// retired V2 Flash ids and anything older are not shipped.
+	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"},
 	"deepseek": {"deepseek-v4-pro", "deepseek-v4-flash"},
 	// Grok (xAI) via OpenCode Go — the Go /models list serves grok-4.5 and
 	// nothing older that we have verified.
@@ -227,12 +229,17 @@ var modelHasVision = map[string]bool{
 	"GLM-5.1": false,
 	"glm-5.2": false,
 	"glm-5.1": false,
-	// MiMo: the default accepts images; the current pro sibling is text-only.
-	// Both are served on Xiaomi's endpoint and on OpenCode Go, and the Go
-	// route re-verifies neither — the LingTai-side vision wiring in
-	// mimoPreset() is scoped to mimo-v2.5 on Xiaomi's own endpoint.
+	// MiMo: only the default has a verified image route. The -pro siblings are
+	// text-only, and mimo-v2-omni is a declared false rather than an
+	// omission — "omni" in a model name is not evidence of a wired vision
+	// route, and the previous generation's image mapping was never pinned
+	// here. All four are served on Xiaomi's endpoint and on OpenCode Go, and
+	// the Go route re-verifies none of them — the LingTai-side vision wiring
+	// in mimoPreset() is scoped to mimo-v2.5 on Xiaomi's own endpoint.
 	"mimo-v2.5":     true,
 	"mimo-v2.5-pro": false,
+	"mimo-v2-pro":   false,
+	"mimo-v2-omni":  false,
 	// DeepSeek: text-only across the board.
 	"deepseek-v4-pro":   false,
 	"deepseek-v4-flash": false,
@@ -996,8 +1003,12 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
 	case feProvider:
-		// Order matches the builtin presets (preset.go BuiltinPresets).
-		// Keep this in sync when adding a new provider/builtin.
+		// The subset of builtins reachable from the provider cycle, in
+		// BuiltinPresets order; kimi/gemini/codex-pool/claude are
+		// intentionally reached only by opening their own template, so this
+		// list is deliberately shorter than BuiltinPresets() rather than out
+		// of sync with it. Anything added here must also be handled by the
+		// model/base_url/api_key_env resets below.
 		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "grok", "nvidia", "openrouter", "codex", "custom"}
 		oldProvider := m.fieldString(f)
 		newProvider := cycleString(opts, oldProvider, dir)
@@ -1035,7 +1046,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// reports "no key" for someone who has ZHIPU_API_KEY set, or sends
 		// the wrong key to bigmodel.cn.
 		//
-		// The api_key_env reset is unconditional and comes from the
+		// The api_key_env reset is unconditional and normally comes from the
 		// provider map, NOT from regions[0].Env: zhipu/minimax region rows
 		// declare no Env precisely so a CN<->INTL base_url cycle preserves
 		// the region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY)
@@ -1044,11 +1055,24 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// keep their current api_key_env. The memoized pre-adoption slot goes
 		// with it: it was taken from the previous provider's region cycle and
 		// must not be restorable onto this one.
+		//
+		// The one exception: when the landing row (regions[0], which base_url
+		// adopts just above) declares its own Env, that declaration wins. Only
+		// grok is in that shape today — its default row IS OpenCode Go, so
+		// taking ProviderDefaultEnv["grok"] = GROK_API_KEY here would leave
+		// the preset pointed at https://opencode.ai/zen/go/v1 holding a
+		// credential slot that endpoint does not use, and the user would have
+		// to paste their OpenCode Go key into a second slot. The slot must
+		// match the row you land on.
 		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
 			m.llmMap()["base_url"] = regions[0].URL
 		}
 		if env, ok := preset.ProviderDefaultEnv[newProvider]; ok {
-			m.llmMap()["api_key_env"] = env
+			want := env
+			if regions := preset.ProviderRegionURLs[newProvider]; len(regions) > 0 && regions[0].Env != "" {
+				want = regions[0].Env
+			}
+			m.llmMap()["api_key_env"] = want
 		}
 		m.regionEnvBeforeAdopt = ""
 	case feModel:
