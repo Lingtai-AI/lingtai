@@ -383,9 +383,24 @@ func (p Preset) Validate() []error {
 		// a blank inline edit, and nothing forces the user to type one (Esc
 		// leaves it empty), so without this check two arrow presses and a save
 		// persist a preset with no endpoint at all.
+		//
+		// Only an explicitly EMPTY value is a violation. A preset that simply
+		// omits the key (hand-edited or recipe-imported saved presets, or the
+		// pre-region-table wizard shape) is tolerated when regionSuffix can
+		// assign a default region (zhipu → CN, minimax → INTL): AutoEnvVarName
+		// stamps a slot for it, so such a preset remains well-defined. A
+		// region-table provider without a region fallback (deepseek) still
+		// needs an explicit endpoint, so an absent key stays a violation there.
+		// The editor's Custom sentinel is the only path that writes an
+		// explicit "", and that is always rejected.
 		if provider, _ := llm["provider"].(string); provider != "" {
 			if _, hasRegions := ProviderRegionURLs[provider]; hasRegions {
-				if s, _ := llm["base_url"].(string); s == "" {
+				if v, present := llm["base_url"]; present {
+					if s, _ := v.(string); s == "" {
+						errs = append(errs, fmt.Errorf(
+							"manifest.llm.base_url must be non-empty for provider %q", provider))
+					}
+				} else if regionSuffix(provider, "") == "" {
 					errs = append(errs, fmt.Errorf(
 						"manifest.llm.base_url must be non-empty for provider %q", provider))
 				}
@@ -527,6 +542,14 @@ func RefreshTemplates() error {
 // Env, when non-empty, is the api_key_env slot the option implies (e.g.
 // "DEEPSEEK_API_KEY") and is applied to the preset when the option is
 // selected. Empty Env means "don't touch api_key_env".
+//
+// Env is deliberately present ONLY where a region genuinely implies a
+// distinct credential (deepseek's DeepSeek API vs OpenCode Go are separate
+// accounts). zhipu/minimax CN and INTL are also separate accounts, but their
+// slots are region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
+// MINIMAX_CN_1_API_KEY via AutoEnvVarName); declaring a flat Env on those
+// rows would make a CN<->INTL base_url cycle overwrite the user's
+// region-specific slot with a region-agnostic one.
 type RegionURL struct {
 	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
@@ -540,13 +563,6 @@ type RegionURL struct {
 // "Custom" sentinel: selecting it clears base_url so the editor opens an
 // inline edit for any user-typed endpoint. At most one entry per provider
 // may carry an empty URL.
-//
-// Every entry with a URL declares the credential env-var slot that endpoint
-// authenticates through. That is load-bearing, not decoration: the editor
-// resets api_key_env from the new provider's first region on a provider
-// switch, so an entry missing Env would leak the previous provider's slot
-// (e.g. a zhipu preset left resolving through OPENCODE_GO_API_KEY). The
-// Custom sentinel declares none — the user's own endpoint decides.
 var ProviderRegionURLs = map[string][]RegionURL{
 	"deepseek": {
 		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
@@ -557,13 +573,36 @@ var ProviderRegionURLs = map[string][]RegionURL{
 		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
 	"zhipu": {
-		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4", Env: "ZHIPU_API_KEY"},
-		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4", Env: "ZHIPU_API_KEY"},
+		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
+		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
 	},
 	"minimax": {
-		{Label: "CN", URL: "https://api.minimaxi.com/anthropic", Env: "MINIMAX_API_KEY"},
-		{Label: "INTL", URL: "https://api.minimax.io/anthropic", Env: "MINIMAX_API_KEY"},
+		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
+		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
 	},
+}
+
+// ProviderDefaultEnv maps each provider to the api_key_env slot a freshly
+// switched-to provider should adopt. Consulted on provider switch only; it
+// must not be read from a region cycle, so zhipu/minimax region rows declare
+// no Env (see RegionURL) and their CN<->INTL cycling preserves whatever
+// region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY etc.).
+//
+// Values match each builtin preset's declared api_key_env ("" = OAuth/CLI
+// providers with no key slot, or a generic placeholder the user replaces).
+var ProviderDefaultEnv = map[string]string{
+	"minimax":    "MINIMAX_API_KEY",
+	"zhipu":      "ZHIPU_API_KEY",
+	"mimo":       "XIAOMI_API_KEY",
+	"deepseek":   "DEEPSEEK_API_KEY",
+	"gemini":     "GEMINI_API_KEY",
+	"kimi":       "KIMI_CODE_API_KEY",
+	"nvidia":     "NVIDIA_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
+	"claude":     "",            // OAuth / CLI login
+	"codex":      "",            // OAuth
+	"codex-pool": "",            // OAuth
+	"custom":     "LLM_API_KEY", // generic placeholder, user replaces
 }
 
 // BuiltinPresets returns the built-in presets.

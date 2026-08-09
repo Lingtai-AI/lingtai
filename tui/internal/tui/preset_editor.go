@@ -969,25 +969,28 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 				m.llmMap()["model"] = models[0]
 			}
 		}
-		// Reset base_url and the region-declared credential env-var slot to
-		// the new provider's default region when switching to a provider with
-		// known regional endpoints. The api_key_env reset is unconditional —
-		// it overwrites a slot the user is already carrying, on purpose.
-		// Cycling base_url adopts the selected region's Env (e.g. OpenCode Go
-		// -> OPENCODE_GO_API_KEY), and without this that slot would follow the
-		// user into the next provider: a zhipu preset resolving through
-		// OPENCODE_GO_API_KEY reports "no key" for someone who has
-		// ZHIPU_API_KEY set, or sends the wrong key to bigmodel.cn.
+		// Reset base_url and the credential env-var slot to the new
+		// provider's defaults when switching to a provider with known
+		// regional endpoints. base_url adopts the first region (the
+		// default); api_key_env is reset from ProviderDefaultEnv so a slot
+		// adopted from a previous base_url cycle (e.g. OpenCode Go ->
+		// OPENCODE_GO_API_KEY) cannot follow the user into the next
+		// provider: a zhipu preset resolving through OPENCODE_GO_API_KEY
+		// reports "no key" for someone who has ZHIPU_API_KEY set, or sends
+		// the wrong key to bigmodel.cn.
 		//
-		// Every first region in the table declares an Env, so this always
-		// fires for a region-table provider; the guard only protects a future
-		// entry that omits one. Providers absent from the table have no region
-		// default to reset from and keep their current api_key_env.
+		// The api_key_env reset is unconditional and comes from the
+		// provider map, NOT from regions[0].Env: zhipu/minimax region rows
+		// declare no Env precisely so a CN<->INTL base_url cycle preserves
+		// the region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY)
+		// instead of overwriting it with a region-agnostic one. Providers
+		// absent from ProviderDefaultEnv (none today; map is exhaustive)
+		// keep their current api_key_env.
 		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
 			m.llmMap()["base_url"] = regions[0].URL
-			if regions[0].Env != "" {
-				m.llmMap()["api_key_env"] = regions[0].Env
-			}
+		}
+		if env, ok := preset.ProviderDefaultEnv[newProvider]; ok {
+			m.llmMap()["api_key_env"] = env
 		}
 	case feModel:
 		// If the current provider has a known model lineup, cycle through

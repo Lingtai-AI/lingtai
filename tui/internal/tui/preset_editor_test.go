@@ -1870,11 +1870,52 @@ func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if got := asString(m.llmMap()["api_key_env"]); got != regions[0].Env {
-			t.Fatalf("after switch to %s api_key_env = %q, want the region default %q", provider, got, regions[0].Env)
+		if got := asString(m.llmMap()["api_key_env"]); got != preset.ProviderDefaultEnv[provider] {
+			t.Fatalf("after switch to %s api_key_env = %q, want the provider default %q", provider, got, preset.ProviderDefaultEnv[provider])
 		}
 		if got := asString(m.llmMap()["base_url"]); got != regions[0].URL {
 			t.Fatalf("after switch to %s base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+	}
+}
+
+// TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv pins the F3a
+// contract: cycling zhipu/minimax between CN and INTL must NOT rewrite
+// api_key_env. The host stamps region-suffixed slots (ZHIPU_INTL_1_API_KEY,
+// MINIMAX_CN_1_API_KEY) for saved presets, and those are separate accounts;
+// the base_url cycle only adopts an Env when the selected option declares one
+// (deepseek's DeepSeek API / OpenCode Go), never for a plain region toggle.
+func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		if len(regions) < 2 {
+			t.Fatalf("%s needs at least two regions for a cycle test", provider)
+		}
+		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
+		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{"provider": provider, "model": "m",
+				"base_url":    regions[1].URL, // INTL
+				"api_key_env": slot}}}
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		llm := m.llmMap()
+		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+		// INTL -> CN: slot must survive the cycle untouched.
+		m.cycleFocused(+1)
+		if got := asString(llm["base_url"]); got != regions[0].URL {
+			t.Fatalf("[%s] INTL->CN base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != slot {
+			t.Fatalf("[%s] INTL->CN api_key_env = %q, want preserved %q", provider, got, slot)
+		}
+
+		// CN -> INTL: still preserved.
+		m.cycleFocused(-1)
+		if got := asString(llm["base_url"]); got != regions[1].URL {
+			t.Fatalf("[%s] CN->INTL base_url = %q, want %q", provider, got, regions[1].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != slot {
+			t.Fatalf("[%s] CN->INTL api_key_env = %q, want preserved %q", provider, got, slot)
 		}
 	}
 }

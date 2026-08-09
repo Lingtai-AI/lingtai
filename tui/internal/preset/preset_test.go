@@ -934,10 +934,27 @@ func TestValidateRequiresBaseURLForRegionProviders(t *testing.T) {
 			Manifest:    map[string]interface{}{"llm": llm},
 		}
 	}
+	// explicitlyEmpty pins the base_url to "" (the shape the editor's Custom
+	// sentinel writes) — always a violation for a region-table provider.
+	explicitlyEmpty := func(provider string) Preset {
+		p := presetWith(provider, "")
+		p.Manifest["llm"].(map[string]interface{})["base_url"] = ""
+		return p
+	}
 
 	for provider := range ProviderRegionURLs {
-		if errs := presetWith(provider, "").Validate(); len(errs) == 0 {
-			t.Errorf("%s with empty base_url validated clean, want a base_url violation", provider)
+		// Explicitly empty is rejected for every region-table provider: the
+		// Custom sentinel path can produce this and the preset would have no
+		// endpoint at all.
+		if errs := explicitlyEmpty(provider).Validate(); len(errs) == 0 {
+			t.Errorf("%s with explicitly empty base_url validated clean, want a base_url violation", provider)
+		}
+		// Absent base_url is tolerated only where regionSuffix assigns a
+		// default region (zhipu → CN, minimax → INTL); deepseek has no region
+		// fallback, so an absent endpoint is still a violation there.
+		wantAbsentViolation := regionSuffix(provider, "") == ""
+		if errs := presetWith(provider, "").Validate(); (len(errs) == 0) == wantAbsentViolation {
+			t.Errorf("%s with absent base_url errs=%v, wantAbsentViolation=%v", provider, errs, wantAbsentViolation)
 		}
 		if errs := presetWith(provider, ProviderRegionURLs[provider][0].URL).Validate(); len(errs) != 0 {
 			t.Errorf("%s with its default endpoint = %v, want no violations", provider, errs)
