@@ -1749,18 +1749,39 @@ func reviveDir(lingtaiCmd, dir string) error {
 	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
+// Launch heartbeat watchdog tuning. Overridable in tests to keep the poll fast.
+var (
+	launchHeartbeatPoll      = 200 * time.Millisecond
+	launchHeartbeatCap       = 60 * time.Second
+	launchHeartbeatIsAlive   = fs.IsAlive
+	launchHeartbeatIsRunning = process.IsAgentRunning
+)
+
+// waitForLaunchHeartbeat polls for a fresh heartbeat from a freshly launched
+// agent. If the launched process exits before the first heartbeat, that is a
+// hard failure. Slow startup (e.g. several stdio MCP addons initialized
+// serially) can legitimately exceed timeout before the first heartbeat: as
+// long as a process is still alive in the agent dir we keep waiting past the
+// initial deadline, up to launchHeartbeatCap, so a recovering launch is not
+// misreported as failed and the user is not pushed into a duplicate relaunch
+// (see #671).
 func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if fs.IsAlive(dir, 3.0) {
+	started := time.Now()
+	deadline := started.Add(timeout)
+	for {
+		if launchHeartbeatIsAlive(dir, 3.0) {
 			return nil
 		}
-		if cmd != nil && !process.IsAgentRunning(dir) {
+		if cmd != nil && !launchHeartbeatIsRunning(dir) {
 			return fmt.Errorf("agent launch exited before writing a fresh heartbeat; see %s", filepath.Join(dir, "logs", "agent.log"))
 		}
-		time.Sleep(200 * time.Millisecond)
+		if now := time.Now(); now.After(deadline) && now.Sub(started) >= launchHeartbeatCap {
+			// The heartbeat was re-checked at the top of this iteration, so
+			// this is a true absence-of-heartbeat verdict after the cap.
+			return fmt.Errorf("agent launch did not write a fresh heartbeat within %s; see %s", launchHeartbeatCap, filepath.Join(dir, "logs", "agent.log"))
+		}
+		time.Sleep(launchHeartbeatPoll)
 	}
-	return fmt.Errorf("agent launch did not write a fresh heartbeat within %s; see %s", timeout, filepath.Join(dir, "logs", "agent.log"))
 }
 
 // firstLine returns the first line of err.Error(), trimmed of trailing
