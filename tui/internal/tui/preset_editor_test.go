@@ -2063,6 +2063,56 @@ func TestPresetEditorRegionCycleRestoresFromOffListBaseURL(t *testing.T) {
 	}
 }
 
+// F1-r6 mirror: an off-list base_url paired with the adopted slot, then
+// cycle -1 (off-list -> OpenCode Go) and +1 (OpenCode Go -> CN wrap). The
+// memo write must NOT capture OPENCODE_GO_API_KEY itself on the way onto
+// the Env row (cur is already region-declared, so the write is skipped), and
+// the +1 restore must still hand back the original slot or provider default.
+func TestPresetEditorRegionCycleRestoresFromOffListBaseURLMirror(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		for _, tc := range []struct {
+			label string
+			memo  string
+			want  string
+		}{
+			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
+			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
+		} {
+			offList := "https://proxy.internal.example/v1"
+			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+				"llm": map[string]interface{}{"provider": provider, "model": "m",
+					"base_url":    offList,
+					"api_key_env": "OPENCODE_GO_API_KEY"}}}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m.regionEnvBeforeAdopt = tc.memo
+			llm := m.llmMap()
+			m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+			m.cycleFocused(-1) // off-list -> OpenCode Go (Env row)
+			if got := asString(llm["base_url"]); got != regions[2].URL {
+				t.Fatalf("[%s/%s] base_url after -1 = %q, want OpenCode Go %q", provider, tc.label, got, regions[2].URL)
+			}
+			if m.regionEnvBeforeAdopt != tc.memo {
+				t.Fatalf("[%s/%s] memo = %q after -1, want %q -- the adopted slot must not memoize itself",
+					provider, tc.label, m.regionEnvBeforeAdopt, tc.memo)
+			}
+
+			m.cycleFocused(+1) // OpenCode Go -> CN (wrap)
+			if got := asString(llm["base_url"]); got != regions[0].URL {
+				t.Fatalf("[%s/%s] base_url after +1 = %q, want CN %q", provider, tc.label, got, regions[0].URL)
+			}
+			if got := asString(llm["api_key_env"]); got != tc.want {
+				t.Fatalf("[%s/%s] api_key_env after +1 = %q, want %q -- the OpenCode slot must not survive onto CN",
+					provider, tc.label, got, tc.want)
+			}
+			if m.regionEnvBeforeAdopt != "" {
+				t.Fatalf("[%s/%s] memo = %q after +1, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
+			}
+		}
+	}
+}
+
 // TestPresetEditorProviderSwitchClearsAdoptedSlotMemo pins the other half of the
 // same rule: the memo records a slot taken from THIS provider's region cycle, so
 // switching providers must drop it along with base_url and api_key_env. Left

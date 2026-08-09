@@ -1069,8 +1069,9 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			// the way onto CN rather than ride the adopted slot along.
 			switch {
 			case next.Env != "":
-				if prev.Env == "" {
-					m.regionEnvBeforeAdopt = asString(m.llmMap()["api_key_env"])
+				cur := asString(m.llmMap()["api_key_env"])
+				if prev.Env == "" && !regionDeclaredEnv(provider, cur) {
+					m.regionEnvBeforeAdopt = cur
 				}
 				m.llmMap()["api_key_env"] = next.Env
 			default: // next.Env == ""

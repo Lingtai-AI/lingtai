@@ -1,7 +1,7 @@
 ---
 name: preset-skill-deepseek
 description: Official-source-led manual for the TUI `deepseek` template.
-version: 2.1.2
+version: 2.1.3
 last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
@@ -41,9 +41,9 @@ editor (`ProviderRegionURLs["deepseek"]`):
   official [OpenCode Go docs](https://opencode.ai/docs/go/). China-hosted
   `deepseek-v4-flash` requires opting in at the OpenCode workspace page
   before first use.
-- **Custom** — free-typed endpoint. `api_key_env` keeps whatever slot you
-  already configured; change it on the API key row if your endpoint needs a
-  different one.
+- **Custom** — free-typed endpoint. The editor leaves `api_key_env` alone on
+  this row, and a saved edited built-in gets `stampAutoEnvVar`'s numbered
+  slot. To change the slot name itself, edit the preset JSON.
 
 Selecting the DeepSeek API or OpenCode Go option also switches `api_key_env`
 to the matching slot in the editor. Saving an **edited built-in** keeps that
