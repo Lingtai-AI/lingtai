@@ -72,6 +72,46 @@ func TestFormatTokenUsageFooter(t *testing.T) {
 			},
 			want: []string{"1.0k", "200", "80.0%", "~"},
 		},
+		{
+			name: "API duration appends after cache rate",
+			usage: &fs.TokenUsage{
+				Input:         181585,
+				Output:        2275,
+				Cached:        180224,
+				ApiDurationMs: 12345,
+			},
+			// 12345ms → 12.3 s, after the cache-rate segment
+			want: []string{"99.3% · API: 12.3 s"},
+		},
+		{
+			name: "sub-second API duration keeps one decimal",
+			usage: &fs.TokenUsage{
+				Input:         500,
+				Output:        120,
+				ApiDurationMs: 400,
+			},
+			want: []string{"API: 0.4 s"},
+		},
+		{
+			name: "no duration — legacy event keeps the four-segment footer",
+			usage: &fs.TokenUsage{
+				Input:  500,
+				Output: 120,
+			},
+			want:    []string{"500", "120", "0.0%"},
+			notWant: []string{"API:"},
+		},
+		{
+			name: "estimated marker still leads when duration present",
+			usage: &fs.TokenUsage{
+				Input:         1000,
+				Output:        200,
+				Cached:        800,
+				Estimated:     true,
+				ApiDurationMs: 2000,
+			},
+			want: []string{"~", "80.0% · API: 2.0 s"},
+		},
 	}
 
 	for _, tt := range tests {

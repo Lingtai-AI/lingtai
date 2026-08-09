@@ -85,7 +85,7 @@ func TestBuildMessages_LLMResponseTokenFooterAndMetaStillHidden(t *testing.T) {
 	}
 	events := strings.Join([]string{
 		`{"ts":1781300000,"type":"llm_call","api_call_id":"api_one"}`,
-		`{"ts":1781300001,"type":"llm_response","api_call_id":"api_one","input_tokens":1000,"output_tokens":200,"cached_tokens":800,"estimated":false}`,
+		`{"ts":1781300001,"type":"llm_response","api_call_id":"api_one","input_tokens":1000,"output_tokens":200,"cached_tokens":800,"estimated":false,"prompt_build_ms":3,"tool_schema_build_ms":1,"provider_wait_ms":8320,"usage_track_ms":0}`,
 		`{"ts":1781300002,"type":"tool_call","api_call_id":"api_one","tool_name":"bash","tool_args":"{}"}`,
 		`{"ts":1781300003,"type":"tool_result","api_call_id":"api_one","tool_name":"bash","status":"ok","elapsed_ms":5,"result":{"stdout":"done"},"_runtime":{"guidance":{"guidance_version":"0.3.0"}}}`,
 	}, "\n") + "\n"
@@ -99,9 +99,13 @@ func TestBuildMessages_LLMResponseTokenFooterAndMetaStillHidden(t *testing.T) {
 	m.buildMessages()
 	out := m.renderMessages(m.messages)
 
-	// Token footer present.
+	// Token footer present, with the kernel-measured API duration appended
+	// after the cache-rate segment (provider_wait_ms 8320 → 8.3 s).
 	if !strings.Contains(out, "80.0%") {
 		t.Fatalf("expected token footer (cache rate 80.0%%) in replay:\n%s", out)
+	}
+	if !strings.Contains(out, "80.0% · API: 8.3 s") {
+		t.Fatalf("expected API duration suffix after cache rate in replay:\n%s", out)
 	}
 	// #440 behavior preserved: the meta hint shows, full meta does NOT leak.
 	if strings.Contains(out, "guidance_version") || strings.Contains(out, "_runtime.guidance:") {
