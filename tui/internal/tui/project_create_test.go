@@ -1293,6 +1293,48 @@ func TestRunProjectCreate_KeepsProjectLocalRecipe(t *testing.T) {
 	}
 }
 
+// TestRunProjectCreate_StrayOrMalformedProjectRecipeDoesNotBlock proves the
+// ProjectLocalRecipeDir early-return is gated on the bundle parsing (fable
+// R2 N1): a stray/empty .recipe/ (interrupted copy) or one with a malformed
+// recipe.json must not hard-block creation, and must NOT be preserved as if
+// it were a real recipe — the normal adaptive staging replaces it.
+func TestRunProjectCreate_StrayOrMalformedProjectRecipeDoesNotBlock(t *testing.T) {
+	for name, recipeJSON := range map[string]string{
+		"empty dir":  "",                     // .recipe/ exists but no recipe.json
+		"malformed":  "{not json",            // unparseable recipe.json
+		"empty name": `{"id":"x","name":""}`, // parses but has empty name
+	} {
+		t.Run(name, func(t *testing.T) {
+			draft, root := newTestDraft(t)
+			writeRecipeFile(t, filepath.Join(root, ".recipe", "recipe.json"), recipeJSON)
+			opts := testCreateOptions(t, root)
+			draft.RecipeName = preset.DefaultRecipe
+			// Global adaptive available.
+			adaptiveRoot := filepath.Join(opts.GlobalDir, "recipes", "recommended", preset.DefaultRecipe)
+			writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
+				`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
+
+			res := RunProjectCreate(draft, opts)
+
+			if res.Err != nil {
+				t.Fatalf("project creation failed at phase %v: %v", res.FailedPhase, res.Err)
+			}
+			if !res.Committed {
+				t.Fatal("expected Committed=true on success")
+			}
+			// The stray/malformed bundle was replaced by the adaptive staging,
+			// not preserved.
+			recipeJSONOut, err := os.ReadFile(filepath.Join(root, ".recipe", "recipe.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(recipeJSONOut), "adaptive") {
+				t.Fatalf("stray .recipe/ not replaced by adaptive, now = %q", recipeJSONOut)
+			}
+		})
+	}
+}
+
 // TestRunProjectCreate_PhantomDirsWithNoRecordsProceeds proves the specific
 // false-positive this recheck must NOT reproduce:
 // inventory.Snapshot.PhantomDirs is populated purely because <root>/.lingtai
