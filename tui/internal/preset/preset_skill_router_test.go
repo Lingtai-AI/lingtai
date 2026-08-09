@@ -321,19 +321,18 @@ func TestPresetSkillRouter_OperationBijection(t *testing.T) {
 // operation prose into the provider page itself.
 func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	wantAnchor := map[string]string{
-		"minimax":    "tui/internal/preset/preset.go:979-1004",
-		"zhipu":      "tui/internal/preset/preset.go:1006-1023",
-		"mimo":       "tui/internal/preset/preset.go:1025-1050",
-		"deepseek":   "tui/internal/preset/preset.go:1052-1061",
-		"gemini":     "tui/internal/preset/preset.go:1063-1090",
-		"kimi":       "tui/internal/preset/preset.go:1092-1104",
-		"nvidia":     "tui/internal/preset/preset.go:1106-1125",
-		"openrouter": "tui/internal/preset/preset.go:1127-1146",
-		"codex":      "tui/internal/preset/preset.go:1148-1176",
-		"codex-pool": "tui/internal/preset/preset.go:1178-1208",
-		"claude":     "tui/internal/preset/preset.go:1212-1241",
-		"custom":     "tui/internal/preset/preset.go:1242-1264",
-		"opencode-go": "tui/internal/preset/preset.go:534-560",
+		"minimax":    "tui/internal/preset/preset.go:1117-1142",
+		"zhipu":      "tui/internal/preset/preset.go:1144-1161",
+		"mimo":       "tui/internal/preset/preset.go:1163-1188",
+		"deepseek":   "tui/internal/preset/preset.go:1190-1199",
+		"gemini":     "tui/internal/preset/preset.go:1201-1228",
+		"kimi":       "tui/internal/preset/preset.go:1230-1242",
+		"nvidia":     "tui/internal/preset/preset.go:1244-1263",
+		"openrouter": "tui/internal/preset/preset.go:1265-1284",
+		"codex":      "tui/internal/preset/preset.go:1286-1314",
+		"codex-pool": "tui/internal/preset/preset.go:1323-1346",
+		"claude":     "tui/internal/preset/preset.go:1348-1377",
+		"custom":     "tui/internal/preset/preset.go:1379-1401",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {

@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `codex`
 
-`codexPreset()` (`tui/internal/preset/preset.go:1148-1176`) uses provider
+`codexPreset()` (`tui/internal/preset/preset.go:1286-1314`) uses provider
 `codex`, model `gpt-5.6-sol`, the Codex endpoint
 `https://chatgpt.com/backend-api/codex`, and ChatGPT OAuth rather than an API
 key env-var. The manifest exposes provider-native `vision` and web search.

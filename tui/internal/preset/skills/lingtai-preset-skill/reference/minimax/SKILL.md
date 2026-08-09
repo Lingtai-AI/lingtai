@@ -1,18 +1,33 @@
 ---
 name: preset-skill-minimax
 description: Official-source-led manual for the TUI `minimax` template.
-version: 2.0.0
-last_changed_at: "2026-07-19T00:00:00Z"
+version: 2.1.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `minimax`
 
-`minimaxPreset()` (`tui/internal/preset/preset.go:979-1004`) ships provider
+`minimaxPreset()` (`tui/internal/preset/preset.go:1117-1142`) ships provider
 `minimax`, exact model `MiniMax-M3`, and `MINIMAX_API_KEY` at the
 Anthropic-compatible regional endpoint `https://api.minimaxi.com/anthropic`
 (CN default) or `https://api.minimax.io/anthropic` (INTL). Its manifest
 explicitly wires `vision`.
+
+The TUI preset editor's `base_url` row offers three options
+(`ProviderRegionURLs["minimax"]`):
+
+- **CN** — `https://api.minimaxi.com/anthropic` (the template default).
+- **INTL** — `https://api.minimax.io/anthropic`.
+- **OpenCode Go** — `https://opencode.ai/zen/go/v1`. This is the only row
+  that implies a credential: selecting it sets `api_key_env` to
+  `OPENCODE_GO_API_KEY` (the shared OpenCode Go account) and saving keeps
+  that slot instead of minting a region-suffixed one.
+
+CN and INTL imply no `api_key_env`, so cycling between them preserves
+whatever slot the host stamped (`MINIMAX_CN_1_API_KEY`,
+`MINIMAX_INTL_1_API_KEY`). Cycling *off* OpenCode Go restores the slot that
+was in place before it was selected, so the choice is reversible.
 
 ## Template-specific settings
 

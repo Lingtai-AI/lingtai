@@ -232,8 +232,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 13 {
-			t.Fatalf("expected 13 presets, got %d", len(presets))
+		if len(presets) != 12 {
+			t.Fatalf("expected 12 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -242,7 +242,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom", "opencode-go"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -752,6 +752,21 @@ func TestAutoEnvVarName(t *testing.T) {
 			preset: pp("deepseek", "https://api.deepseek.com"),
 			want:   "DEEPSEEK_1_API_KEY",
 		},
+		// The OpenCode Go row is a distinct account on a shared endpoint,
+		// not a CN/INTL split. It must not borrow a region suffix — the
+		// substring classifier would otherwise call opencode.ai "CN" for
+		// zhipu and "INTL" for minimax, stamping a slot that lies about
+		// the endpoint it unlocks.
+		{
+			name:   "zhipu OpenCode Go gets no region suffix",
+			preset: pp("zhipu", "https://opencode.ai/zen/go/v1"),
+			want:   "ZHIPU_1_API_KEY",
+		},
+		{
+			name:   "minimax OpenCode Go gets no region suffix",
+			preset: pp("minimax", "https://opencode.ai/zen/go/v1"),
+			want:   "MINIMAX_1_API_KEY",
+		},
 		{
 			name:   "non-numeric existing entries (e.g. legacy) ignored",
 			preset: pp("deepseek", "https://api.deepseek.com"),
@@ -823,33 +838,66 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 }
 
-func TestOpenCodeGoPresetDeclaresCloudEndpoint(t *testing.T) {
-	p := opencodeGoPreset()
-	if p.Name != "opencode-go" {
-		t.Fatalf("preset name = %q, want opencode-go", p.Name)
+// TestProviderRegionURLTablesAreExact pins the full base_url option table for
+// every provider that offers one — order, Label, URL and Env. Order matters
+// beyond cosmetics: entry [0] is the template default (preset.go's
+// ProviderRegionURLs[...][0].URL), so a reorder silently repoints new presets
+// at a different region. The OpenCode Go row must stay byte-identical across
+// all three providers so one OPENCODE_GO_API_KEY serves all of them.
+func TestProviderRegionURLTablesAreExact(t *testing.T) {
+	openCodeGo := RegionURL{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"}
+
+	tests := []struct {
+		provider string
+		want     []RegionURL
+	}{
+		{"deepseek", []RegionURL{
+			{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
+			openCodeGo,
+			{Label: "Custom", URL: ""},
+		}},
+		{"zhipu", []RegionURL{
+			{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
+			{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
+			openCodeGo,
+		}},
+		{"minimax", []RegionURL{
+			{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
+			{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+			openCodeGo,
+		}},
 	}
-	llm := p.Manifest["llm"].(map[string]interface{})
-	// Reuses the generic custom provider: no kernel registration needed.
-	if got, _ := llm["provider"].(string); got != "custom" {
-		t.Fatalf("provider = %q, want custom", got)
+
+	if len(ProviderRegionURLs) != len(tests) {
+		t.Errorf("ProviderRegionURLs has %d providers, this test pins %d — add the new one here", len(ProviderRegionURLs), len(tests))
 	}
-	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("base_url = %q, want https://opencode.ai/zen/go/v1", got)
-	}
-	if got, _ := llm["api_compat"].(string); got != "openai" {
-		t.Fatalf("api_compat = %q, want openai", got)
-	}
-	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("api_key_env = %q, want OPENCODE_GO_API_KEY", got)
-	}
-	// Model is left blank so the user fills in a Go model id themselves.
-	if got, _ := llm["model"].(string); got != "" {
-		t.Fatalf("model = %q, want blank (user fills it in)", got)
-	}
-	// Only the chat/completions wire is exposed — Responses is supported for
-	// some Go models but surfacing both wires would be confusing.
-	if got, _ := llm["wire_api"].(string); got != "chat_completions" {
-		t.Fatalf("wire_api = %q, want chat_completions", got)
+
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			// Every region-table provider must remain a shipped builtin —
+			// deepseek in particular, after the opencode-go preset was
+			// folded into it as an OpenCode Go base_url option.
+			found := false
+			for _, p := range BuiltinPresets() {
+				if p.Name == tc.provider {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("%s preset missing from BuiltinPresets", tc.provider)
+			}
+
+			regions, ok := ProviderRegionURLs[tc.provider]
+			if !ok || len(regions) != len(tc.want) {
+				t.Fatalf("ProviderRegionURLs[%s] = %#v, want %d entries", tc.provider, regions, len(tc.want))
+			}
+			for i, w := range tc.want {
+				if regions[i] != w {
+					t.Errorf("ProviderRegionURLs[%s][%d] = %#v, want %#v", tc.provider, i, regions[i], w)
+				}
+			}
+		})
 	}
 }
 
@@ -916,5 +964,72 @@ func TestResolvePresetWithAuthPreservesKeyedAndLocalBehavior(t *testing.T) {
 	got = ResolvePresetWithAuth(local, nil, AuthState{})
 	if got.Family != CredentialFamilyOther || got.HasKey {
 		t.Fatalf("keyless custom/local resolution = %#v, want unchanged no-key behavior", got)
+	}
+}
+
+// TestValidateRequiresBaseURLForRegionProviders is the F2 regression: the
+// editor's Custom sentinel clears base_url, and nothing forces the user to
+// type one, so Validate must refuse a region-table preset with no endpoint.
+func TestValidateRequiresBaseURLForRegionProviders(t *testing.T) {
+	presetWith := func(provider, baseURL string) Preset {
+		llm := map[string]interface{}{"provider": provider, "model": "some-model"}
+		if baseURL != "" {
+			llm["base_url"] = baseURL
+		}
+		return Preset{
+			Name:        provider,
+			Description: PresetDescription{Summary: "test preset"},
+			Manifest:    map[string]interface{}{"llm": llm},
+		}
+	}
+	// explicitlyEmpty pins the base_url to "" (the shape the editor's Custom
+	// sentinel writes) — always a violation for a region-table provider.
+	explicitlyEmpty := func(provider string) Preset {
+		p := presetWith(provider, "")
+		p.Manifest["llm"].(map[string]interface{})["base_url"] = ""
+		return p
+	}
+
+	for provider := range ProviderRegionURLs {
+		// Explicitly empty is rejected for every region-table provider: the
+		// Custom sentinel path can produce this and the preset would have no
+		// endpoint at all.
+		if errs := explicitlyEmpty(provider).Validate(); len(errs) == 0 {
+			t.Errorf("%s with explicitly empty base_url validated clean, want a base_url violation", provider)
+		}
+		// Absent base_url is tolerated only where regionSuffix assigns a
+		// default region (zhipu → CN, minimax → INTL); deepseek has no region
+		// fallback, so an absent endpoint is still a violation there.
+		wantAbsentViolation := regionSuffix(provider, "") == ""
+		if errs := presetWith(provider, "").Validate(); (len(errs) == 0) == wantAbsentViolation {
+			t.Errorf("%s with absent base_url errs=%v, wantAbsentViolation=%v", provider, errs, wantAbsentViolation)
+		}
+		if errs := presetWith(provider, ProviderRegionURLs[provider][0].URL).Validate(); len(errs) != 0 {
+			t.Errorf("%s with its default endpoint = %v, want no violations", provider, errs)
+		}
+		if errs := presetWith(provider, "https://my-proxy.example/v1").Validate(); len(errs) != 0 {
+			t.Errorf("%s with an off-list endpoint = %v, want no violations", provider, errs)
+		}
+	}
+
+	// Providers with no region table have no endpoint requirement — the kernel
+	// adapter supplies its own (gemini, claude) or the user does (custom).
+	if errs := presetWith("gemini", "").Validate(); len(errs) != 0 {
+		t.Errorf("gemini with no base_url = %v, want no violations", errs)
+	}
+
+	// Every shipped builtin that has a region table must carry an endpoint,
+	// so the templates themselves cannot trip the new rule. (Builtins are not
+	// wholesale Validate-clean: `custom` deliberately ships an empty model for
+	// the user to fill in.)
+	for _, p := range BuiltinPresets() {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		provider, _ := llm["provider"].(string)
+		if _, ok := ProviderRegionURLs[provider]; !ok {
+			continue
+		}
+		if s, _ := llm["base_url"].(string); s == "" {
+			t.Errorf("builtin %s has provider %q with a region table but no base_url", p.Name, provider)
+		}
 	}
 }

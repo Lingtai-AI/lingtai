@@ -454,7 +454,7 @@
   "doctor.llm_oauth": "⚠ OAuth 提供方 — 凭证由 CLI 管理，此处不做探测",
   "doctor.suggest_oauth": "→ 在外部确认登录（如 `codex login`）；若 CLI 可用，可忽略此提示。",
   "doctor.llm_no_base_url": "✗ 未设置 %s 的 API 端点 (base_url)",
-  "doctor.suggest_base_url": "→ 打开预设编辑器选择区域 (CN / INTL)，然后 /refresh。",
+  "doctor.suggest_base_url": "→ 打开预设编辑器选择 base_url 选项，然后 /refresh。",
   "doctor.llm_unknown": "✗ LLM 错误：%s",
   "doctor.llm_empty_response": "✗ LLM 响应包络为空：%s",
   "doctor.suggest_proxy_check": "→ 端点接受了请求但未转发上游。检查代理/网关的日志（如 JoyCode），确认模型名和凭证正确转发，然后 /refresh。",

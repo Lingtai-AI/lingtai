@@ -377,6 +377,35 @@ func (p Preset) Validate() []error {
 		if s, _ := llm["model"].(string); s == "" {
 			errs = append(errs, fmt.Errorf("manifest.llm.model must be non-empty"))
 		}
+		// A provider with a region table reaches its API through an explicit
+		// endpoint — there is no implicit default in the kernel adapter. The
+		// editor's Custom sentinel deliberately clears base_url so Enter opens
+		// a blank inline edit, and nothing forces the user to type one (Esc
+		// leaves it empty), so without this check two arrow presses and a save
+		// persist a preset with no endpoint at all.
+		//
+		// Only an explicitly EMPTY value is a violation. A preset that simply
+		// omits the key (hand-edited or recipe-imported saved presets, or the
+		// pre-region-table wizard shape) is tolerated when regionSuffix can
+		// assign a default region (zhipu → CN, minimax → INTL): AutoEnvVarName
+		// stamps a slot for it, so such a preset remains well-defined. A
+		// region-table provider without a region fallback (deepseek) still
+		// needs an explicit endpoint, so an absent key stays a violation there.
+		// The editor's Custom sentinel is the only path that writes an
+		// explicit "", and that is always rejected.
+		if provider, _ := llm["provider"].(string); provider != "" {
+			if _, hasRegions := ProviderRegionURLs[provider]; hasRegions {
+				if v, present := llm["base_url"]; present {
+					if s, _ := v.(string); s == "" {
+						errs = append(errs, fmt.Errorf(
+							"manifest.llm.base_url must be non-empty for provider %q", provider))
+					}
+				} else if regionSuffix(provider, "") == "" {
+					errs = append(errs, fmt.Errorf(
+						"manifest.llm.base_url must be non-empty for provider %q", provider))
+				}
+			}
+		}
 		if v, ok := llm["context_limit"]; ok && v != nil {
 			// JSON unmarshals numbers as float64; accept int-valued floats.
 			switch n := v.(type) {
@@ -510,55 +539,76 @@ func RefreshTemplates() error {
 }
 
 // RegionURL pairs a human-readable label with an API base URL.
+// Env, when non-empty, is the api_key_env slot the option implies (e.g.
+// "DEEPSEEK_API_KEY") and is applied to the preset when the option is
+// selected. Empty Env means "don't touch api_key_env"; the editor
+// restores the slot it memoized when cycling back off an Env row.
+//
+// Env is deliberately present ONLY where a region genuinely implies a
+// distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
+// OpenCode Go row on zhipu/minimax, are separate accounts). The plain
+// region rows (zhipu/minimax CN and INTL) declare none: their slots are
+// region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
+// MINIMAX_CN_1_API_KEY via AutoEnvVarName), and a flat Env on those rows
+// would overwrite that slot on every CN<->INTL base_url cycle.
 type RegionURL struct {
-	Label string // e.g. "CN", "INTL"
+	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
+	Env   string // optional credential env-var name; empty = leave api_key_env alone
 }
 
 // ProviderRegionURLs maps provider names to their regional endpoint
 // options. Providers not in this map have a single endpoint (or none)
 // and their base_url is free-text in the editor. The first entry is
-// the default for new presets.
+// the default for new presets. An entry with an empty URL is the free-text
+// "Custom" sentinel: selecting it clears base_url so the editor opens an
+// inline edit for any user-typed endpoint. At most one entry per provider
+// may carry an empty URL.
 var ProviderRegionURLs = map[string][]RegionURL{
+	"deepseek": {
+		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
+		// OpenCode Go is scoped to DeepSeek models served through the OpenCode Go
+		// subscription (provider stays "deepseek"); other Go models are reached via
+		// a Custom preset.
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
+	},
 	"zhipu": {
 		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
 		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
 	"minimax": {
 		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
 		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
 }
 
-// BuiltinPresets returns the built-in presets.
-func opencodeGoPreset() Preset {
-	// OpenCode Go subscription (https://opencode.ai/docs/go/) — curated open
-	// coding models served through the cloud Zen Go endpoint. It is a plain
-	// OpenAI-compatible endpoint, so it reuses the generic `custom` provider
-	// with an explicit base_url — no kernel-side provider registration needed.
-	// Leave model blank on purpose: users fill in a Go model id themselves
-	// (see https://opencode.ai/docs/go/ for the current model list, or call
-	// GET https://opencode.ai/zen/go/v1/models with their API key).
-	return Preset{
-		Name:        "opencode-go",
-		Description: PresetDescription{Summary: "OpenCode Go subscription — curated open coding models; fill in a Go model id", Tier: "3"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "custom", "model": "",
-				"api_key": nil, "api_key_env": "OPENCODE_GO_API_KEY",
-				"base_url": "https://opencode.ai/zen/go/v1", "api_compat": "openai",
-				// Expose chat/completions only — the Responses API is supported for
-				// some Go models, but surfacing both wires would be confusing.
-				"wire_api": "chat_completions",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
+// ProviderDefaultEnv maps each provider to the api_key_env slot a freshly
+// switched-to provider should adopt. Consulted on provider switch only; it
+// must not be read from a region cycle, so zhipu/minimax region rows declare
+// no Env (see RegionURL) and their CN<->INTL cycling preserves whatever
+// region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY etc.).
+//
+// Values match each builtin preset's declared api_key_env ("" = OAuth/CLI
+// providers with no key slot, or a generic placeholder the user replaces).
+var ProviderDefaultEnv = map[string]string{
+	"minimax":    "MINIMAX_API_KEY",
+	"zhipu":      "ZHIPU_API_KEY",
+	"mimo":       "XIAOMI_API_KEY",
+	"deepseek":   "DEEPSEEK_API_KEY",
+	"gemini":     "GEMINI_API_KEY",
+	"kimi":       "KIMI_CODE_API_KEY",
+	"nvidia":     "NVIDIA_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
+	"claude":     "",            // OAuth / CLI login
+	"codex":      "",            // OAuth
+	"codex-pool": "",            // OAuth
+	"custom":     "LLM_API_KEY", // generic placeholder, user replaces
 }
 
+// BuiltinPresets returns the built-in presets.
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
@@ -573,7 +623,6 @@ func BuiltinPresets() []Preset {
 		codexPoolPreset(),
 		claudePreset(),
 		customPreset(),
-		opencodeGoPreset(),
 	}
 }
 
@@ -599,8 +648,6 @@ var builtinNames = map[string]bool{
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
-	"opencode-go":      true,
-	"opencode_go":      true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.
@@ -1148,7 +1195,7 @@ func deepseekPreset() Preset {
 	return openAICompatNoVisionPreset(
 		"deepseek",
 		"DeepSeek V4 Pro — OpenAI-compatible, 1M context window, tool calls",
-		"deepseek-v4-pro", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
+		"deepseek-v4-pro", "DEEPSEEK_API_KEY", ProviderRegionURLs["deepseek"][0].URL, "")
 }
 
 func geminiPreset() Preset {
@@ -1603,7 +1650,20 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 // splits, "" for everything else. Mirrors the wizard's existing
 // region-detection logic so a preset that says "minimaxi.com" gets
 // the same CN suffix the wizard would have applied.
+//
+// A region row that declares its own Env (OpenCode Go) is not a CN/INTL
+// split — it is a separate account reached through a shared endpoint. It
+// gets no suffix: the substring match below classifies by hostname, and
+// opencode.ai contains neither "api.z.ai" nor "minimaxi.com", so zhipu
+// would fall through to "CN" and minimax to "INTL" and the stamped slot
+// (MINIMAX_INTL_1_API_KEY for https://opencode.ai/zen/go/v1) would lie
+// about the endpoint it unlocks.
 func regionSuffix(provider, baseURL string) string {
+	for _, r := range ProviderRegionURLs[provider] {
+		if r.URL != "" && r.URL == baseURL && r.Env != "" {
+			return ""
+		}
+	}
 	switch provider {
 	case "minimax":
 		if strings.Contains(baseURL, "minimaxi.com") {

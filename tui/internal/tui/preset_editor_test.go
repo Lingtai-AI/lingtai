@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -1658,5 +1659,538 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 				t.Fatalf("Other API-key row mode after Enter = %v, want inline", m.mode)
 			}
 		})
+	}
+}
+
+// TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel covers the
+// deepseek preset's three base_url options: cycling DeepSeek API → OpenCode
+// adopts the OpenCode credential env-var, cycling to Custom clears base_url
+// (the free-text sentinel), and Enter on Custom/unknown URLs opens inline
+// edit while Enter on a known region URL stays a no-op.
+func TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	llm := m.llmMap()
+	if got, _ := llm["provider"].(string); got != "deepseek" {
+		t.Fatalf("test preset provider = %q, want deepseek", got)
+	}
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+	// DeepSeek API -> OpenCode: base_url switches and api_key_env follows.
+	m.cycleFocused(+1)
+	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("after first cycle base_url = %q, want OpenCode endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after first cycle api_key_env = %q, want OPENCODE_GO_API_KEY", llm["api_key_env"])
+	}
+
+	// OpenCode -> Custom: base_url clears (free-text sentinel); api_key_env
+	// is left untouched (the Custom option declares no env).
+	m.cycleFocused(+1)
+	if got, _ := llm["base_url"].(string); got != "" {
+		t.Fatalf("after second cycle base_url = %q, want empty (Custom sentinel)", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after second cycle api_key_env = %q, want untouched OPENCODE_GO_API_KEY", llm["api_key_env"])
+	}
+
+	// Cycling back to the first region restores DeepSeek API + its env.
+	m.cycleFocused(-1)
+	m.cycleFocused(-1)
+	if got, _ := llm["base_url"].(string); got != "https://api.deepseek.com" {
+		t.Fatalf("cycling back base_url = %q, want DeepSeek API endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("cycling back api_key_env = %q, want DEEPSEEK_API_KEY", llm["api_key_env"])
+	}
+
+	// Enter on a known region URL stays a no-op (←/→ cycle).
+	m2, _ := m.openInline()
+	if m2.mode == emInline {
+		t.Fatal("Enter on a known region URL must not open inline edit")
+	}
+
+	// Enter on the Custom (empty) URL opens free-text inline edit prefilled
+	// with the current value.
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.cycleFocused(+1) // DeepSeek API -> OpenCode
+	m.cycleFocused(+1) // OpenCode -> Custom (empty)
+	m3, _ := m.openInline()
+	if m3.mode != emInline {
+		t.Fatalf("Enter on Custom (empty base_url) mode = %v, want inline", m3.mode)
+	}
+
+	// Enter on an unknown (free-typed) URL also opens inline edit.
+	m4 := m
+	m4.llmMap()["base_url"] = "https://myhost.example/v1"
+	m5, _ := m4.openInline()
+	if m5.mode != emInline {
+		t.Fatalf("Enter on unknown base_url mode = %v, want inline", m5.mode)
+	}
+}
+
+// TestPresetEditorDeepseekTypedURLCycling covers the free-typed Custom URL
+// path: an off-list endpoint resolves to the Custom row, so cycling away
+// moves to the adjacent real option (never the wrong slot), and Enter still
+// opens inline edit.
+func TestPresetEditorDeepseekTypedURLCycling(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	llm := m.llmMap()
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+	// Simulate the user typing a custom endpoint on the Custom row.
+	llm["base_url"] = "https://myhost.example/v1"
+
+	// +1 from Custom lands on DeepSeek API (index 0), not OpenCode (1).
+	m.cycleFocused(+1)
+	if got, _ := llm["base_url"].(string); got != "https://api.deepseek.com" {
+		t.Fatalf("cycle +1 from typed URL base_url = %q, want DeepSeek API endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("cycle +1 from typed URL api_key_env = %q, want DEEPSEEK_API_KEY", llm["api_key_env"])
+	}
+
+	// -1 from a fresh typed URL lands on OpenCode Go (index 1).
+	llm["base_url"] = "https://myhost.example/v1"
+	m.cycleFocused(-1)
+	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("cycle -1 from typed URL base_url = %q, want OpenCode endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("cycle -1 from typed URL api_key_env = %q, want OPENCODE_GO_API_KEY", llm["api_key_env"])
+	}
+
+	// Enter on the typed URL still opens inline edit.
+	llm["base_url"] = "https://myhost.example/v1"
+	m2, _ := m.openInline()
+	if m2.mode != emInline {
+		t.Fatalf("Enter on typed base_url mode = %v, want inline", m2.mode)
+	}
+}
+
+// TestPresetEditorDeepseekBaseURLStripRendering locks the radio strip's
+// three-state selection and the trailing typed-URL echo.
+func TestPresetEditorDeepseekBaseURLStripRendering(t *testing.T) {
+	newModel := func() PresetEditorModel {
+		return NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	}
+	style := lipgloss.NewStyle()
+
+	m := newModel()
+	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● OpenCode Go") || strings.Contains(strip, "● Custom") {
+		t.Fatalf("DeepSeek API strip = %q, want only DeepSeek API selected", strip)
+	}
+	m.llmMap()["base_url"] = "https://opencode.ai/zen/go/v1"
+	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● OpenCode Go") || strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● Custom") {
+		t.Fatalf("OpenCode strip = %q, want only OpenCode selected", strip)
+	}
+	m.llmMap()["base_url"] = ""
+	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● Custom") || strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● OpenCode Go") {
+		t.Fatalf("empty Custom strip = %q, want only Custom selected", strip)
+	}
+	m.llmMap()["base_url"] = "https://myhost.example/v1"
+	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● Custom") || !strings.Contains(strip, "https://myhost.example/v1") {
+		t.Fatalf("typed Custom strip = %q, want Custom selected with endpoint echoed", strip)
+	}
+}
+
+// TestPresetEditorNoCustomRowOffListBaseURLStrip covers the providers that have
+// no Custom row (zhipu, minimax): an off-list base_url must select nothing and
+// echo the raw value, never claim a region the preset does not point at.
+func TestPresetEditorNoCustomRowOffListBaseURLStrip(t *testing.T) {
+	style := lipgloss.NewStyle()
+	for _, provider := range []string{"zhipu", "minimax"} {
+		m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, provider), "en", nil, "", false)
+		m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+		strip := m.baseURLRadioStrip(false, style)
+		if strings.Contains(strip, "● ") {
+			t.Errorf("%s off-list strip = %q, want no filled dot", provider, strip)
+		}
+		if !strings.Contains(strip, "○ CN") || !strings.Contains(strip, "○ INTL") {
+			t.Errorf("%s off-list strip = %q, want both regions hollow", provider, strip)
+		}
+		if !strings.Contains(strip, "https://my-proxy.example/v4") {
+			t.Errorf("%s off-list strip = %q, want the raw endpoint echoed", provider, strip)
+		}
+
+		// The known region URLs still select normally.
+		m.llmMap()["base_url"] = preset.ProviderRegionURLs[provider][1].URL
+		if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● INTL") {
+			t.Errorf("%s INTL strip = %q, want INTL selected", provider, strip)
+		}
+	}
+}
+
+// TestPresetEditorNoCustomRowOffListCyclingAndEnter checks the other two
+// selectedRegionIndex consumers agree with the strip when nothing is selected:
+// cycling enters the list at its edge (never indexing -1), and Enter opens
+// inline edit so the value is correctable from the editor.
+func TestPresetEditorNoCustomRowOffListCyclingAndEnter(t *testing.T) {
+	regions := preset.ProviderRegionURLs["zhipu"]
+
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "zhipu"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	m.cycleFocused(+1)
+	if got := m.fieldString(feBaseURL); got != regions[0].URL {
+		t.Errorf("cycle +1 from off-list = %q, want first region %q", got, regions[0].URL)
+	}
+
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	m.cycleFocused(-1)
+	if got := m.fieldString(feBaseURL); got != regions[len(regions)-1].URL {
+		t.Errorf("cycle -1 from off-list = %q, want last region %q", got, regions[len(regions)-1].URL)
+	}
+
+	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
+	opened, _ := m.openInline()
+	if opened.mode != emInline {
+		t.Errorf("Enter on off-list base_url mode = %v, want emInline so the value is editable", opened.mode)
+	}
+}
+
+// TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv is the F3 regression:
+// a credential slot adopted from a base_url region must not follow the user
+// into the next provider.
+func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.cycleFocused(+1) // DeepSeek API -> OpenCode Go
+	if got := asString(m.llmMap()["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after base_url cycle api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+
+	// Switch the provider until it lands on each region-table provider and
+	// assert the stale OpenCode slot is gone every time.
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+	for i := 0; i < 24; i++ {
+		m.cycleFocused(+1)
+		provider := asString(m.llmMap()["provider"])
+		regions, ok := preset.ProviderRegionURLs[provider]
+		if !ok {
+			continue
+		}
+		if got := asString(m.llmMap()["api_key_env"]); got != preset.ProviderDefaultEnv[provider] {
+			t.Fatalf("after switch to %s api_key_env = %q, want the provider default %q", provider, got, preset.ProviderDefaultEnv[provider])
+		}
+		if got := asString(m.llmMap()["base_url"]); got != regions[0].URL {
+			t.Fatalf("after switch to %s base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+	}
+}
+
+// TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv pins the F3a
+// contract: cycling zhipu/minimax between CN and INTL must NOT rewrite
+// api_key_env. The host stamps region-suffixed slots (ZHIPU_INTL_1_API_KEY,
+// MINIMAX_CN_1_API_KEY) for saved presets, and those are separate accounts;
+// the base_url cycle only adopts an Env when the selected option declares one
+// (the OpenCode Go row, which is a genuinely distinct credential), never for
+// a plain CN<->INTL region toggle.
+func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		if len(regions) < 3 {
+			t.Fatalf("%s needs at least CN/INTL/OpenCode Go for the cycle test", provider)
+		}
+		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
+		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{"provider": provider, "model": "m",
+				"base_url":    regions[1].URL, // INTL
+				"api_key_env": slot}}}
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		llm := m.llmMap()
+		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+		// INTL -> CN (cycle backwards): slot must survive untouched.
+		m.cycleFocused(-1)
+		if got := asString(llm["base_url"]); got != regions[0].URL {
+			t.Fatalf("[%s] INTL->CN base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != slot {
+			t.Fatalf("[%s] INTL->CN api_key_env = %q, want preserved %q", provider, got, slot)
+		}
+
+		// CN -> INTL (cycle forward): still preserved.
+		m.cycleFocused(+1)
+		if got := asString(llm["base_url"]); got != regions[1].URL {
+			t.Fatalf("[%s] CN->INTL base_url = %q, want %q", provider, got, regions[1].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != slot {
+			t.Fatalf("[%s] CN->INTL api_key_env = %q, want preserved %q", provider, got, slot)
+		}
+
+		// INTL -> OpenCode Go: adopts the OpenCode credential (distinct account).
+		m.cycleFocused(+1)
+		if got := asString(llm["base_url"]); got != regions[2].URL {
+			t.Fatalf("[%s] INTL->OpenCodeGo base_url = %q, want %q", provider, got, regions[2].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+			t.Fatalf("[%s] INTL->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", provider, got)
+		}
+
+		// OpenCode Go -> INTL (back the way we came): the adopted slot must
+		// be handed back, not left stuck on the plain region row.
+		m.cycleFocused(-1)
+		if got := asString(llm["base_url"]); got != regions[1].URL {
+			t.Fatalf("[%s] OpenCodeGo->INTL base_url = %q, want %q", provider, got, regions[1].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != slot {
+			t.Fatalf("[%s] OpenCodeGo->INTL api_key_env = %q, want restored %q", provider, got, slot)
+		}
+	}
+}
+
+// TestPresetEditorRegionCycleRoundTripRestoresAdoptedSlot is the F2 regression
+// (fable r4): the OpenCode Go row's Env adoption must be a two-way door.
+// zhipu/minimax CN and INTL declare no Env of their own, so before this fix
+// one extra → press past OpenCode Go wrapped around to CN and left the preset
+// pointing at bigmodel.cn while still resolving through OPENCODE_GO_API_KEY —
+// silently destroying the user's ZHIPU_INTL_1_API_KEY with no way back.
+// Walks the FULL round trip, wrap included: CN → INTL → OpenCode Go → CN.
+func TestPresetEditorRegionCycleRoundTripRestoresAdoptedSlot(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		if len(regions) != 3 {
+			t.Fatalf("%s wants exactly CN/INTL/OpenCode Go for the wrap test, got %d rows", provider, len(regions))
+		}
+		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
+		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{"provider": provider, "model": "m",
+				"base_url":    regions[0].URL, // CN
+				"api_key_env": slot}}}
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		llm := m.llmMap()
+		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+		steps := []struct {
+			label   string
+			wantURL string
+			wantEnv string
+		}{
+			{"CN->INTL", regions[1].URL, slot},
+			{"INTL->OpenCodeGo", regions[2].URL, "OPENCODE_GO_API_KEY"},
+			// The wrap. This is the press the r3 test stopped one short of.
+			{"OpenCodeGo->CN (wrap)", regions[0].URL, slot},
+			// And round again, to prove the memo survives a second lap.
+			{"CN->INTL (lap 2)", regions[1].URL, slot},
+			{"INTL->OpenCodeGo (lap 2)", regions[2].URL, "OPENCODE_GO_API_KEY"},
+			{"OpenCodeGo->CN (wrap, lap 2)", regions[0].URL, slot},
+		}
+		for _, s := range steps {
+			m.cycleFocused(+1)
+			if got := asString(llm["base_url"]); got != s.wantURL {
+				t.Fatalf("[%s] %s base_url = %q, want %q", provider, s.label, got, s.wantURL)
+			}
+			if got := asString(llm["api_key_env"]); got != s.wantEnv {
+				t.Fatalf("[%s] %s api_key_env = %q, want %q", provider, s.label, got, s.wantEnv)
+			}
+		}
+	}
+}
+
+// TestPresetEditorRegionCycleFallsBackToProviderDefaultEnv covers the branch
+// where there is nothing memoized to restore: the preset was already sitting
+// on OpenCode Go when the editor opened, so cycling off it has no prior slot
+// to hand back and must fall back to the provider default rather than leaving
+// OPENCODE_GO_API_KEY stuck on a bigmodel.cn / minimaxi.com endpoint.
+func TestPresetEditorRegionCycleFallsBackToProviderDefaultEnv(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{"provider": provider, "model": "m",
+				"base_url":    regions[2].URL, // OpenCode Go
+				"api_key_env": "OPENCODE_GO_API_KEY"}}}
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		llm := m.llmMap()
+		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+		m.cycleFocused(+1) // wraps to CN
+		if got := asString(llm["base_url"]); got != regions[0].URL {
+			t.Fatalf("[%s] OpenCodeGo->CN base_url = %q, want %q", provider, got, regions[0].URL)
+		}
+		want := preset.ProviderDefaultEnv[provider]
+		if got := asString(llm["api_key_env"]); got != want {
+			t.Fatalf("[%s] OpenCodeGo->CN api_key_env = %q, want provider default %q", provider, got, want)
+		}
+	}
+}
+
+// TestPresetEditorRegionCycleRestoresFromOffListBaseURL is the residual edge of
+// F2 (fable r5): zhipu/minimax have no Custom sentinel row, so an off-list
+// base_url makes selectedRegionIndex return -1 and there is no "previous row"
+// to key the restore on. A preset that pairs such a URL with the adopted
+// OPENCODE_GO_API_KEY must still be healed on the first cycle — otherwise the
+// stale slot rides along onto CN and bigmodel.cn resolves through the OpenCode
+// account, which is the exact harm the F2 fix exists to prevent. The rule is
+// therefore about the STATE (is api_key_env a slot some region row declares?),
+// not about the row we came from.
+func TestPresetEditorRegionCycleRestoresFromOffListBaseURL(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		for _, tc := range []struct {
+			label string
+			memo  string
+			want  string
+		}{
+			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
+			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
+		} {
+			offList := "https://proxy.internal.example/v1"
+			if idx := selectedRegionIndex(regions, offList); idx >= 0 {
+				t.Fatalf("[%s] test setup wrong: %q resolves to region %d", provider, offList, idx)
+			}
+			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+				"llm": map[string]interface{}{"provider": provider, "model": "m",
+					"base_url":    offList,
+					"api_key_env": "OPENCODE_GO_API_KEY"}}}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m.regionEnvBeforeAdopt = tc.memo
+			llm := m.llmMap()
+			m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+			m.cycleFocused(+1) // off-list -> CN (enters the list at its edge)
+			if got := asString(llm["base_url"]); got != regions[0].URL {
+				t.Fatalf("[%s/%s] base_url = %q, want CN %q", provider, tc.label, got, regions[0].URL)
+			}
+			if got := asString(llm["api_key_env"]); got != tc.want {
+				t.Fatalf("[%s/%s] api_key_env = %q, want restored %q — the adopted OpenCode slot must not ride along onto CN",
+					provider, tc.label, got, tc.want)
+			}
+			if m.regionEnvBeforeAdopt != "" {
+				t.Fatalf("[%s/%s] memo = %q after restore, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
+			}
+		}
+	}
+}
+
+// F1-r6 mirror: an off-list base_url paired with the adopted slot, then
+// cycle -1 (off-list -> OpenCode Go) and +1 (OpenCode Go -> CN wrap). The
+// memo write must NOT capture OPENCODE_GO_API_KEY itself on the way onto
+// the Env row (cur is already region-declared, so the write is skipped), and
+// the +1 restore must still hand back the original slot or provider default.
+func TestPresetEditorRegionCycleRestoresFromOffListBaseURLMirror(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		for _, tc := range []struct {
+			label string
+			memo  string
+			want  string
+		}{
+			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
+			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
+		} {
+			offList := "https://proxy.internal.example/v1"
+			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+				"llm": map[string]interface{}{"provider": provider, "model": "m",
+					"base_url":    offList,
+					"api_key_env": "OPENCODE_GO_API_KEY"}}}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m.regionEnvBeforeAdopt = tc.memo
+			llm := m.llmMap()
+			m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+			m.cycleFocused(-1) // off-list -> OpenCode Go (Env row)
+			if got := asString(llm["base_url"]); got != regions[2].URL {
+				t.Fatalf("[%s/%s] base_url after -1 = %q, want OpenCode Go %q", provider, tc.label, got, regions[2].URL)
+			}
+			if m.regionEnvBeforeAdopt != tc.memo {
+				t.Fatalf("[%s/%s] memo = %q after -1, want %q -- the adopted slot must not memoize itself",
+					provider, tc.label, m.regionEnvBeforeAdopt, tc.memo)
+			}
+
+			m.cycleFocused(+1) // OpenCode Go -> CN (wrap)
+			if got := asString(llm["base_url"]); got != regions[0].URL {
+				t.Fatalf("[%s/%s] base_url after +1 = %q, want CN %q", provider, tc.label, got, regions[0].URL)
+			}
+			if got := asString(llm["api_key_env"]); got != tc.want {
+				t.Fatalf("[%s/%s] api_key_env after +1 = %q, want %q -- the OpenCode slot must not survive onto CN",
+					provider, tc.label, got, tc.want)
+			}
+			if m.regionEnvBeforeAdopt != "" {
+				t.Fatalf("[%s/%s] memo = %q after +1, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
+			}
+		}
+	}
+}
+
+// TestPresetEditorProviderSwitchClearsAdoptedSlotMemo pins the other half of the
+// same rule: the memo records a slot taken from THIS provider's region cycle, so
+// switching providers must drop it along with base_url and api_key_env. Left
+// behind, it could be handed back onto a provider it never belonged to.
+func TestPresetEditorProviderSwitchClearsAdoptedSlotMemo(t *testing.T) {
+	regions := preset.ProviderRegionURLs["zhipu"]
+	p := preset.Preset{Name: "my-zhipu", Source: preset.SourceSaved, Manifest: map[string]interface{}{
+		"llm": map[string]interface{}{"provider": "zhipu", "model": "m",
+			"base_url":    regions[2].URL, // OpenCode Go
+			"api_key_env": "OPENCODE_GO_API_KEY"}}}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.regionEnvBeforeAdopt = "ZHIPU_INTL_1_API_KEY"
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+
+	m.cycleFocused(+1)
+	if got := asString(m.llmMap()["provider"]); got == "zhipu" {
+		t.Fatal("provider cycle did not move off zhipu")
+	}
+	if m.regionEnvBeforeAdopt != "" {
+		t.Fatalf("memo = %q after provider switch, want cleared", m.regionEnvBeforeAdopt)
+	}
+}
+
+// TestPresetEditorDeepseekRegionCycleRoundTrip is the deepseek half of the F2
+// contract. deepseek's table has a Custom sentinel instead of a second real
+// region, and its first row declares DEEPSEEK_API_KEY, so the full lap is
+// DeepSeek API → OpenCode Go → Custom → DeepSeek API. Landing on Custom must
+// leave api_key_env alone (documented, intended: the user's free-typed
+// endpoint keeps whatever slot it actually uses), and the lap must end back
+// on DEEPSEEK_API_KEY.
+func TestPresetEditorDeepseekRegionCycleRoundTrip(t *testing.T) {
+	regions := preset.ProviderRegionURLs["deepseek"]
+	if len(regions) != 3 || regions[2].URL != "" {
+		t.Fatalf("deepseek table changed shape: %#v", regions)
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	llm := m.llmMap()
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("template api_key_env = %q, want DEEPSEEK_API_KEY", got)
+	}
+
+	m.cycleFocused(+1) // DeepSeek API -> OpenCode Go
+	if got := asString(llm["base_url"]); got != regions[1].URL {
+		t.Fatalf("->OpenCodeGo base_url = %q, want %q", got, regions[1].URL)
+	}
+	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+
+	m.cycleFocused(+1) // OpenCode Go -> Custom (sentinel: clears base_url, keeps the slot)
+	if got := asString(llm["base_url"]); got != "" {
+		t.Fatalf("->Custom base_url = %q, want cleared", got)
+	}
+	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("->Custom api_key_env = %q, want untouched OPENCODE_GO_API_KEY", got)
+	}
+
+	m.cycleFocused(+1) // Custom -> DeepSeek API (wrap): row declares its own slot
+	if got := asString(llm["base_url"]); got != regions[0].URL {
+		t.Fatalf("->DeepSeek API base_url = %q, want %q", got, regions[0].URL)
+	}
+	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("round trip ended on api_key_env = %q, want DEEPSEEK_API_KEY", got)
+	}
+
+	// And the reverse lap, so neither direction is a one-way door.
+	m.cycleFocused(-1) // DeepSeek API -> Custom
+	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("reverse ->Custom api_key_env = %q, want untouched DEEPSEEK_API_KEY", got)
+	}
+	m.cycleFocused(-1) // Custom -> OpenCode Go
+	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("reverse ->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+	m.cycleFocused(-1) // OpenCode Go -> DeepSeek API
+	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("reverse ->DeepSeek API api_key_env = %q, want DEEPSEEK_API_KEY", got)
 	}
 }

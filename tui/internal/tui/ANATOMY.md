@@ -24,6 +24,7 @@ related_files:
   - tui/internal/tui/doctor_intrinsic.go
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/preset_editor_test.go
+  - tui/internal/tui/e2e_opencode_go_test.go
   - tui/internal/tui/preset_library.go
   - tui/internal/tui/settings.go
   - tui/internal/tui/addon.go

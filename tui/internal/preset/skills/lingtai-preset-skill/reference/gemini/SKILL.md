@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `gemini`
 
-`geminiPreset()` (`tui/internal/preset/preset.go:1063-1090`) ships provider
+`geminiPreset()` (`tui/internal/preset/preset.go:1201-1228`) ships provider
 `gemini` with the exact default model `gemini-3-flash-preview` and
 `GEMINI_API_KEY`. It uses Google’s native adapter: there is no `base_url` or
 OpenAI-compat override. Its manifest includes

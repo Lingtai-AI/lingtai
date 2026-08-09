@@ -109,7 +109,6 @@ related_files:
   - tui/internal/preset/skills/lingtai-portal-guide/reference/lifecycle-and-recording/SKILL.md
   - tui/internal/preset/skills/lingtai-portal-guide/reference/overview/SKILL.md
   - tui/internal/preset/skills/lingtai-portal-guide/reference/topology-and-api/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/opencode-go/SKILL.md
   - tui/internal/preset/skills/lingtai-recipe/SKILL.md
   - tui/internal/preset/skills/lingtai-recipe/assets/gitignore.template
   - tui/internal/preset/skills/lingtai-recipe/reference/export-recipe/SKILL.md

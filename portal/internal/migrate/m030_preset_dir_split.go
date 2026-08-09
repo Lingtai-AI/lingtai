@@ -132,8 +132,8 @@ func migratePresetDirSplit(lingtaiDir string) error {
 // rewrite happened. Paths that already include "/templates/" or
 // "/saved/" pass through unchanged.
 //
-// Mirrors the IsBuiltin name list — keep in sync with
-// preset.builtinNames (which lives in a different package).
+// Classification uses migrateBuiltinNames, which is frozen at the m030-era
+// builtin set — not a live mirror of preset.builtinNames.
 func rewritePresetRef(s string) (string, bool) {
 	if s == "" {
 		return s, false
@@ -165,8 +165,16 @@ func rewritePresetRef(s string) (string, bool) {
 	return s[:idx+len(seg)] + subdir + "/" + tail, true
 }
 
-// migrateBuiltinNames mirrors preset.builtinNames. Duplicated here so
+// migrateBuiltinNames is the builtin template-name set as it stood when
+// m030 shipped, frozen. It is NOT a live mirror of preset.builtinNames and
+// must not be resynced with it: m030 classifies files written by m030-era
+// binaries, so a legacy flat presets/opencode-go.json still belongs in
+// templates/ even though preset.builtinNames has since dropped
+// "opencode-go"/"opencode_go" (the preset was retired). Duplicated here so
 // the migration package stays decoupled from preset.
+//
+// Nothing enforces any relationship between the two maps — no test asserts
+// they agree, and none should, since divergence is the intended state.
 var migrateBuiltinNames = map[string]bool{
 	"minimax":          true,
 	"zhipu":            true,

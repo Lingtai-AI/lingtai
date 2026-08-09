@@ -260,6 +260,17 @@ type PresetEditorModel struct {
 	apiKey       string
 	apiKeySet    bool
 
+	// regionEnvBeforeAdopt remembers the api_key_env the preset carried
+	// just before a base_url cycle landed on a region row that declares
+	// its own credential (OpenCode Go -> OPENCODE_GO_API_KEY). Cycling
+	// back off that row restores it, so adopting a region credential is
+	// a reversible move rather than a one-way door: the zhipu/minimax
+	// CN/INTL rows declare no Env of their own, so without this memo one
+	// extra → press would wrap to CN while still resolving through
+	// OPENCODE_GO_API_KEY and destroy the user's ZHIPU_INTL_1_API_KEY.
+	// Empty means "nothing to restore" (fall back to ProviderDefaultEnv).
+	regionEnvBeforeAdopt string
+
 	// Status
 	saveErr string
 }
@@ -531,11 +542,22 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feBaseURL:
-		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op.
-		// Other providers get free-text inline edit.
+		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op
+		// only while the current value is one of the known non-empty region
+		// URLs. The Custom option (empty-URL sentinel) and any free-typed URL
+		// open free-text inline edit instead. The selection rule is shared with
+		// cycleFocused and baseURLRadioStrip via selectedRegionIndex.
+		//
+		// selectedRegionIndex returns -1 for an off-list value on a provider
+		// with no Custom row; that opens inline edit too, which is the only
+		// way to correct such a value from the editor.
 		provider := asString(m.llmMap()["provider"])
-		if _, hasRegions := preset.ProviderRegionURLs[provider]; hasRegions {
-			return *m, nil
+		current := asString(m.llmMap()["base_url"])
+		regions, hasRegions := preset.ProviderRegionURLs[provider]
+		if hasRegions && len(regions) > 0 {
+			if idx := selectedRegionIndex(regions, current); idx >= 0 && regions[idx].URL != "" {
+				return *m, nil
+			}
 		}
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
@@ -958,11 +980,32 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 				m.llmMap()["model"] = models[0]
 			}
 		}
-		// Reset base_url to the new provider's default region when
-		// switching to a provider with known regional endpoints.
+		// Reset base_url and the credential env-var slot to the new
+		// provider's defaults when switching to a provider with known
+		// regional endpoints. base_url adopts the first region (the
+		// default); api_key_env is reset from ProviderDefaultEnv so a slot
+		// adopted from a previous base_url cycle (e.g. OpenCode Go ->
+		// OPENCODE_GO_API_KEY) cannot follow the user into the next
+		// provider: a zhipu preset resolving through OPENCODE_GO_API_KEY
+		// reports "no key" for someone who has ZHIPU_API_KEY set, or sends
+		// the wrong key to bigmodel.cn.
+		//
+		// The api_key_env reset is unconditional and comes from the
+		// provider map, NOT from regions[0].Env: zhipu/minimax region rows
+		// declare no Env precisely so a CN<->INTL base_url cycle preserves
+		// the region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY)
+		// instead of overwriting it with a region-agnostic one. Providers
+		// absent from ProviderDefaultEnv (none today; map is exhaustive)
+		// keep their current api_key_env. The memoized pre-adoption slot goes
+		// with it: it was taken from the previous provider's region cycle and
+		// must not be restorable onto this one.
 		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
 			m.llmMap()["base_url"] = regions[0].URL
 		}
+		if env, ok := preset.ProviderDefaultEnv[newProvider]; ok {
+			m.llmMap()["api_key_env"] = env
+		}
+		m.regionEnvBeforeAdopt = ""
 	case feModel:
 		// If the current provider has a known model lineup, cycle through
 		// it. Otherwise no-op — Enter on free-text providers (custom,
@@ -975,11 +1018,72 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feBaseURL:
 		provider := asString(m.llmMap()["provider"])
 		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
-			urls := make([]string, len(regions))
-			for i, r := range regions {
-				urls[i] = r.URL
+			idx := selectedRegionIndex(regions, m.fieldString(f))
+			var next, prev preset.RegionURL
+			if idx >= 0 {
+				prev = regions[idx]
 			}
-			m.llmMap()["base_url"] = cycleString(urls, m.fieldString(f), dir)
+			if idx < 0 {
+				// Off-list value on a provider with no Custom row: nothing is
+				// selected, so enter the list at its edge the way cycleString
+				// does — first option going right, last going left.
+				if dir < 0 {
+					next = regions[len(regions)-1]
+				} else {
+					next = regions[0]
+				}
+			} else {
+				next = regions[(idx+dir+len(regions))%len(regions)]
+			}
+			if next.URL == "" {
+				// Moving onto the Custom free-text sentinel: clear the value
+				// so Enter opens a blank inline edit. This branch is only
+				// reachable from a known region option; an off-list typed URL
+				// resolves to the Custom row, so cycling away from it goes
+				// straight to a real region and never clears the typed value
+				// as a side effect.
+				m.llmMap()["base_url"] = ""
+				break
+			}
+			m.llmMap()["base_url"] = next.URL
+			// Region options can carry an implied credential env-var (e.g.
+			// DeepSeek API -> DEEPSEEK_API_KEY, OpenCode Go ->
+			// OPENCODE_GO_API_KEY); adopt it when the selected option declares
+			// one. The Custom option declares none, so landing on it leaves
+			// api_key_env untouched and the user keeps whatever credential
+			// slot their endpoint actually uses.
+			//
+			// The adoption must be REVERSIBLE. deepseek self-heals on the way
+			// out (its DeepSeek API row declares DEEPSEEK_API_KEY), but the
+			// zhipu/minimax CN/INTL rows deliberately declare no Env, so
+			// wrapping past OpenCode Go back to CN would otherwise leave the
+			// preset pointing at bigmodel.cn while resolving through
+			// OPENCODE_GO_API_KEY — silently destroying the user's
+			// ZHIPU_INTL_1_API_KEY. Memoize the slot on the way in and put it
+			// back on the way out.
+			//
+			// The restore is keyed on the STATE, not on the previously
+			// selected row: an off-list base_url yields no selected row at all
+			// (selectedRegionIndex == -1 on zhipu/minimax), and a preset that
+			// pairs such a URL with OPENCODE_GO_API_KEY must still be healed on
+			// the way onto CN rather than ride the adopted slot along.
+			switch {
+			case next.Env != "":
+				cur := asString(m.llmMap()["api_key_env"])
+				if prev.Env == "" && !regionDeclaredEnv(provider, cur) {
+					m.regionEnvBeforeAdopt = cur
+				}
+				m.llmMap()["api_key_env"] = next.Env
+			default: // next.Env == ""
+				if cur := asString(m.llmMap()["api_key_env"]); regionDeclaredEnv(provider, cur) {
+					restore := m.regionEnvBeforeAdopt
+					if restore == "" {
+						restore = preset.ProviderDefaultEnv[provider]
+					}
+					m.llmMap()["api_key_env"] = restore
+					m.regionEnvBeforeAdopt = ""
+				}
+			}
 		}
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
@@ -1066,8 +1170,23 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		// Without this, the user's pasted key would overwrite the
 		// template's shared slot (e.g. MIMO_API_KEY), polluting any
 		// other preset that references it.
+		//
+		// Exception: a CROSS-PROVIDER account a region row declares
+		// (OpenCode Go -> OPENCODE_GO_API_KEY) — the whole point of picking
+		// that base_url option is to resolve through that one credential.
+		// Dropping it here would make stampAutoEnvVar mint an unrelated
+		// PROVIDER_N slot, so a user who already configured OpenCode Go on
+		// deepseek would have to paste the same key again for zhipu. Keep it.
+		//
+		// The provider's OWN default slot is not such a case even when a
+		// region row declares it (DeepSeek API -> DEEPSEEK_API_KEY): that is
+		// the template's shared slot in the same sense as MIMO_API_KEY above,
+		// so it is dropped like any other and stampAutoEnvVar mints
+		// DEEPSEEK_1_API_KEY.
 		if llm, ok := committed.Manifest["llm"].(map[string]interface{}); ok {
-			delete(llm, "api_key_env")
+			if !usesRegionDeclaredEnv(llm) {
+				delete(llm, "api_key_env")
+			}
 		}
 	}
 	normalizeLLMForCommit(committed.Manifest)
@@ -1550,6 +1669,13 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 // strip showing region labels (e.g. "● CN  ○ INTL") when the current
 // provider has regional endpoints. Returns "" when there's no region
 // list — caller falls back to the standard single-value render.
+// A region with an empty URL is the free-text "Custom" sentinel: it is
+// selected whenever the current base_url is empty or doesn't match any
+// known non-empty region URL, and the typed endpoint is appended after
+// the strip so it stays visible (the strip path hides the raw value).
+// A provider with no Custom row and an off-list base_url has nothing to
+// select: every dot renders hollow and the raw value is appended, so the
+// strip never claims an endpoint the preset does not point at.
 func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	provider := asString(m.llmMap()["provider"])
 	regions, ok := preset.ProviderRegionURLs[provider]
@@ -1558,9 +1684,10 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 	}
 	current := asString(m.llmMap()["base_url"])
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	selected := selectedRegionIndex(regions, current)
 	parts := make([]string, 0, len(regions))
-	for _, r := range regions {
-		if r.URL == current {
+	for i, r := range regions {
+		if i == selected {
 			if focused {
 				parts = append(parts, valStyle.Render("● "+r.Label))
 			} else {
@@ -1570,11 +1697,17 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 			parts = append(parts, subtle.Render("○ "+r.Label))
 		}
 	}
-	return strings.Join(parts, "  ")
+	strip := strings.Join(parts, "  ")
+	// Custom, an unknown typed URL, or an off-list value on a provider with no
+	// Custom row (selected < 0) shows the actual endpoint after the strip so
+	// the user always sees exactly what will be saved.
+	if (selected < 0 || regions[selected].URL == "") && current != "" {
+		strip += "  " + subtle.Render(current)
+	}
+	return strip
 }
 
-// wireAPIRadioStrip renders all three wire choices so Custom OpenAI users
-// can see the selector rather than only the current raw manifest value.
+// wireAPIRadioStrip renders all three wire choices so Custom OpenAI users can see the selector rather than only the current raw manifest value.
 func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	current := m.fieldString(feWireAPI)
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -1941,6 +2074,79 @@ func maskAPIKey(key string) string {
 		return strings.Repeat("•", len(key))
 	}
 	return "••••••••" + key[len(key)-4:]
+}
+
+// usesRegionDeclaredEnv reports whether llm's current api_key_env is a
+// CROSS-PROVIDER shared credential its current base_url's region row declares
+// (today only OpenCode Go -> OPENCODE_GO_API_KEY). Picking such a row means
+// "resolve through that one account", so commit() must not strip the slot from
+// an edited built-in and mint an unrelated PROVIDER_N one.
+//
+// The provider's own ProviderDefaultEnv is deliberately excluded even when a
+// region row declares it (deepseek's DeepSeek API row declares
+// DEEPSEEK_API_KEY): that is the template's shared slot, exactly what
+// per-preset numbering exists to replace, so keeping it would let a second
+// deepseek preset overwrite the first one's key. A free-typed URL, an Env-less
+// region row (zhipu/minimax CN/INTL), or a mismatched slot all return false.
+func usesRegionDeclaredEnv(llm map[string]interface{}) bool {
+	env := asString(llm["api_key_env"])
+	baseURL := asString(llm["base_url"])
+	if env == "" || baseURL == "" {
+		return false
+	}
+	provider := asString(llm["provider"])
+	for _, r := range preset.ProviderRegionURLs[provider] {
+		if r.URL == baseURL && r.Env != "" {
+			return r.Env == env && r.Env != preset.ProviderDefaultEnv[provider]
+		}
+	}
+	return false
+}
+
+// regionDeclaredEnv reports whether env is a credential slot ANY region row of
+// provider declares, regardless of which row is currently selected. This is the
+// state-shaped question cycleFocused asks when landing on an Env-less row: a
+// preset resolving through a row-declared slot while pointing somewhere that
+// row does not cover is the thing the restore exists to undo, and keying the
+// restore on the state rather than on the previously selected row also covers
+// selectedRegionIndex == -1 (an off-list base_url on a provider with no Custom
+// row).
+func regionDeclaredEnv(provider string, env string) bool {
+	if env == "" {
+		return false
+	}
+	for _, r := range preset.ProviderRegionURLs[provider] {
+		if r.Env == env {
+			return true
+		}
+	}
+	return false
+}
+
+// selectedRegionIndex resolves which ProviderRegionURLs option is selected
+// for the given current base_url. A value matching a known non-empty URL
+// selects that option; the empty-URL Custom sentinel absorbs an empty or
+// free-typed value.
+//
+// Returns -1 — "no region selected" — when the value matches nothing and the
+// provider has no Custom row (zhipu, minimax). Callers MUST handle that case
+// rather than index with it: falling back to index 0 would render a solid
+// dot on CN for a preset that points somewhere else entirely, stating
+// positively something that is false. All consumers (openInline,
+// baseURLRadioStrip, cycleFocused) share this rule so the strip's
+// highlighted dot, the Enter no-op, and the cycle always agree.
+func selectedRegionIndex(regions []preset.RegionURL, current string) int {
+	for i, r := range regions {
+		if r.URL != "" && r.URL == current {
+			return i
+		}
+	}
+	for i, r := range regions {
+		if r.URL == "" {
+			return i
+		}
+	}
+	return -1
 }
 
 // cycleString rotates `cur` through `opts` by `dir` steps. Unknown
