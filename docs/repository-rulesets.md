@@ -193,6 +193,20 @@ The rejection is the proof. Note that the probe tag is now itself undeletable �
 is the same property working as intended — so clearing it requires the recovery path
 below.
 
+The probe push also fires `release.yml`: its trigger is `on: push: tags: ['v*']`, the
+same glob the ruleset targets, so any tag that exercises the rule necessarily starts
+the release pipeline. Expect `source-release` to succeed and **publish a public GitHub
+release named `v0.0.0-ruleset-probe`** — it has no tag-shape gate — while
+`update-homebrew` and `windows-release` fail their exact-`vX.Y.Z` gate, which is the
+correct outcome and not a fault to chase. Delete the release afterwards:
+
+```bash
+gh release delete v0.0.0-ruleset-probe --yes
+```
+
+Do **not** add `--cleanup-tag`: deleting the tag is what the ruleset blocks, so the
+whole command fails. Clear the tag itself via the Recovery section below.
+
 ## Recovery — undoing a tag once `release-tags.json` is active
 
 `release-tags.json` ships `bypass_actors: []` with `deletion`, `update` and
@@ -219,15 +233,23 @@ gh api "repos/Lingtai-AI/lingtai/rulesets?targets=tag" --jq '.[] | {id, name}'
 gh api -X PUT repos/Lingtai-AI/lingtai/rulesets/<id> -f enforcement=disabled
 gh api repos/Lingtai-AI/lingtai/rulesets/<id> --jq .enforcement    # -> "disabled"
 
-# 3. Delete or re-cut the tag.
+# 3. Delete OR re-cut the tag — run one of these two, not both.
+#    (a) delete it outright:
 git push origin :refs/tags/vX.Y.Z
-git tag -f vX.Y.Z <sha> && git push origin vX.Y.Z
+#    (b) or re-point it at another commit; -f is needed on both sides,
+#        since moving a tag is not a fast-forward:
+git tag -f vX.Y.Z <sha> && git push -f origin vX.Y.Z
 
 # 4. Re-enable, and confirm again. Do not skip this read-back.
 gh api -X PUT repos/Lingtai-AI/lingtai/rulesets/<id> -f enforcement=active
 gh api repos/Lingtai-AI/lingtai/rulesets/<id> \
   --jq '{enforcement, conditions, rules: [.rules[].type]}'
 ```
+
+Re-pushing `vX.Y.Z` in step 3 re-triggers `release.yml`, which is what you want here:
+`source-release` detects the existing release and preserves it, and `update-homebrew`
+recomputes the sha256 against the new tarball and pushes the formula — the exact repair
+the stale-pin concern above calls for.
 
 Step 4's read-back must show `enforcement: "active"` *and* a non-empty
 `conditions.ref_name.include`. Checking only `enforcement` reproduces the original bug:
@@ -246,7 +268,9 @@ bypass list — `{ "actor_type": "OrganizationAdmin", "actor_id": 1, "bypass_mod
 
 - `Lingtai-AI/homebrew-lingtai` — the tap that `release.yml` pushes to — has no
   rulesets either. The same treatment applies there.
-- `bypass_actors` on the two existing rulesets is not readable without admin. Audit it
+- `bypass_actors` on both existing rulesets was read with an admin token and is `[]`
+  (`current_user_can_bypass: "never"` on each). Nothing bypasses them today, so the
+  `conditions` repair is not silently undone by an inherited bypass list. Re-check this
   when applying: a bypass list survives a `conditions` repair and would quietly undo it.
 - A CODEOWNERS file is only load-bearing once `require_code_owner_review` is `true` in
   the `pull_request` rule. Adding one before that changes nothing.
