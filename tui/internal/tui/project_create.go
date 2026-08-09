@@ -210,10 +210,6 @@ func validateDraftForCommit(draft *ProjectDraft, expectedProjectRoot string) err
 		return fmt.Errorf("selected preset %q is invalid: %w", draft.DraftPreset.Name, errs[0])
 	}
 
-	if draft.RecipeName == preset.RecipeCustom && strings.TrimSpace(draft.RecipeCustomDir) == "" {
-		return fmt.Errorf("custom recipe selected but no custom recipe directory given")
-	}
-
 	return nil
 }
 
@@ -450,13 +446,15 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 
 	// 3c. Recipe bundle staging + init.json + apply — all against the
 	// staging dir, exactly mirroring firstrun.go's performRecipeSave but
-	// targeting stagingDir instead of the real project.
+	// targeting stagingDir instead of the real project. The wizard always
+	// stages the adaptive recipe (preset.DefaultRecipe), resolved by name
+	// from the global recipes tree.
 	if err := injected(PhaseApplyRecipe); err != nil {
 		cleanupStaging()
 		return fail(PhaseApplyRecipe, err)
 	}
 	if draft.RecipeName != "" {
-		stagedProjectRoot, err := copyRecipeBundleWithEmbedded(stagingDir, opts.GlobalDir, draft.RecipeName, draft.RecipeCustomDir, draft.RecipeEmbedded)
+		stagedProjectRoot, err := copyRecipeBundle(stagingDir, opts.GlobalDir, preset.DefaultRecipe)
 		if err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("stage recipe bundle: %w", err))
@@ -481,14 +479,15 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		if agentOpts.SoulDelay != nil {
 			soulDelayStr = formatNumber(*agentOpts.SoulDelay)
 		}
-		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, draft.RecipeName, draft.RecipeCustomDir, lang, soulDelayStr); err != nil {
+		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, preset.DefaultRecipe, lang, soulDelayStr); err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("apply staged recipe: %w", err))
 		}
 	} else {
-		// No recipe selected — still need a valid init.json for the
-		// orchestrator so the "exactly one orchestrator" invariant and
-		// the eventual launch succeed.
+		// No recipe on the draft (defensive — the wizard always stages
+		// adaptive) — still need a valid init.json for the orchestrator so
+		// the "exactly one orchestrator" invariant and the eventual launch
+		// succeed.
 		if err := preset.GenerateInitJSONWithOpts(chosenPreset, agentName, dirName, stagingDir, opts.GlobalDir, draft.AgentOpts); err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("write staged init.json: %w", err))

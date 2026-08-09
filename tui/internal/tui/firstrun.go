@@ -103,10 +103,8 @@ const (
 	stepCapabilities
 	stepAgentPresets // pick default + multi-toggle allowed
 	stepAgentNameDir
-	stepRecipe            // picks a bundled/agora/custom recipe (adaptive, greeter, plain, tutorial, custom)
-	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
-	stepReview            // draftMode only — final "Start project" confirmation before staging/commit
-	stepPropagate         // rehydration only — runs after orchestrator save, before launch
+	stepReview    // draftMode only — final "Start project" confirmation before staging/commit
+	stepPropagate // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -136,11 +134,11 @@ type capInfo struct {
 // "Step 1/4" even on a machine with no presets yet.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
 	if setupMode {
-		total = 4 // library → presets-config → details → recipe
+		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
 	} else if hasPresets {
-		total = 4 // library → presets-config → details → recipe
+		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
 	} else {
-		total = 5 // api key → library → presets-config → details → recipe
+		total = 4 // api key • library • presets-config • details
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -159,11 +157,6 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 			return 3, total
 		}
 		return 4, total
-	case step == stepRecipe || step == stepRecipeSwapConfirm:
-		if setupMode || hasPresets {
-			return 4, total
-		}
-		return 5, total
 	case step == stepLaunching:
 		return total, total
 	}
@@ -360,31 +353,10 @@ type FirstRunModel struct {
 	addonCursor   int             // cursor when in addon zone
 	inAddonZone   bool            // true when cursor is in addon section
 
-	// Recipe picker state (stepRecipe)
-	recipeIdx          int                       // cursor in recipe list (0..4 or 0..5 if imported)
-	recipeCustomInput  textinput.Model           // folder path input for custom recipe
-	recipeCustomErr    string                    // validation error message
-	currentRecipe      string                    // loaded from .tui-asset/.recipe in setup mode
-	currentCustomDir   string                    // loaded from .tui-asset/.recipe in setup mode
-	preselectedRecipe  string                    // set by constructor for post-nirvana fresh start
-	localRecipeDir     string                    // non-empty if .recipe/ found in project root
-	importedRecipe     *preset.RecipeInfo        // non-nil if .recipe/ has valid recipe.json
-	importedRecipeDir  string                    // path to .recipe/ (only when importedRecipe != nil)
-	agoraRecipes       []preset.AgoraRecipe      // discovered from ~/lingtai-agora/recipes/
-	discoveredRecipes  []preset.DiscoveredRecipe // auto-discovered from recipes/<category>/
-	categoryBoundaries []int                     // index where each category starts in discoveredRecipes
-
-	// Recipe viewer (Ctrl+O from recipe picker)
-	recipeViewer *MarkdownViewerModel
-
-	// Pending save state (captured at end of stepAgentNameDir, consumed by stepRecipe)
+	// Pending save state (captured at end of stepAgentNameDir, consumed by the
+	// adaptive-commit finalizer)
 	pendingAgentOpts preset.AgentOpts
 	pendingDirName   string
-
-	// Swap-confirm state (stepRecipeSwapConfirm — wired in Task 9)
-	pendingRecipeName string
-	pendingCustomDir  string
-	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
 
 	// purpose is the typed discriminator visible to Update/Init. Normal and
 	// draft flows pass their purpose directly into the shared constructor;
@@ -424,10 +396,10 @@ const (
 // into `draft` (or, for Delete, is blocked entirely — see the delete-key
 // handler) and returns without touching the filesystem. purposeSetup and
 // purposeRehydrate are unaffected by this — their existing
-// persist-immediately behavior is unchanged. stepRecipe's Enter handler is
-// redirected to enterReviewStep instead of
-// performRecipeSave/performSetupSaveOnly when purpose == purposeDraft,
-// landing on stepReview instead of generating the project directly.
+// persist-immediately behavior is unchanged. The details-page Enter handler
+// commits adaptive directly (performRecipeSave) or, when purpose ==
+// purposeDraft, stages into the draft via enterReviewStep, landing on
+// stepReview instead of generating the project immediately.
 func (m FirstRunModel) withPurpose(p firstRunPurpose) FirstRunModel {
 	m.purpose = p
 	m.draftMode = p == purposeDraft
@@ -460,8 +432,8 @@ func (m *FirstRunModel) clearDraftPendingAPIKey(envName string) bool {
 // this is the public entry point every existing caller uses and its
 // behavior is unchanged. It delegates to the purpose-aware shared body so
 // purposeNormal callers keep their exact existing signature.
-func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
-	return newFirstRunModelForPurpose(purposeNormal, baseDir, globalDir, hasPresets, preselectedRecipe)
+func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
+	return newFirstRunModelForPurpose(purposeNormal, baseDir, globalDir, hasPresets)
 }
 
 // newFirstRunModelForPurpose is the shared constructor body for all four
@@ -485,7 +457,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 // only reads existing ~/.lingtai-tui/codex-auth*.json files (no writes, no
 // subprocess) and IS needed so the draft wizard's own Codex credential row
 // correctly reflects "already authed" state.
-func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
+func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir string, hasPresets bool) FirstRunModel {
 	ti := textinput.New()
 	ti.CharLimit = 64
 	ti.SetWidth(40)
@@ -538,11 +510,6 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	comi.CharLimit = 256
 	comi.SetWidth(50)
 	comi.Prompt = ""
-
-	rci := textinput.New()
-	rci.CharLimit = 512
-	rci.SetWidth(50)
-	rci.Placeholder = ".recipe/ or absolute path"
 
 	// Load existing keys from Config.Keys. purposeDraft uses
 	// LoadConfigReadOnly — identical read+parse+legacy-migration behavior,
@@ -598,36 +565,11 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 		commentInput:         comi,
 		nirvanaIdx:           1, // default false (1=false)
 		progressCh:           make(chan string, 4),
-		recipeCustomInput:    rci,
-		preselectedRecipe:    preselectedRecipe,
 		draftEditedPresetIdx: -1,
 		draftPendingAPIKeys:  make(map[string]secretString),
 		draftBaselineKeys:    draftBaselineKeys,
 	}
 	m = m.withPurpose(purpose)
-
-	// Detect project-local .recipe/ directory.
-	// The projectDir is one level up from baseDir (.lingtai/).
-	projectDir := filepath.Dir(baseDir)
-	if local := preset.ProjectLocalRecipeDir(projectDir); local != "" {
-		lang := "en"
-		if m.pendingAgentOpts.Language != "" {
-			lang = m.pendingAgentOpts.Language
-		}
-		if info, err := preset.LoadRecipeInfo(local, lang); err == nil {
-			m.importedRecipe = &info
-			m.importedRecipeDir = local
-		} else {
-			// Has .recipe/ but no valid recipe.json — fallback to custom pre-fill
-			m.localRecipeDir = local
-			m.recipeCustomInput.SetValue(local)
-		}
-	}
-
-	// Discover recipes (agora + bundled). On first run this may come up empty
-	// because preset.Bootstrap hasn't populated globalDir/recipes/ yet; the
-	// bootstrapDoneMsg handler re-runs discoverRecipes once bootstrap finishes.
-	m.discoverRecipes()
 
 	// Load OAuth / CLI auth status. Codex is local-file based (a read-only
 	// check of existing ~/.lingtai-tui/codex-auth*.json files — needed even
@@ -642,62 +584,7 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 		m.refreshClaudeCodeAuth()
 	}
 
-	// Default to imported recipe if detected and no explicit preselection
-	if m.importedRecipe != nil && preselectedRecipe == "" {
-		m.recipeIdx = 0
-	} else {
-		m.recipeIdx = m.recipeNameToIdx(preselectedRecipe)
-	}
-
 	return m
-}
-
-// discoverRecipes rescans agora and bundled recipes into the model. Safe to
-// call multiple times — resets the slices each call. Invoked from the
-// constructor and again from the bootstrapDoneMsg handler so first-run users
-// see bundled recipes as soon as preset.Bootstrap finishes writing them.
-func (m *FirstRunModel) discoverRecipes() {
-	lang := "en"
-	if m.pendingAgentOpts.Language != "" {
-		lang = m.pendingAgentOpts.Language
-	}
-	m.agoraRecipes = preset.ScanAgoraRecipes(lang)
-	m.discoveredRecipes = m.discoveredRecipes[:0]
-	m.categoryBoundaries = m.categoryBoundaries[:0]
-	for _, cat := range preset.RecipeCategories {
-		m.categoryBoundaries = append(m.categoryBoundaries, len(m.discoveredRecipes))
-		m.discoveredRecipes = append(m.discoveredRecipes, preset.ScanCategory(m.globalDir, cat, lang)...)
-	}
-	if !m.draftMode || len(m.discoveredRecipes) != 0 {
-		return
-	}
-
-	// Draft discovery cannot run Bootstrap before confirmation. When no
-	// disk-backed bundled recipe exists, expose the same compiled recipe set in
-	// memory; Dir stays empty so preview/apply callers cannot mistake it for a
-	// real global path. Imported/project-local and Agora choices remain owned by
-	// their existing slots, so an embedded ID already represented there is not
-	// duplicated.
-	seen := make(map[string]bool)
-	if m.importedRecipe != nil && m.importedRecipe.ID != "" {
-		seen[m.importedRecipe.ID] = true
-	}
-	for _, recipe := range m.agoraRecipes {
-		if recipe.Info.ID != "" {
-			seen[recipe.Info.ID] = true
-		}
-	}
-	m.categoryBoundaries = m.categoryBoundaries[:0]
-	for _, cat := range preset.RecipeCategories {
-		m.categoryBoundaries = append(m.categoryBoundaries, len(m.discoveredRecipes))
-		for _, recipe := range preset.ScanEmbeddedCategory(cat, lang) {
-			if seen[recipe.ID] {
-				continue
-			}
-			seen[recipe.ID] = true
-			m.discoveredRecipes = append(m.discoveredRecipes, recipe)
-		}
-	}
 }
 
 // NewDraftFirstRunModel creates a FirstRunModel for the no-project
@@ -705,7 +592,7 @@ func (m *FirstRunModel) discoverRecipes() {
 // NewFirstRunModel EXCEPT every step that would otherwise persist
 // immediately is redirected into draft (see withPurpose's doc comment).
 // baseDir/globalDir are still passed through unchanged — they are used only
-// for READS (loading existing config/presets/recipes to populate pickers),
+// for READS (loading existing config/presets to populate pickers),
 // never writes, while purpose is purposeDraft. hasPresets should reflect
 // whatever the caller already knows about the global presets directory (a
 // pure read, same as normal first-run construction).
@@ -734,7 +621,7 @@ func (m *FirstRunModel) discoverRecipes() {
 // picker — it never detours through stepAPIKey. Esc/Back/Ctrl+C at
 // stepPickPreset emit ProjectDraftCancelledMsg (see its doc comment).
 func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *ProjectDraft) FirstRunModel {
-	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets, "")
+	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets)
 	m.draft = draft
 	m.step = stepPickPreset
 	m.presets, _ = preset.List()
@@ -780,7 +667,7 @@ func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *Pr
 // NewSetupModeModel creates a FirstRunModel for /setup — skips welcome/bootstrap/tutorial,
 // starts at preset selection with presets preloaded, and overwrites the current agent on completion.
 func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunModel {
-	m := NewFirstRunModel(baseDir, globalDir, true, "")
+	m := NewFirstRunModel(baseDir, globalDir, true)
 	m = m.withPurpose(purposeSetup)
 	m.setupMode = true
 	m.setupOrchDir = orchDir
@@ -846,24 +733,6 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 		}
 	}
 
-	// Load current recipe state for pre-selection
-	state, _ := preset.LoadRecipeState(baseDir)
-	m.currentRecipe = state.Recipe
-	m.currentCustomDir = state.CustomDir
-	m.preselectedRecipe = state.Recipe
-	m.recipeIdx = -1 // default to "keep current" in setup mode
-	if state.Recipe == preset.RecipeAgora && state.CustomDir != "" {
-		for i, ar := range m.agoraRecipes {
-			if ar.Dir == state.CustomDir {
-				m.recipeIdx = m.recipeNameToIdx(preset.RecipeAgora) + i
-				break
-			}
-		}
-	}
-	if state.Recipe == preset.RecipeCustom && state.CustomDir != "" {
-		m.recipeCustomInput.SetValue(state.CustomDir)
-	}
-
 	// Self-heal proposal: when config.json is missing (or lacks keys) but
 	// ~/.lingtai-tui/.env still carries API keys — the running agents read
 	// them at boot via env_file — offer to regenerate config.json from .env
@@ -910,7 +779,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 // orchDir is the existing orchestrator directory name (not a full path),
 // and orchName is the agent_name read from that directory's .agent.json.
 func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets bool) FirstRunModel {
-	m := NewFirstRunModel(baseDir, globalDir, hasPresets, "")
+	m := NewFirstRunModel(baseDir, globalDir, hasPresets)
 	m = m.withPurpose(purposeRehydrate)
 	m.rehydrateMode = true
 	m.rehydrateOrchDir = orchDir
@@ -1027,25 +896,6 @@ func (m FirstRunModel) runBootstrap(ch chan<- string) tea.Cmd {
 }
 
 func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
-	// Delegate to recipe viewer if active
-	if m.recipeViewer != nil {
-		switch msg := msg.(type) {
-		case MarkdownViewerCloseMsg:
-			m.recipeViewer = nil
-			return m, nil
-		case tea.WindowSizeMsg:
-			updated, cmd := m.recipeViewer.Update(msg)
-			m.recipeViewer = &updated
-			m.width = msg.Width
-			m.height = msg.Height
-			return m, cmd
-		default:
-			updated, cmd := m.recipeViewer.Update(msg)
-			m.recipeViewer = &updated
-			return m, cmd
-		}
-	}
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1203,17 +1053,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		}
 		m.setupDone = true
 		m.setupStatus = ""
-		// Bundled recipes only exist on disk after preset.Bootstrap finishes.
-		// Re-scan and re-apply the constructor's default cursor logic so the
-		// recipe picker reflects the now-populated recipes/ directory on
-		// first run (otherwise the list stays empty until the user quits
-		// and relaunches the TUI).
-		m.discoverRecipes()
-		if m.importedRecipe != nil && m.preselectedRecipe == "" {
-			m.recipeIdx = 0
-		} else {
-			m.recipeIdx = m.recipeNameToIdx(m.preselectedRecipe)
-		}
 		return m, nil
 
 	case bootstrapErrMsg:
@@ -2424,8 +2263,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// "keep current" branch) — fall through to the
 				// save-and-advance logic below.
 				if m.fieldIdx == -1 && m.setupMode {
-					// Skip — keep existing agent settings, jump to recipe.
-					// Stash current values for stepRecipe.
+					// Skip — keep existing agent settings, commit adaptive directly.
+					// Stash current values for the adaptive-commit finalizer.
 					ctxLimit, _ := strconv.Atoi(m.ctxLimitInput.Value())
 					if ctxLimit <= 0 {
 						ctxLimit = 300000
@@ -2461,14 +2300,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.pendingAgentOpts = opts
 					m.pendingDirName = filepath.Base(m.setupOrchDir)
 					m.agentName = m.nameInput.Value()
-					m.step = stepRecipe
 					m.message = ""
-					if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-						m.recipeCustomInput.Focus()
-					} else {
-						m.recipeCustomInput.Blur()
-					}
-					return m, nil
+					return m.applyDefaultRecipeAndAdvance()
 				}
 				name := m.nameInput.Value()
 				if name == "" {
@@ -2501,7 +2334,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					SoulFile:        m.soulFlowInput.Value(),
 					CommentFile:     m.commentInput.Value(),
 					AllowedPresets:  m.allowedPresetRefs(),
-					// CommentFile is set by stepRecipe from the chosen recipe
+					// CommentFile is resolved from the staged .recipe/ in the finalizer
 				}
 				var selectedAddons []string
 				for _, addonName := range m.addonOrder {
@@ -2530,22 +2363,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 				}
 
-				// Stash for stepRecipe to consume
+				// Stash for the adaptive-commit finalizer to consume
 				m.pendingAgentOpts = opts
 				m.pendingDirName = dirName
 				if m.setupMode {
 					m.pendingDirName = filepath.Base(m.setupOrchDir)
 				}
 
-				m.step = stepRecipe
 				m.message = ""
-				// Focus custom input if pre-selected to custom
-				if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-					m.recipeCustomInput.Focus()
-				} else {
-					m.recipeCustomInput.Blur()
-				}
-				return m, nil
+				return m.applyDefaultRecipeAndAdvance()
 			case "esc":
 				// stepCapabilities was removed from the flow — Esc from
 				// the agent-name page returns to the preset picker.
@@ -2580,155 +2406,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, cmd
 			}
 
-		case stepRecipe:
-			minIdx := 0
-			if m.setupMode {
-				minIdx = -1 // allow "keep current" at index -1
-			}
-			recipeBackIdx := m.recipeMaxIdx() + 1
-			recipeLastIdx := recipeBackIdx
-			// recipeDoNext encapsulates the save-and-advance logic
-			// triggered by Enter on a recipe row.
-			recipeDoNext := func() (FirstRunModel, tea.Cmd) {
-				if m.recipeIdx == -1 {
-					return m.performSetupSaveOnly()
-				}
-				recipeName := m.recipeIdxToName(m.recipeIdx)
-				customDir := ""
-				if recipeName == preset.RecipeImported {
-					customDir = m.importedRecipeDir
-				} else if recipeName == preset.RecipeAgora {
-					if ar := m.agoraRecipeAt(m.recipeIdx); ar != nil {
-						customDir = ar.Dir
-					}
-				} else if recipeName == preset.RecipeCustom {
-					customDir = m.recipeCustomInput.Value()
-					if err := preset.ValidateCustomDir(customDir); err != nil {
-						m.recipeCustomErr = err.Error()
-						return m, nil
-					}
-				}
-				if m.draftMode {
-					// New-project draft flow: stage the recipe choice into
-					// the in-memory draft and move to the review step
-					// instead of writing init.json/.recipe/.prompt now.
-					// copyRecipeBundle/GenerateInitJSONWithOpts/applyRecipe
-					// all run later, against a STAGING directory, from the
-					// finalizer's build phase (project_create.go) — never
-					// here, and never against the real project root.
-					return m.enterReviewStep(recipeName, customDir)
-				}
-				if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
-					m.pendingRecipeName = recipeName
-					m.pendingCustomDir = customDir
-					m.step = stepRecipeSwapConfirm
-					m.swapConfirmIdx = 0
-					return m, nil
-				}
-				return m.performRecipeSave(recipeName, customDir)
-			}
-
-			switch msg.String() {
-			case "up":
-				if m.recipeIdx > minIdx {
-					m.recipeIdx--
-					m.recipeCustomErr = ""
-				}
-				if m.recipeIdx == m.recipeMaxIdx() {
-					m.recipeCustomInput.Focus()
-				} else {
-					m.recipeCustomInput.Blur()
-				}
-				return m, nil
-			case "down":
-				if m.recipeIdx < recipeLastIdx {
-					m.recipeIdx++
-					m.recipeCustomErr = ""
-				}
-				if m.recipeIdx == m.recipeMaxIdx() {
-					m.recipeCustomInput.Focus()
-				} else {
-					m.recipeCustomInput.Blur()
-				}
-				return m, nil
-			case "tab", "shift+tab":
-				m.recipeIdx = recipeBackIdx
-				m.recipeCustomInput.Blur()
-				return m, nil
-			case "ctrl+o":
-				if m.recipeIdx == -1 || m.recipeIdx == recipeBackIdx {
-					return m, nil
-				}
-				recipeName := m.recipeIdxToName(m.recipeIdx)
-				recipeDir := m.resolveCurrentRecipeDir()
-				var entries []MarkdownEntry
-				if m.recipeIdxIsEmbedded(m.recipeIdx) {
-					// Embedded fallback recipes have no truthful disk path;
-					// render their files as in-memory MarkdownEntry content.
-					entries = buildEmbeddedRecipeEntries(recipeName, m.currentAgentLanguage())
-				} else if recipeDir != "" {
-					entries = buildRecipeEntries(recipeDir, m.currentAgentLanguage())
-				}
-				if len(entries) == 0 {
-					return m, nil
-				}
-				viewer := NewMarkdownViewer(entries, i18n.T("recipe.preview"))
-				m.recipeViewer = &viewer
-				return m, nil
-			case "esc":
-				m.step = stepAgentNameDir
-				m.message = ""
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			case "enter":
-				// Footer button activation
-				if m.recipeIdx == recipeBackIdx {
-					m.step = stepAgentNameDir
-					m.message = ""
-					return m, nil
-				}
-				return recipeDoNext()
-
-			default:
-				if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom { // custom selected -- forward to input
-					var cmd tea.Cmd
-					m.recipeCustomInput, cmd = m.recipeCustomInput.Update(msg)
-					return m, cmd
-				}
-				return m, nil
-			}
-
-		case stepRecipeSwapConfirm:
-			switch msg.String() {
-			case "up":
-				if m.swapConfirmIdx > 0 {
-					m.swapConfirmIdx--
-				}
-				return m, nil
-			case "down":
-				if m.swapConfirmIdx < 1 {
-					m.swapConfirmIdx++
-				}
-				return m, nil
-			case "esc":
-				m.step = stepRecipe
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			case "enter":
-				switch m.swapConfirmIdx {
-				case 0: // Swap in place
-					return m.performRecipeSave(m.pendingRecipeName, m.pendingCustomDir)
-				case 1: // Cancel
-					m.step = stepRecipe
-					return m, nil
-				}
-			}
-			return m, nil
-
 		case stepReview:
-			// draftMode only. Esc goes back to the recipe picker (still no
+			// draftMode only. Esc goes back to the details page (still no
 			// writes); Enter emits ProjectDraftConfirmedMsg so the hosting
 			// launcher model (not FirstRunModel) drives the staging
 			// finalizer in project_create.go. FirstRunModel never performs
@@ -2737,7 +2416,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// produces a complete ProjectDraft.
 			switch msg.String() {
 			case "esc":
-				m.step = stepRecipe
+				m.step = stepAgentNameDir
 				m.message = ""
 				return m, nil
 			case "ctrl+c":
@@ -2806,10 +2485,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
 			case 12:
 				m.commentInput, cmd = m.commentInput.Update(msg)
-			}
-		case stepRecipe:
-			if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-				m.recipeCustomInput, cmd = m.recipeCustomInput.Update(msg)
 			}
 		case stepAPIKey:
 			m.setup, cmd = m.setup.Update(msg)
@@ -3447,15 +3122,6 @@ func (m FirstRunModel) View() string {
 			"  [tab] "+i18n.T("firstrun.next_field")+
 			"  [enter] "+i18n.T("firstrun.activate_button")+
 			"  [esc] "+i18n.T("firstrun.back")) + "\n")
-
-	case stepRecipe:
-		if m.recipeViewer != nil {
-			return m.recipeViewer.View()
-		}
-		return m.viewRecipe()
-
-	case stepRecipeSwapConfirm:
-		return m.viewRecipeSwapConfirm()
 
 	case stepReview:
 		return m.viewReview()
@@ -4666,159 +4332,6 @@ func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
 	return !hasKey || val == ""
 }
 
-func (m FirstRunModel) hasImportedRecipe() bool {
-	return m.importedRecipe != nil
-}
-
-func (m FirstRunModel) recipeMaxIdx() int {
-	base := len(m.discoveredRecipes)
-	if m.hasImportedRecipe() {
-		base++
-	}
-	base += len(m.agoraRecipes)
-	return base // custom is the max
-}
-
-func (m FirstRunModel) recipeNameToIdx(name string) int {
-	offset := 0
-	if m.hasImportedRecipe() {
-		if name == preset.RecipeImported {
-			return 0
-		}
-		offset = 1
-	}
-	for i, r := range m.discoveredRecipes {
-		if r.ID == name {
-			return i + offset
-		}
-	}
-	afterDiscovered := len(m.discoveredRecipes) + offset
-	if name == preset.RecipeAgora {
-		return afterDiscovered
-	}
-	if name == preset.RecipeCustom {
-		return afterDiscovered + len(m.agoraRecipes)
-	}
-	// No match. If caller asked for "default" (empty name), try to land on
-	// DefaultRecipe by ID before falling back to whatever's first.
-	if name == "" {
-		for i, r := range m.discoveredRecipes {
-			if r.ID == preset.DefaultRecipe {
-				return i + offset
-			}
-		}
-	}
-	return offset // default to first
-}
-
-func (m FirstRunModel) recipeIdxToName(idx int) string {
-	if idx < 0 {
-		return "" // sentinel for "keep current" in setup mode
-	}
-	if m.hasImportedRecipe() {
-		if idx == 0 {
-			return preset.RecipeImported
-		}
-		idx--
-	}
-	switch {
-	case idx < len(m.discoveredRecipes):
-		return m.discoveredRecipes[idx].ID
-	case idx < len(m.discoveredRecipes)+len(m.agoraRecipes):
-		return preset.RecipeAgora
-	default:
-		return preset.RecipeCustom
-	}
-}
-
-func (m FirstRunModel) recipeIdxIsEmbedded(idx int) bool {
-	if idx < 0 {
-		return false
-	}
-	if m.hasImportedRecipe() {
-		if idx == 0 {
-			return false
-		}
-		idx--
-	}
-	return idx >= 0 && idx < len(m.discoveredRecipes) && m.discoveredRecipes[idx].Embedded
-}
-
-// agoraRecipeAt returns the AgoraRecipe for the given picker index, or nil.
-func (m FirstRunModel) agoraRecipeAt(idx int) *preset.AgoraRecipe {
-	offset := 0
-	if m.hasImportedRecipe() {
-		offset = 1
-	}
-	agoraStart := len(m.discoveredRecipes) + offset
-	agoraIdx := idx - agoraStart
-	if agoraIdx < 0 || agoraIdx >= len(m.agoraRecipes) {
-		return nil
-	}
-	return &m.agoraRecipes[agoraIdx]
-}
-
-func recipeChanged(oldRecipe, oldCustomDir, newRecipe, newCustomDir string) bool {
-	if oldRecipe == "" {
-		return false // legacy project, no current recipe
-	}
-	if oldRecipe != newRecipe {
-		return true
-	}
-	if (oldRecipe == preset.RecipeCustom || oldRecipe == preset.RecipeImported || oldRecipe == preset.RecipeAgora) && oldCustomDir != newCustomDir {
-		return true
-	}
-	return false
-}
-
-// viewRecipe renders the recipe picker page.
-func (m FirstRunModel) viewRecipeSwapConfirm() string {
-	var b strings.Builder
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
-
-	b.WriteString("\n  " + titleStyle.Render(i18n.T("recipe.swap_title")) + "\n\n")
-	b.WriteString("  " + i18n.TF("recipe.swap_hint", m.currentRecipe, m.pendingRecipeName) + "\n\n")
-
-	type option struct {
-		label string
-		desc  string
-		warn  bool
-	}
-	opts := []option{
-		{i18n.T("recipe.swap_inplace"), i18n.T("recipe.swap_inplace_desc"), false},
-		{i18n.T("recipe.swap_cancel"), "", false},
-	}
-
-	for i, opt := range opts {
-		cursor := "  "
-		labelStyle := lipgloss.NewStyle().Foreground(ColorText)
-		if i == m.swapConfirmIdx {
-			cursor = "> "
-			if opt.warn {
-				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
-			} else {
-				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-		} else if opt.warn {
-			labelStyle = warnStyle
-		}
-		b.WriteString(cursor + labelStyle.Render(opt.label) + "\n")
-		if opt.desc != "" {
-			b.WriteString("    " + StyleFaint.Render(opt.desc) + "\n")
-		}
-	}
-
-	b.WriteString("\n  " + StyleFaint.Render(i18n.T("recipe.swap_nirvana_hint")) + "\n")
-
-	b.WriteString("\n" + StyleFaint.Render(
-		"  ↑↓ "+i18n.T("welcome.select_lang")+
-			"  [Enter] "+i18n.T("welcome.confirm")+
-			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
-	return b.String()
-}
-
 // presetModelName reads the truthful manifest.llm.model value straight off
 // the preset that will actually be applied — the same field
 // Preset.Validate() requires to be non-empty and the same location every
@@ -4912,190 +4425,6 @@ func (m FirstRunModel) viewReview() string {
 	return b.String()
 }
 
-func (m FirstRunModel) viewRecipe() string {
-	var b strings.Builder
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	b.WriteString("\n  " + titleStyle.Render(i18n.T("recipe.title")) + "\n\n")
-	b.WriteString("  " + i18n.T("recipe.hint") + "\n")
-	b.WriteString("\n")
-
-	var leftBlock strings.Builder
-
-	// Render "keep current recipe" option in setup mode
-	if m.setupMode {
-		cursor := "  "
-		style := lipgloss.NewStyle().Foreground(ColorText)
-		if m.recipeIdx == -1 {
-			cursor = "> "
-			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-		}
-		keepLabel := i18n.T("recipe.keep_current")
-		leftBlock.WriteString(cursor + style.Render(keepLabel) + "\n")
-		keepDesc := i18n.T("recipe.keep_current_desc")
-		leftBlock.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
-		leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
-	}
-
-	// Render imported recipe slot (if detected)
-	if m.hasImportedRecipe() {
-		importedIdx := 0
-		cursor := "  "
-		style := lipgloss.NewStyle().Foreground(ColorText)
-		if importedIdx == m.recipeIdx {
-			cursor = "> "
-			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-		}
-		importedStyle := lipgloss.NewStyle().Foreground(ColorActive)
-		leftBlock.WriteString("  " + importedStyle.Render(i18n.T("recipe.imported")) + "\n")
-		leftBlock.WriteString(cursor + style.Render(m.importedRecipe.Name) + "\n")
-		if m.importedRecipe.Description != "" {
-			leftBlock.WriteString("    " + StyleFaint.Render(m.importedRecipe.Description) + "\n")
-		}
-		leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
-	}
-
-	// Render discovered recipes by category
-	for ci, cat := range preset.RecipeCategories {
-		catStart := m.categoryBoundaries[ci]
-		var catEnd int
-		if ci+1 < len(m.categoryBoundaries) {
-			catEnd = m.categoryBoundaries[ci+1]
-		} else {
-			catEnd = len(m.discoveredRecipes)
-		}
-		if catStart >= catEnd {
-			continue // empty category
-		}
-
-		if ci > 0 {
-			leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
-		}
-		headerStyle := lipgloss.NewStyle().Foreground(ColorAgent)
-		leftBlock.WriteString("  " + headerStyle.Render(i18n.T("recipe.category."+cat)) + "\n")
-
-		for di := catStart; di < catEnd; di++ {
-			r := m.discoveredRecipes[di]
-			offset := 0
-			if m.hasImportedRecipe() {
-				offset = 1
-			}
-			idx := di + offset
-			cursor := "  "
-			style := lipgloss.NewStyle().Foreground(ColorText)
-			if idx == m.recipeIdx {
-				cursor = "> "
-				style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-			leftBlock.WriteString(cursor + style.Render(r.Info.Name) + "\n")
-			if r.Info.Description != "" {
-				leftBlock.WriteString("    " + StyleFaint.Render(r.Info.Description) + "\n")
-			}
-		}
-	}
-
-	// Render agora recipes (if any)
-	if len(m.agoraRecipes) > 0 {
-		agoraStyle := lipgloss.NewStyle().Foreground(ColorAgent)
-		leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
-		leftBlock.WriteString("  " + agoraStyle.Render(i18n.T("recipe.agora")) + "\n")
-		for i, ar := range m.agoraRecipes {
-			arIdx := m.recipeNameToIdx(preset.RecipeAgora) + i
-			cursor := "  "
-			style := lipgloss.NewStyle().Foreground(ColorText)
-			if arIdx == m.recipeIdx {
-				cursor = "> "
-				style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-			leftBlock.WriteString(cursor + style.Render(ar.Info.Name) + "\n")
-			if ar.Info.Description != "" {
-				leftBlock.WriteString("    " + StyleFaint.Render(ar.Info.Description) + "\n")
-			}
-		}
-	}
-
-	// Render custom entry
-	{
-		customIdx := m.recipeMaxIdx()
-		cursor := "  "
-		style := lipgloss.NewStyle().Foreground(ColorText)
-		if customIdx == m.recipeIdx {
-			cursor = "> "
-			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-		}
-		label := i18n.T("recipe.name." + preset.RecipeCustom)
-		desc := i18n.T("recipe.desc." + preset.RecipeCustom)
-		leftBlock.WriteString(cursor + style.Render(label) + "\n")
-		leftBlock.WriteString("    " + StyleFaint.Render(desc) + "\n")
-	}
-
-	if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-		leftBlock.WriteString("\n  " + i18n.T("recipe.custom_path") + "\n")
-		leftBlock.WriteString("  " + m.recipeCustomInput.View() + "\n")
-		if m.recipeCustomErr != "" {
-			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
-			leftBlock.WriteString("  " + errStyle.Render(m.recipeCustomErr) + "\n")
-		}
-	}
-
-	b.WriteString(leftBlock.String())
-
-	// Footer button: Back. There is no Next — Enter on a recipe row already
-	// saves and finishes.
-	recipeBackIdx := m.recipeMaxIdx() + 1
-	var recipeFocused wizardFooterButton
-	if m.recipeIdx == recipeBackIdx {
-		recipeFocused = wizardFooterBack
-	}
-	b.WriteString(renderWizardFooter(recipeFocused, true, false))
-
-	if m.message != "" {
-		errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
-		b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
-	}
-
-	b.WriteString("\n" + StyleFaint.Render(
-		"  ↑↓ "+i18n.T("welcome.select_lang")+
-			"  [Ctrl+O] "+i18n.T("recipe.preview")+
-			"  [Enter] "+i18n.T("welcome.confirm")+
-			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
-	return b.String()
-}
-
-// resolveCurrentRecipeDir returns the filesystem path for the currently
-// selected recipe, or "" if not resolvable.
-func (m FirstRunModel) resolveCurrentRecipeDir() string {
-	recipeName := m.recipeIdxToName(m.recipeIdx)
-	switch recipeName {
-	case preset.RecipeImported:
-		return m.importedRecipeDir
-	case preset.RecipeAgora:
-		if ar := m.agoraRecipeAt(m.recipeIdx); ar != nil {
-			return ar.Dir
-		}
-		return ""
-	case preset.RecipeCustom:
-		dir := m.recipeCustomInput.Value()
-		if dir == "" {
-			return ""
-		}
-		if err := preset.ValidateCustomDir(dir); err != nil {
-			return ""
-		}
-		return dir
-	default:
-		return preset.RecipeDir(m.globalDir, recipeName)
-	}
-}
-
-func (m FirstRunModel) currentAgentLanguage() string {
-	langs := []string{"en", "zh", "wen"}
-	if m.agentLangIdx < 0 || m.agentLangIdx >= len(langs) {
-		return "en"
-	}
-	return langs[m.agentLangIdx]
-}
-
 // performSetupSaveOnly writes init.json with the updated runtime settings
 // but keeps the current recipe and does not rewrite .prompt.
 func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
@@ -5159,14 +4488,38 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 //     ~/.lingtai-tui/ or the user's download folder).
 //  4. Run preset.ApplyRecipe to write .prompt (skipped when greet
 //     absent), append skills paths, and snapshot the applied recipe.
-func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
+//
+// applyDefaultRecipeAndAdvance is the stepAgentNameDir completion path for
+// the recipe phase: the recipe picker (stepRecipe) and the swap-confirm page
+// have been removed and "adaptive" (preset.DefaultRecipe) is the only recipe
+// choice, so Enter on the details page commits adaptive directly. In draft
+// mode the choice is staged into m.draft and the wizard moves to stepReview
+// instead of writing init.json/.recipe/.prompt now.
+//
+// /setup keeps the current recipe (base's recipeIdx=-1 "keep current"
+// default): it must NOT re-apply adaptive, which would RemoveAll the
+// project's .recipe/ and rewrite every agent's .prompt. setupMode therefore
+// routes to the settings-only save (init.json only) and both stepAgentNameDir
+// exits in setup mode land here. setupMode and draftMode are mutually
+// exclusive purposes, so checking setupMode first is exact.
+func (m FirstRunModel) applyDefaultRecipeAndAdvance() (FirstRunModel, tea.Cmd) {
+	if m.setupMode {
+		return m.performSetupSaveOnly()
+	}
+	if m.draftMode {
+		return m.enterReviewStep(preset.DefaultRecipe)
+	}
+	return m.performRecipeSave(preset.DefaultRecipe)
+}
+
+func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.Cmd) {
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
 		lang = "en"
 	}
 
 	// 1. Stage the bundle into the project root.
-	projectRoot, err := copyRecipeBundle(m.baseDir, m.globalDir, recipeName, customDir)
+	projectRoot, err := copyRecipeBundle(m.baseDir, m.globalDir, recipeName)
 	if err != nil {
 		m.message = i18n.TF("firstrun.error", err)
 		m.step = stepAgentNameDir
@@ -5214,7 +4567,7 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 	}
 	if err := applyRecipe(
 		m.baseDir, orchDir, m.globalDir, humanDir, humanAddr,
-		recipeName, customDir, lang, soulDelayStr,
+		recipeName, lang, soulDelayStr,
 	); err != nil {
 		m.message = i18n.TF("firstrun.error", err)
 		m.step = stepAgentNameDir
@@ -5252,11 +4605,9 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 // m.presets, so this function can resolve fresh on every entry (including
 // Back/reselect navigation) and use draftEditedPresetIdx only to decide whether
 // the selected row is dirty enough to require preset.Save before publication.
-func (m FirstRunModel) enterReviewStep(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
+func (m FirstRunModel) enterReviewStep(recipeName string) (FirstRunModel, tea.Cmd) {
 	if m.draft != nil {
 		m.draft.RecipeName = recipeName
-		m.draft.RecipeCustomDir = customDir
-		m.draft.RecipeEmbedded = m.recipeIdxIsEmbedded(m.recipeIdx)
 		m.draft.AgentName = m.agentName
 		m.draft.AgentDirName = m.pendingDirName
 		m.draft.AgentOpts = m.pendingAgentOpts

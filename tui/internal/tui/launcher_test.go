@@ -409,7 +409,7 @@ func TestDraftFirstRun_PresetEditorCommitDoesNotPersist(t *testing.T) {
 	if !m.draft.DraftAPIKey.Empty() {
 		t.Fatal("last-edited key reached ProjectDraft before a preset was selected for Review")
 	}
-	m, _ = m.enterReviewStep("", "")
+	m, _ = m.enterReviewStep("")
 	if m.draft.DraftAPIKeyEnv != "MINIMAX_API_KEY" || m.draft.DraftAPIKey.Reveal() != "sk-draft-key" {
 		t.Fatalf("review-selected draft key = env %q value %q", m.draft.DraftAPIKeyEnv, m.draft.DraftAPIKey.Reveal())
 	}
@@ -584,7 +584,7 @@ func TestDraftFirstRun_EditPresetAThenSelectPresetBFinalizesB(t *testing.T) {
 	// 3. Enter Review — the function under test. Cursor (1) no longer
 	// matches draftEditedPresetIdx (0), so this must resolve FRESH from the
 	// cursor rather than keep the stale edited preset-a.
-	m, _ = m.enterReviewStep("", "")
+	m, _ = m.enterReviewStep("")
 
 	if m.step != stepReview {
 		t.Fatalf("expected stepReview, got %v", m.step)
@@ -615,7 +615,7 @@ func TestDraftFirstRun_EditPresetAThenSelectPresetBFinalizesB(t *testing.T) {
 	// Returning to A in the same live draft recovers A's pending key without
 	// ever having persisted it while B was selected.
 	m.cursor = 0
-	m, _ = m.enterReviewStep("", "")
+	m, _ = m.enterReviewStep("")
 	if m.draft.DraftPreset == nil || m.draft.DraftPreset.Name != "preset-a" {
 		t.Fatalf("reselected preset = %+v, want preset-a", m.draft.DraftPreset)
 	}
@@ -930,34 +930,34 @@ func TestDraftFirstRun_PurityWalkAcrossSteps(t *testing.T) {
 	assertSnapshotsEqual(t, "after draft construction", before, dirSnapshot(t, home))
 
 	// Stage the values gathered by the intervening preset/agent pages, then
-	// exercise the production recipe -> Review transition. Dedicated tests
-	// cover those pages' individual key paths; this test guards the aggregate
-	// no-write boundary across the full draft state sequence.
+	// exercise the production adaptive-recipe -> Review transition. Dedicated
+	// tests cover those pages' individual key paths; this test guards the
+	// aggregate no-write boundary across the full draft state sequence.
 	m.presets = []preset.Preset{minimalDraftPreset()}
 	m.cursor = 0
 	m.pendingAgentOpts = preset.DefaultAgentOpts()
 	m.pendingDirName = "orchestrator"
 	m.agentName = "orchestrator"
-	m.step = stepRecipe
-	assertSnapshotsEqual(t, "after agent and recipe state staged", before, dirSnapshot(t, home))
+	m.step = stepAgentNameDir
+	assertSnapshotsEqual(t, "after agent state staged", before, dirSnapshot(t, home))
 
-	m, _ = m.enterReviewStep("", "")
+	m, _ = m.applyDefaultRecipeAndAdvance()
 	if m.step != stepReview {
-		t.Fatalf("expected recipe transition to reach stepReview, got %v", m.step)
+		t.Fatalf("expected adaptive transition to reach stepReview, got %v", m.step)
 	}
 	assertSnapshotsEqual(t, "after entering Review", before, dirSnapshot(t, home))
 
-	// Real Esc paths: Review -> recipe -> agent page.
+	// Real Esc paths: Review -> details (agent name/dir) page -> preset picker.
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.step != stepRecipe {
-		t.Fatalf("expected Review Esc to return to recipe, got %v", m.step)
+	if m.step != stepAgentNameDir {
+		t.Fatalf("expected Review Esc to return to the details page, got %v", m.step)
 	}
 	assertSnapshotsEqual(t, "after esc from Review", before, dirSnapshot(t, home))
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.step != stepAgentNameDir {
-		t.Fatalf("expected recipe Esc to return to agent page, got %v", m.step)
+	if m.step != stepPickPreset {
+		t.Fatalf("expected details Esc to return to the preset picker, got %v", m.step)
 	}
-	assertSnapshotsEqual(t, "after esc from recipe", before, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "after esc from details", before, dirSnapshot(t, home))
 
 	// The typed cancel path itself also remains pure: Esc at the draft
 	// entry step (stepPickPreset) leaves the wizard via the typed cancel.
@@ -1507,7 +1507,7 @@ func TestViewReview_ShowsModelAndCapabilities(t *testing.T) {
 	// Drive the REAL transition function (the same one the wizard's Enter
 	// handler on stepRecipe calls) rather than directly assigning m.step —
 	// this is what actually resolves DraftPreset from the cursor.
-	m, _ = m.enterReviewStep("", "")
+	m, _ = m.enterReviewStep("")
 	if m.step != stepReview {
 		t.Fatalf("expected enterReviewStep to reach stepReview, got %v", m.step)
 	}
@@ -1543,7 +1543,7 @@ func TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities(t *testin
 	m.agentName = "orchestrator"
 	m.pendingDirName = "orchestrator"
 
-	m, _ = m.enterReviewStep("no-recipe", "")
+	m, _ = m.enterReviewStep("no-recipe")
 
 	out := m.viewReview()
 

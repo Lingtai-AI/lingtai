@@ -77,7 +77,7 @@ func TestFirstRunAndSetupViewsOmitObsoletePrincipleControl(t *testing.T) {
 			if tc.setupMode {
 				m = NewSetupModeModel(baseDir, globalDir, "", "test")
 			} else {
-				m = NewFirstRunModel(baseDir, globalDir, true, "")
+				m = NewFirstRunModel(baseDir, globalDir, true)
 				m.presets = []preset.Preset{{
 					Name:     "test",
 					Manifest: map[string]interface{}{"language": "en"},
@@ -628,6 +628,84 @@ func TestSetupModePrefillsLegacyCommentWhenCommentFileMissing(t *testing.T) {
 	}
 }
 
+// TestSetupKeepCurrentDoesNotRewritePromptOrRecipe reproduces fable F3: /setup's
+// "Skip — keep existing agent settings" exit (fieldIdx == -1) must do a
+// settings-only save — write init.json, keep the current recipe, and leave
+// every agent's .prompt untouched — instead of re-applying adaptive, which
+// would RemoveAll the project's .recipe/ and rewrite .prompt for every agent.
+func TestSetupKeepCurrentDoesNotRewritePromptOrRecipe(t *testing.T) {
+	tmp := t.TempDir()
+	baseDir := filepath.Join(tmp, ".lingtai")
+	orchDir := filepath.Join(baseDir, "alice")
+	globalDir := filepath.Join(tmp, "global")
+
+	// Existing network: the project ships its own .recipe/ and the agent has
+	// a live .prompt that must survive /setup. The global adaptive bundle is
+	// ALSO available (a mature install) — head's old code would resolve it,
+	// RemoveAll the local .recipe/, and rewrite every agent's .prompt.
+	if err := os.MkdirAll(orchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeFile(t, filepath.Join(tmp, ".recipe", "recipe.json"),
+		`{"id":"greeter","name":"Greeter","description":"d","library_name":null}`)
+	writeRecipeFile(t, filepath.Join(tmp, ".recipe", "notes.md"), "project-local notes")
+	adaptiveRoot := filepath.Join(globalDir, "recipes", "recommended", preset.DefaultRecipe)
+	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
+		`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
+	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "greet", "greet.md"), "adaptive greet {{addr}}")
+	const prompt = "existing queued prompt"
+	if err := os.WriteFile(filepath.Join(orchDir, ".prompt"), []byte(prompt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := FirstRunModel{
+		baseDir:          baseDir,
+		globalDir:        globalDir,
+		setupMode:        true,
+		setupOrchDir:     orchDir,
+		agentName:        "alice",
+		cursor:           0,
+		presets:          []preset.Preset{minimaxPresetForSetupTest()},
+		pendingAgentOpts: preset.DefaultAgentOpts(),
+		step:             stepAgentNameDir,
+		fieldIdx:         -1, // "Skip — keep existing agent settings" branch
+	}
+	m.nameInput.SetValue("alice")
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("setup keep-current completion returned no command")
+	}
+	msg := cmd()
+	if _, ok := msg.(SetupSavedMsg); !ok {
+		t.Fatalf("setup completion returned %T, want SetupSavedMsg", msg)
+	}
+
+	// Settings-only save still wrote init.json.
+	if _, err := os.Stat(filepath.Join(orchDir, "init.json")); err != nil {
+		t.Fatalf("init.json not written by setup save: %v", err)
+	}
+	// .prompt untouched — no adaptive greet broadcast to the network.
+	got, err := os.ReadFile(filepath.Join(orchDir, ".prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != prompt {
+		t.Fatalf(".prompt rewritten by /setup: %q, want %q", got, prompt)
+	}
+	// Local .recipe/ preserved — not RemoveAll'd and replaced with adaptive.
+	if _, err := os.Stat(filepath.Join(tmp, ".recipe", "notes.md")); err != nil {
+		t.Fatalf("project-local .recipe/ destroyed by /setup: %v", err)
+	}
+	recipeJSON, err := os.ReadFile(filepath.Join(tmp, ".recipe", "recipe.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recipeJSON), "greeter") {
+		t.Fatalf("project-local recipe overwritten by /setup, now = %q", recipeJSON)
+	}
+}
+
 func TestSetupModeEnterOnKeepCurrentAdvancesToAgentPresets(t *testing.T) {
 	m := FirstRunModel{
 		setupMode: true,
@@ -680,7 +758,7 @@ func TestEnterAgentNameDirLanguageFollowsTUIConfig(t *testing.T) {
 			if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: tt.tuiLang, MailPageSize: 200}); err != nil {
 				t.Fatalf("save TUI config: %v", err)
 			}
-			m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+			m := NewFirstRunModel(t.TempDir(), globalDir, true)
 			m.enterAgentNameDir(preset.Preset{
 				Name: "tutorial-test",
 				Manifest: map[string]interface{}{
@@ -703,7 +781,7 @@ func TestEnterAgentNameDirLanguageFallsBackToPresetWhenTUIConfigInvalid(t *testi
 	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "bogus", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
-	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m := NewFirstRunModel(t.TempDir(), globalDir, true)
 	m.enterAgentNameDir(preset.Preset{
 		Name: "fallback-test",
 		Manifest: map[string]interface{}{
@@ -725,7 +803,7 @@ func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "en", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
-	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m := NewFirstRunModel(t.TempDir(), globalDir, true)
 	m.setupMode = true
 	m.setupKeepInitJSON = map[string]interface{}{
 		"manifest": map[string]interface{}{
