@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `deepseek`
 
-`deepseekPreset()` (`tui/internal/preset/preset.go:1187-1196`) uses the
+`deepseekPreset()` (`tui/internal/preset/preset.go:1190-1199`) uses the
 shared OpenAI-compatible text shape: provider `deepseek`, default model
 `deepseek-v4-pro`, `https://api.deepseek.com`, and `DEEPSEEK_API_KEY`.
 The shipped manifest has no `vision` capability, so this manual records no

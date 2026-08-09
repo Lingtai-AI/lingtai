@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `mimo`
 
-`mimoPreset()` (`tui/internal/preset/preset.go:1160-1185`) ships Xiaomi MiMo
+`mimoPreset()` (`tui/internal/preset/preset.go:1163-1188`) ships Xiaomi MiMo
 model `mimo-v2.5` at `https://api.xiaomimimo.com/v1` with OpenAI
 compatibility and `XIAOMI_API_KEY`. The manifest explicitly wires native
 vision to that exact default model.
