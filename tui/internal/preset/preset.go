@@ -616,16 +616,16 @@ var ProviderRegionURLs = map[string][]RegionURL{
 	// no native xAI route (no verified api.x.ai endpoint/model pairing), so
 	// `grok-4.5` is reached only through the Go subscription. Entry [0]
 	// therefore declares OPENCODE_GO_API_KEY and grokPreset() ships that same
-	// slot; ProviderDefaultEnv["grok"] holds the provider-generic slot used on
-	// a switch TO grok (see ProviderDefaultEnv below).
+	// slot; ProviderDefaultEnv["grok"] holds the provider-generic fallback
+	// name (see ProviderDefaultEnv below).
 	"grok": {
 		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
 }
 
-// ProviderDefaultEnv maps each provider to the api_key_env slot a freshly
-// switched-to provider should adopt. Consulted on provider switch only; it
+// ProviderDefaultEnv maps each provider to its provider-generic api_key_env
+// fallback slot. Consulted on provider switch only; it
 // must not be read from a region cycle, so zhipu/minimax region rows declare
 // no Env (see RegionURL) and their CN<->INTL cycling preserves whatever
 // region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY etc.).
@@ -636,8 +636,8 @@ var ProviderRegionURLs = map[string][]RegionURL{
 // grok is the single deliberate exception: grokPreset() declares
 // OPENCODE_GO_API_KEY because its default (and only non-Custom) endpoint IS
 // OpenCode Go, so an existing Go user needs no second copy of the key. The
-// entry below is the provider-GENERIC slot adopted on a switch TO grok from
-// another provider. Keeping the two different is what makes
+// entry below is the provider-generic fallback name; the editor adopts the
+// landing row's slot on a switch. Keeping the two different is what makes
 // usesRegionDeclaredEnv treat the Go slot as a cross-provider account worth
 // preserving across a save, instead of as this template's own shared slot.
 var ProviderDefaultEnv = map[string]string{
@@ -1302,8 +1302,8 @@ func grokPreset() Preset {
 	// because the shipped endpoint IS OpenCode Go: someone who already
 	// configured that shared account for deepseek/zhipu/minimax/kimi/mimo
 	// gets a working grok preset without pasting the key a second time. The
-	// provider-generic GROK_API_KEY lives in ProviderDefaultEnv and is what a
-	// switch TO grok from another provider adopts.
+	// provider-generic GROK_API_KEY stays in ProviderDefaultEnv as the
+	// fallback name, separate from the slot a switch adopts.
 	//
 	// Text-only: the Go endpoint's image-input mapping for grok-4.5 is not
 	// pinned, so no vision capability is wired.

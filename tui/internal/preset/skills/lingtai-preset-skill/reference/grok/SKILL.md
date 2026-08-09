@@ -56,16 +56,17 @@ template's own slot to be replaced by a numbered one.
 `base_url` to the new provider's first region row, and for grok that row *is*
 OpenCode Go, so the row's own declared `Env` wins over the provider-generic
 default: the credential slot always matches the endpoint you land on. (Every
-other provider's first row declares no `Env`, so they adopt their
-`ProviderDefaultEnv` name as before.) If you then cycle `base_url` to
+other provider's first row declares either no `Env` or the same name as its
+`ProviderDefaultEnv` — deepseek — so only grok's adopted slot changes.) If
+you then cycle `base_url` to
 **Custom** and your endpoint takes an xAI key, set `api_key_env` yourself —
 the editor leaves the slot alone on the Custom row by design.
 
 ## Template-specific settings
 
 Grok ids are lowercase, and there is no uppercase form to avoid. The picker
-ships `grok-4.5` only — that is the id
-the OpenCode Go model list serves, and per the TUI's model-curation rule
+ships `grok-4.5` only — that is the id the OpenCode Go model list serves,
+and per the TUI's model-curation rule
 (`tui/CONTRACT.md`) only the latest two generations of a family may ship, so
 no older Grok generation is offered. Read the official
 [OpenCode Go docs](https://opencode.ai/docs/go/) for the current served-model

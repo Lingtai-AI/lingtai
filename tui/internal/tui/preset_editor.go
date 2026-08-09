@@ -1057,8 +1057,8 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// must not be restorable onto this one.
 		//
 		// The one exception: when the landing row (regions[0], which base_url
-		// adopts just above) declares its own Env, that declaration wins. Only
-		// grok is in that shape today — its default row IS OpenCode Go, so
+		// adopts just above) declares its own Env, that declaration wins.
+		// Only grok differs from its default — its row IS OpenCode Go, so
 		// taking ProviderDefaultEnv["grok"] = GROK_API_KEY here would leave
 		// the preset pointed at https://opencode.ai/zen/go/v1 holding a
 		// credential slot that endpoint does not use, and the user would have

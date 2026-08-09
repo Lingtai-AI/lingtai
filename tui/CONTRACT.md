@@ -128,8 +128,10 @@ only ever grows rots into one.
   bijection is what `TestModelHasVisionDeclaresEveryShippedModel` enforces,
   minus two deliberate exemptions it names: `nvidia` (a gateway catalog whose
   per-vendor vision facts we do not verify) and the `claude*` CLI-alias
-  spellings. Adding an exemption is a change to that test, not a silent
-  omission;
+  spellings. The exemptions apply only to the *requirement* to carry an
+  entry — the reverse direction is not exempt: a `modelHasVision` entry for
+  an id no picker ships still fails the test. Adding an exemption is a change
+  to that test, not a silent omission;
 - **not** the providers whose model row is free text. `kimi`, `gemini`,
   `openrouter`, and `custom` have no `providerModels` entry, so they have no
   `modelHasVision` entries either and the bijection test never sees them.
