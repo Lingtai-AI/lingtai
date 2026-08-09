@@ -1,7 +1,7 @@
 ---
 name: preset-skill-deepseek
 description: Official-source-led manual for the TUI `deepseek` template.
-version: 2.1.1
+version: 2.1.2
 last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
@@ -46,7 +46,13 @@ editor (`ProviderRegionURLs["deepseek"]`):
   different one.
 
 Selecting the DeepSeek API or OpenCode Go option also switches `api_key_env`
-to the matching slot.
+to the matching slot in the editor. Saving an **edited built-in** keeps that
+slot only for OpenCode Go, whose credential is a shared cross-provider account
+(the same `OPENCODE_GO_API_KEY` the `zhipu` and `minimax` presets use). On the
+DeepSeek API row the saved preset gets its own numbered slot instead —
+`DEEPSEEK_1_API_KEY`, `DEEPSEEK_2_API_KEY`, ... — because `DEEPSEEK_API_KEY` is
+the template's shared slot, and keeping it would let a second deepseek preset
+overwrite the first one's key.
 
 ## Operations
 

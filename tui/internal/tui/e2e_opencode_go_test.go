@@ -166,29 +166,41 @@ func TestE2EOpenCodeGoOptionSurvivesSave(t *testing.T) {
 }
 
 // TestE2EEditedBuiltinWithoutRegionEnvStillGetsFreshSlot is the other half of
-// the api_key_env gate in commit(): narrowing the delete to "keep only a slot
-// the region row itself declares" must not weaken the original rule. Editing a
-// built-in in any other way still drops the template's shared slot so
-// stampAutoEnvVar can allocate a private one, and the stamped name still
-// carries the CN/INTL region suffix for a genuine regional endpoint.
+// the api_key_env gate in commit(): narrowing the delete to "keep only a
+// cross-provider account a region row declares" must not weaken the original
+// rule. Editing a built-in in any other way still drops the template's shared
+// slot so stampAutoEnvVar can allocate a private one, and the stamped name
+// still carries the CN/INTL region suffix for a genuine regional endpoint.
+//
+// The deepseek case is the counter-case that matters most: its DEFAULT region
+// row declares an Env (DeepSeek API -> DEEPSEEK_API_KEY), so an edit that never
+// touches base_url would keep the template's shared slot if the exception were
+// keyed on "the row declares an Env" alone — and the next deepseek preset the
+// user saves would overwrite the first one's key in cfg.Keys.
 func TestE2EEditedBuiltinWithoutRegionEnvStillGetsFreshSlot(t *testing.T) {
 	tempTestHome(t)
 
 	for _, tc := range []struct {
 		provider string
+		editRow  editorField // the one row this case cycles with →
+		wantBase int         // region index base_url must sit on afterwards
 		want     string
 	}{
-		{"zhipu", "ZHIPU_INTL_1_API_KEY"},
-		{"minimax", "MINIMAX_INTL_1_API_KEY"},
+		{"zhipu", feBaseURL, 1, "ZHIPU_INTL_1_API_KEY"},     // CN -> INTL: an Env-less region row
+		{"minimax", feBaseURL, 1, "MINIMAX_INTL_1_API_KEY"}, // CN -> INTL: an Env-less region row
+		{"deepseek", feModel, 0, "DEEPSEEK_1_API_KEY"},      // model only; base_url stays on DeepSeek API
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
 			regions := preset.ProviderRegionURLs[tc.provider]
 			m := openEditorAsHostDoes(t, tc.provider)
-			m = walkCursorTo(t, m, feBaseURL)
-			m, _ = pressKey(t, m, tea.KeyRight) // CN -> INTL: an Env-less region row
+			m = walkCursorTo(t, m, tc.editRow)
+			m, _ = pressKey(t, m, tea.KeyRight)
 
-			if got := asString(m.llmMap()["base_url"]); got != regions[1].URL {
-				t.Fatalf("[%s] base_url = %q, want INTL %q", tc.provider, got, regions[1].URL)
+			if !m.hasSemanticEdits() {
+				t.Fatalf("[%s] → on %v changed nothing; commit()'s isBuiltin branch would not run", tc.provider, tc.editRow)
+			}
+			if got := asString(m.llmMap()["base_url"]); got != regions[tc.wantBase].URL {
+				t.Fatalf("[%s] base_url = %q, want %q (%s)", tc.provider, got, regions[tc.wantBase].URL, regions[tc.wantBase].Label)
 			}
 
 			msg := saveViaKeyboard(t, m)

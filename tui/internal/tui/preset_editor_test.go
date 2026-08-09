@@ -2015,6 +2015,77 @@ func TestPresetEditorRegionCycleFallsBackToProviderDefaultEnv(t *testing.T) {
 	}
 }
 
+// TestPresetEditorRegionCycleRestoresFromOffListBaseURL is the residual edge of
+// F2 (fable r5): zhipu/minimax have no Custom sentinel row, so an off-list
+// base_url makes selectedRegionIndex return -1 and there is no "previous row"
+// to key the restore on. A preset that pairs such a URL with the adopted
+// OPENCODE_GO_API_KEY must still be healed on the first cycle — otherwise the
+// stale slot rides along onto CN and bigmodel.cn resolves through the OpenCode
+// account, which is the exact harm the F2 fix exists to prevent. The rule is
+// therefore about the STATE (is api_key_env a slot some region row declares?),
+// not about the row we came from.
+func TestPresetEditorRegionCycleRestoresFromOffListBaseURL(t *testing.T) {
+	for _, provider := range []string{"zhipu", "minimax"} {
+		regions := preset.ProviderRegionURLs[provider]
+		for _, tc := range []struct {
+			label string
+			memo  string
+			want  string
+		}{
+			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
+			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
+		} {
+			offList := "https://proxy.internal.example/v1"
+			if idx := selectedRegionIndex(regions, offList); idx >= 0 {
+				t.Fatalf("[%s] test setup wrong: %q resolves to region %d", provider, offList, idx)
+			}
+			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
+				"llm": map[string]interface{}{"provider": provider, "model": "m",
+					"base_url":    offList,
+					"api_key_env": "OPENCODE_GO_API_KEY"}}}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m.regionEnvBeforeAdopt = tc.memo
+			llm := m.llmMap()
+			m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+			m.cycleFocused(+1) // off-list -> CN (enters the list at its edge)
+			if got := asString(llm["base_url"]); got != regions[0].URL {
+				t.Fatalf("[%s/%s] base_url = %q, want CN %q", provider, tc.label, got, regions[0].URL)
+			}
+			if got := asString(llm["api_key_env"]); got != tc.want {
+				t.Fatalf("[%s/%s] api_key_env = %q, want restored %q — the adopted OpenCode slot must not ride along onto CN",
+					provider, tc.label, got, tc.want)
+			}
+			if m.regionEnvBeforeAdopt != "" {
+				t.Fatalf("[%s/%s] memo = %q after restore, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
+			}
+		}
+	}
+}
+
+// TestPresetEditorProviderSwitchClearsAdoptedSlotMemo pins the other half of the
+// same rule: the memo records a slot taken from THIS provider's region cycle, so
+// switching providers must drop it along with base_url and api_key_env. Left
+// behind, it could be handed back onto a provider it never belonged to.
+func TestPresetEditorProviderSwitchClearsAdoptedSlotMemo(t *testing.T) {
+	regions := preset.ProviderRegionURLs["zhipu"]
+	p := preset.Preset{Name: "my-zhipu", Source: preset.SourceSaved, Manifest: map[string]interface{}{
+		"llm": map[string]interface{}{"provider": "zhipu", "model": "m",
+			"base_url":    regions[2].URL, // OpenCode Go
+			"api_key_env": "OPENCODE_GO_API_KEY"}}}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.regionEnvBeforeAdopt = "ZHIPU_INTL_1_API_KEY"
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+
+	m.cycleFocused(+1)
+	if got := asString(m.llmMap()["provider"]); got == "zhipu" {
+		t.Fatal("provider cycle did not move off zhipu")
+	}
+	if m.regionEnvBeforeAdopt != "" {
+		t.Fatalf("memo = %q after provider switch, want cleared", m.regionEnvBeforeAdopt)
+	}
+}
+
 // TestPresetEditorDeepseekRegionCycleRoundTrip is the deepseek half of the F2
 // contract. deepseek's table has a Custom sentinel instead of a second real
 // region, and its first row declares DEEPSEEK_API_KEY, so the full lap is
