@@ -49,10 +49,17 @@ jobs:
           set -euo pipefail
 
           # Refuse anything that could be read as a `gh` flag rather than a
-          # branch name. Fail closed: an undeleted branch is a nuisance, a
-          # wrongly deleted one is lost work.
+          # branch name, and anything the URL layer would reinterpret. Git
+          # permits `#` and `%` in ref names, and `gh api` hands the path to
+          # Go's URL parser, which drops everything after a `#` and decodes
+          # `%XX`: a legal head ref `fix/issue#123` would send the DELETE at
+          # `refs/heads/fix/issue`, a different and unmerged branch, past every
+          # guard below. An allowlist rather than a blocklist, so a character
+          # nobody thought about is refused rather than passed through. Fail
+          # closed: an undeleted branch is a nuisance, a wrongly deleted one is
+          # lost work.
           case "$HEAD_REF" in
-            ""|-*)
+            ""|-*|*[!A-Za-z0-9._/-]*)
               echo "::warning::refusing to act on head ref '$HEAD_REF'"
               exit 0
               ;;
@@ -69,8 +76,16 @@ jobs:
 
           # One branch can be the head of several PRs (a stacked branch also
           # targeting a release base). Deleting it would force-close the others.
-          open_heads="$(gh pr list --repo "$REPO" --state open \
-            --head="$HEAD_REF" --json number --jq 'length')"
+          # `gh pr list --head` matches on ref *name* alone, across fork PRs
+          # too, so an unrelated fork branch of the same name would block a
+          # deletion that is ours to make. The REST `head` filter takes an
+          # `owner:ref` pair instead, which is owner-qualified natively (and
+          # passes the ref as a query parameter rather than in the URL path).
+          # The base side -- a PR still open *against* this branch -- is
+          # delegated to GitHub, which retargets dependent PRs onto the merged
+          # PR's base when the base PR merges.
+          open_heads="$(gh api -X GET "repos/$REPO/pulls" \
+            -f state=open -f head="${REPO%%/*}:$HEAD_REF" --jq 'length')"
           if [ "$open_heads" != "0" ]; then
             echo "Keeping '$HEAD_REF': still the head of $open_heads open PR(s)."
             exit 0
@@ -78,12 +93,32 @@ jobs:
 
           # The branch may already be gone -- a human can delete it from the
           # merge page, and the repository's own "automatically delete head
-          # branches" setting would win this race if it is ever enabled. Treat
-          # a missing ref as success; treat anything else as a real failure.
+          # branches" setting would win this race if it is ever enabled. Treat a
+          # missing ref as success; treat anything else as a real failure.
+          #
+          # Only a genuine missing ref qualifies. GitHub answers a DELETE on a
+          # ref that is not there with `422 Reference does not exist`, whereas a
+          # bare `404 Not Found` is also what it returns for an authorization
+          # failure on a resource the token cannot see -- matching `Not Found`
+          # would report a token-scope regression, a repository rename or a
+          # malformed path as "nothing to do" and branches would quietly stop
+          # being cleaned with nothing in the Actions log to say so.
+          #
+          # Encoding constraint: `$HEAD_REF` goes into a URL *path* below with
+          # no encoding, which is only safe because the allowlist guard above
+          # has already rejected every character the URL layer reinterprets
+          # (`#`, `%`, anything outside [A-Za-z0-9._/-]). Do not relax that
+          # guard, and do not reach for `@uri` instead: it escapes `/` too and
+          # would break every nested branch name in the repository. Cases to
+          # re-check by hand after editing this step -- there is no shell test
+          # harness in this repository to hold the PR's mock-`gh` matrix, so
+          # this list is the durable artifact: protected ref, 422 missing ref,
+          # 403, `-rf`, `$(touch PWNED)x`, `main#123`, `fix/issue#123`, `ma%69n`
+          # (the last three must be refused by the guard, never requested).
           if gh api -X DELETE "repos/$REPO/git/refs/heads/$HEAD_REF" \
               2>"$RUNNER_TEMP/delete-ref.err"; then
             echo "Deleted '$HEAD_REF' (merged in PR #$PR_NUMBER)."
-          elif grep -qiE 'Reference does not exist|Not Found' \
+          elif grep -qF 'Reference does not exist' \
               "$RUNNER_TEMP/delete-ref.err"; then
             echo "'$HEAD_REF' was already deleted; nothing to do."
           else
