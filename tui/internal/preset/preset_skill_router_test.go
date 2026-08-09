@@ -60,7 +60,7 @@ var wantOperations = map[string]bool{
 
 // TestPresetSkillRouter_BuiltinBijection keeps the source preset list, the
 // embedded direct-provider manuals, the parent router, and extracted utility
-// tree aligned. Direct providers are exactly the 12 BuiltinPresets() names —
+// tree aligned. Direct providers are exactly the 13 BuiltinPresets() names —
 // nested operation children live under reference/operations/ and are
 // validated separately by TestPresetSkillRouter_OperationBijection so a
 // provider directory can never silently absorb an operation, or vice versa.
@@ -321,18 +321,19 @@ func TestPresetSkillRouter_OperationBijection(t *testing.T) {
 // operation prose into the provider page itself.
 func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	wantAnchor := map[string]string{
-		"minimax":    "tui/internal/preset/preset.go:1132-1157",
-		"zhipu":      "tui/internal/preset/preset.go:1159-1176",
-		"mimo":       "tui/internal/preset/preset.go:1178-1203",
-		"deepseek":   "tui/internal/preset/preset.go:1205-1214",
-		"gemini":     "tui/internal/preset/preset.go:1216-1243",
-		"kimi":       "tui/internal/preset/preset.go:1245-1257",
-		"nvidia":     "tui/internal/preset/preset.go:1259-1278",
-		"openrouter": "tui/internal/preset/preset.go:1280-1299",
-		"codex":      "tui/internal/preset/preset.go:1301-1329",
-		"codex-pool": "tui/internal/preset/preset.go:1338-1361",
-		"claude":     "tui/internal/preset/preset.go:1363-1392",
-		"custom":     "tui/internal/preset/preset.go:1394-1416",
+		"minimax":    "tui/internal/preset/preset.go:1167-1192",
+		"zhipu":      "tui/internal/preset/preset.go:1194-1211",
+		"mimo":       "tui/internal/preset/preset.go:1213-1238",
+		"deepseek":   "tui/internal/preset/preset.go:1240-1249",
+		"gemini":     "tui/internal/preset/preset.go:1251-1278",
+		"kimi":       "tui/internal/preset/preset.go:1280-1292",
+		"grok":       "tui/internal/preset/preset.go:1294-1314",
+		"nvidia":     "tui/internal/preset/preset.go:1316-1335",
+		"openrouter": "tui/internal/preset/preset.go:1337-1356",
+		"codex":      "tui/internal/preset/preset.go:1358-1386",
+		"codex-pool": "tui/internal/preset/preset.go:1395-1418",
+		"claude":     "tui/internal/preset/preset.go:1420-1449",
+		"custom":     "tui/internal/preset/preset.go:1451-1473",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {

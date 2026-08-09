@@ -229,8 +229,8 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7,
-		"codex-pool": 8, "claude": 9, "custom": 10,
+		"kimi": 4, "grok": 5, "nvidia": 6, "openrouter": 7,
+		"codex": 8, "codex-pool": 9, "claude": 10, "custom": 11,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -389,8 +389,11 @@ func (p Preset) Validate() []error {
 		// pre-region-table wizard shape) is tolerated when regionSuffix can
 		// assign a default region (zhipu → CN, minimax → INTL): AutoEnvVarName
 		// stamps a slot for it, so such a preset remains well-defined. A
-		// region-table provider without a region fallback (deepseek) still
-		// needs an explicit endpoint, so an absent key stays a violation there.
+		// region-table provider without a region fallback (deepseek, kimi,
+		// mimo, grok) still needs an explicit endpoint, so an absent key stays
+		// a violation there. kimi and mimo joined that set when they gained a
+		// region table — a base_url-less kimi/mimo preset that validated on an
+		// older TUI must gain an explicit endpoint to save again.
 		// The editor's Custom sentinel is the only path that writes an
 		// explicit "", and that is always rejected.
 		if provider, _ := llm["provider"].(string); provider != "" {
@@ -546,13 +549,19 @@ func RefreshTemplates() error {
 //
 // Env is deliberately present ONLY where a region genuinely implies a
 // distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
-// OpenCode Go row on zhipu/minimax/kimi/mimo, are separate accounts). The
-// plain native rows (zhipu/minimax CN and INTL, Kimi Code, MiMo) declare
+// OpenCode Go row on zhipu/minimax/kimi/mimo/grok, are separate accounts).
+// The plain native rows (zhipu/minimax CN and INTL, Kimi Code, MiMo) declare
 // none: their slots are region-suffixed and host-stamped
 // (ZHIPU_INTL_1_API_KEY, MINIMAX_CN_1_API_KEY, KIMI_1_API_KEY via
 // AutoEnvVarName), and a flat Env on those rows would overwrite that slot
 // on every base_url cycle. Their provider default lives in
 // ProviderDefaultEnv instead.
+//
+// The Custom sentinel (empty URL) declares no Env either, and the editor
+// additionally leaves api_key_env untouched when landing on it: the user is
+// about to type their own endpoint and keeps whatever slot that endpoint
+// actually uses. Note the consequence for a preset arriving from an Env row —
+// the shared OpenCode Go slot carries over until the user changes it.
 type RegionURL struct {
 	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
 	URL   string
@@ -585,18 +594,33 @@ var ProviderRegionURLs = map[string][]RegionURL{
 		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
 		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
-	// OpenCode Go serves the Kimi K-series (kimi-k3, kimi-k2.7-code,
-	// kimi-k2.6, kimi-k2.5) under lowercase model ids; the native Kimi Code
-	// endpoint serves the subscription model `kimi-for-coding`.
+	// OpenCode Go serves the Kimi K-series (kimi-k3, kimi-k2.7-code, ...)
+	// under lowercase model ids; the native Kimi Code endpoint serves the
+	// subscription model `kimi-for-coding`. Kimi had free-text base_url
+	// before it gained this table, so it carries the Custom sentinel too —
+	// a region table without one removes the only in-editor path to a
+	// corporate proxy or relay.
 	"kimi": {
 		{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
 		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
-	// OpenCode Go serves the MiMo V2 family (mimo-v2-pro, mimo-v2-omni,
-	// mimo-v2.5-pro, mimo-v2.5) alongside Xiaomi's own endpoint.
+	// OpenCode Go serves the MiMo V2 family alongside Xiaomi's own endpoint.
+	// Custom sentinel for the same reason as kimi above.
 	"mimo": {
 		{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
 		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
+	},
+	// grok is the one provider whose DEFAULT row is OpenCode Go: the TUI has
+	// no native xAI route (no verified api.x.ai endpoint/model pairing), so
+	// `grok-4.5` is reached only through the Go subscription. Entry [0]
+	// therefore declares OPENCODE_GO_API_KEY and grokPreset() ships that same
+	// slot; ProviderDefaultEnv["grok"] holds the provider-generic slot used on
+	// a switch TO grok (see ProviderDefaultEnv below).
+	"grok": {
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
 	},
 }
 
@@ -608,6 +632,14 @@ var ProviderRegionURLs = map[string][]RegionURL{
 //
 // Values match each builtin preset's declared api_key_env ("" = OAuth/CLI
 // providers with no key slot, or a generic placeholder the user replaces).
+//
+// grok is the single deliberate exception: grokPreset() declares
+// OPENCODE_GO_API_KEY because its default (and only non-Custom) endpoint IS
+// OpenCode Go, so an existing Go user needs no second copy of the key. The
+// entry below is the provider-GENERIC slot adopted on a switch TO grok from
+// another provider. Keeping the two different is what makes
+// usesRegionDeclaredEnv treat the Go slot as a cross-provider account worth
+// preserving across a save, instead of as this template's own shared slot.
 var ProviderDefaultEnv = map[string]string{
 	"minimax":    "MINIMAX_API_KEY",
 	"zhipu":      "ZHIPU_API_KEY",
@@ -615,6 +647,7 @@ var ProviderDefaultEnv = map[string]string{
 	"deepseek":   "DEEPSEEK_API_KEY",
 	"gemini":     "GEMINI_API_KEY",
 	"kimi":       "KIMI_CODE_API_KEY",
+	"grok":       "GROK_API_KEY",
 	"nvidia":     "NVIDIA_API_KEY",
 	"openrouter": "OPENROUTER_API_KEY",
 	"claude":     "",            // OAuth / CLI login
@@ -632,6 +665,7 @@ func BuiltinPresets() []Preset {
 		deepseekPreset(),
 		geminiPreset(),
 		kimiPreset(),
+		grokPreset(),
 		nvidiaPreset(),
 		openrouterPreset(),
 		codexPreset(),
@@ -653,6 +687,7 @@ var builtinNames = map[string]bool{
 	"deepseek":         true,
 	"gemini":           true,
 	"kimi":             true,
+	"grok":             true,
 	"nvidia":           true,
 	"openrouter":       true,
 	"codex":            true,
@@ -1254,6 +1289,28 @@ func kimiPreset() Preset {
 		"kimi",
 		"Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling",
 		"kimi-for-coding", "KIMI_CODE_API_KEY", ProviderRegionURLs["kimi"][0].URL, "3")
+}
+
+func grokPreset() Preset {
+	// Grok (xAI) reached through the OpenCode Go subscription — the only
+	// route this TUI has verified for it. `grok-4.5` is the id the Go
+	// endpoint's model list serves; no native api.x.ai endpoint/model pairing
+	// has been checked, so none is shipped (a user with an xAI key selects
+	// the Custom base_url row, or clones the `custom` template).
+	//
+	// api_key_env is OPENCODE_GO_API_KEY rather than a grok-specific slot
+	// because the shipped endpoint IS OpenCode Go: someone who already
+	// configured that shared account for deepseek/zhipu/minimax/kimi/mimo
+	// gets a working grok preset without pasting the key a second time. The
+	// provider-generic GROK_API_KEY lives in ProviderDefaultEnv and is what a
+	// switch TO grok from another provider adopts.
+	//
+	// Text-only: the Go endpoint's image-input mapping for grok-4.5 is not
+	// pinned, so no vision capability is wired.
+	return openAICompatNoVisionPreset(
+		"grok",
+		"Grok (xAI) — OpenAI-compatible via OpenCode Go",
+		"grok-4.5", ProviderRegionURLs["grok"][0].Env, ProviderRegionURLs["grok"][0].URL, "3")
 }
 
 func nvidiaPreset() Preset {

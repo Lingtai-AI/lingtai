@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `custom`
 
-`customPreset()` (`tui/internal/preset/preset.go:1394-1416`) is a
+`customPreset()` (`tui/internal/preset/preset.go:1451-1473`) is a
 user-supplied OpenAI-compatible template: model is empty until configured,
 the key slot is `LLM_API_KEY`, and the endpoint is user-supplied. Its
 `vision` capability inherits the configured LLM endpoint.

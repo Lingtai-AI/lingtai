@@ -1,19 +1,22 @@
 ---
 name: preset-skill-codex-pool
 description: Official-source-led manual for the TUI `codex-pool` template, including the codex-auth-pool.json format and manual-edit protocol.
-version: 2.1.0
-last_changed_at: "2026-07-19T12:00:00Z"
+version: 2.2.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `codex-pool`
 
-`codexPoolPreset()` (`tui/internal/preset/preset.go:1338-1361`) ships
+`codexPoolPreset()` (`tui/internal/preset/preset.go:1395-1418`) ships
 provider `codex-pool`, exact model `gpt-5.6-sol`,
 `https://chatgpt.com/backend-api/codex`, `thinking: xhigh`, and an empty
 `api_key_env` because it selects from local ChatGPT OAuth token files. The
 manifest declares `vision` parity with `codex`; pooling changes account
-selection, not the model or endpoint.
+selection, not the model or endpoint. The editor's model row therefore
+offers exactly the `codex` lineup — `gpt-5.6-sol`, `gpt-5.6-terra`,
+`gpt-5.6-luna`, `gpt-5.5`, the latest two GPT-5.x generations under the TUI's
+model-curation rule (`tui/CONTRACT.md`). See `reference/codex/SKILL.md`.
 
 ## Template-specific settings
 

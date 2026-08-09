@@ -1,19 +1,27 @@
 ---
 name: preset-skill-codex
 description: Official-source-led manual for the TUI `codex` template.
-version: 2.1.0
-last_changed_at: "2026-07-19T12:00:00Z"
+version: 2.2.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `codex`
 
-`codexPreset()` (`tui/internal/preset/preset.go:1301-1329`) uses provider
+`codexPreset()` (`tui/internal/preset/preset.go:1358-1386`) uses provider
 `codex`, model `gpt-5.6-sol`, the Codex endpoint
 `https://chatgpt.com/backend-api/codex`, and ChatGPT OAuth rather than an API
 key env-var. The manifest exposes provider-native `vision` and web search.
 
 ## Template-specific settings
+
+The editor's model row ships the latest two GPT-5.x generations only:
+`gpt-5.6-sol` (the default), `gpt-5.6-terra`, `gpt-5.6-luna` — three named
+routes of the one 5.6 generation — and `gpt-5.5`. Per the TUI's
+model-curation rule (`tui/CONTRACT.md`) the older `gpt-5.4`, `gpt-5.4-mini`,
+`gpt-5.3-codex`, and `gpt-5.2` ids are no longer offered. A saved preset
+already pinned to one of them keeps working — the TUI never rewrites
+`presets/saved/` — it simply is not reachable from the picker any more.
 
 Exact image support can depend on the current model/account; verify it rather
 than treating this manual as a promise.

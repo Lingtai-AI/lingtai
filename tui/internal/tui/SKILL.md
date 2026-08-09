@@ -4,7 +4,7 @@ Bookkeeping notes for keeping `providerModels`, `modelHasVision`, and friends in
 
 ## What this file is for
 
-Each LLM provider in `providerModels` (preset_editor.go:134) feeds a model picker on the preset editor's model row. When a user clones a template and cycles ←/→ on the model row, the candidates come straight from this map. The map is the source of truth.
+Each LLM provider in `providerModels` (preset_editor.go:108) feeds a model picker on the preset editor's model row. When a user clones a template and cycles ←/→ on the model row, the candidates come straight from this map. The map is the source of truth.
 
 Drift here causes one of two failures:
 
@@ -17,15 +17,20 @@ The second failure mode is what this file exists to prevent.
 
 | Provider | Canonical list | Cadence | Notes |
 |---|---|---|---|
-| `minimax` | https://platform.minimaxi.com/document/Models | Quarterly | M-series, current = 2.7 |
-| `zhipu` | https://docs.bigmodel.cn/cn/guide/models | Quarterly | GLM-5.x family |
+| `minimax` | https://platform.minimaxi.com/document/Models | Quarterly | M-series, current = M3 |
+| `zhipu` | https://docs.bigmodel.cn/cn/guide/models | Quarterly | GLM-5.x family; OpenCode Go takes the same ids lowercased |
 | `mimo` | https://www.xiaomi-ai.com/cn/models | Quarterly | Xiaomi MiMo |
 | `deepseek` | https://api-docs.deepseek.com/quick_start/pricing | Quarterly | DS-V4 family |
+| `grok` | https://opencode.ai/docs/go/ | Monthly | reached only through OpenCode Go; no native xAI route is shipped |
 | `codex` | https://developers.openai.com/codex/models | Monthly | ChatGPT-OAuth only — not the standard OpenAI API list |
+
+`kimi` is deliberately absent from `providerModels`: its model row stays free text so a typed Moonshot id survives a `→`. Its OpenCode Go ids are documented in `internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md` instead.
 
 For codex specifically, **do not** consult `https://platform.openai.com/docs/models`. That's the standard API model list, which includes models the codex backend (`chatgpt.com/backend-api/codex/responses`) doesn't accept (e.g. `gpt-5.5-pro` exists in the standard API but 4xx's on the codex endpoint).
 
 ## Curation rules
+
+**Rule 0 — latest two generations only.** `tui/CONTRACT.md` ("Model list curation") caps every family at its latest two generations. Adding a new generation is the same change that removes the third-newest. Variants inside a generation (`-highspeed`, `-pro`, `-mini`, the `gpt-5.6-sol/-terra/-luna` routes, a lowercase respelling for another endpoint) are not generations and all stay. Read that section before touching the maps; the checklist below decides inclusion *within* the two generations the rule allows.
 
 For each candidate model, decide inclusion against this checklist:
 
@@ -82,9 +87,9 @@ After editing `providerModels["codex"]` / `modelHasVision`:
 
 ## Cross-references
 
-- `preset_editor.go:97` — `providerModels` map
-- `preset_editor.go:158` — `modelHasVision` map
-- `preset_editor.go:1412` — `mandatoryCapRow` (fixed, informational capabilities rendering)
+- `preset_editor.go:108` — `providerModels` map
+- `preset_editor.go:215` — `modelHasVision` map
+- `preset_editor.go:1623` — `mandatoryCapRow` (fixed, informational capabilities rendering)
 - `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
 - `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
 - `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion

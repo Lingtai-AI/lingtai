@@ -232,8 +232,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 12 {
-			t.Fatalf("expected 12 presets, got %d", len(presets))
+		if len(presets) != 13 {
+			t.Fatalf("expected 13 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -242,7 +242,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -786,6 +786,36 @@ func TestAutoEnvVarName(t *testing.T) {
 			preset: pp("zhipu", "https://api.z.ai/api/coding/paas/v4"),
 			want:   "ZHIPU_INTL_1_API_KEY",
 		},
+		// The prefix comes from the PROVIDER name, never from
+		// ProviderDefaultEnv. mimo is the case that makes the difference
+		// visible and the case a manual got wrong: ProviderDefaultEnv["mimo"]
+		// is XIAOMI_API_KEY, but the stamped slot is MIMO_1_API_KEY. kimi is
+		// the same shape (KIMI_CODE_API_KEY -> KIMI_1_API_KEY).
+		{
+			name:   "kimi native row → provider-derived prefix",
+			preset: pp("kimi", "https://api.kimi.com/coding/v1"),
+			want:   "KIMI_1_API_KEY",
+		},
+		{
+			name:   "mimo native row → MIMO_, not XIAOMI_",
+			preset: pp("mimo", "https://api.xiaomimimo.com/v1"),
+			want:   "MIMO_1_API_KEY",
+		},
+		{
+			name:   "kimi OpenCode Go gets no region suffix",
+			preset: pp("kimi", "https://opencode.ai/zen/go/v1"),
+			want:   "KIMI_1_API_KEY",
+		},
+		{
+			name:   "mimo OpenCode Go gets no region suffix",
+			preset: pp("mimo", "https://opencode.ai/zen/go/v1"),
+			want:   "MIMO_1_API_KEY",
+		},
+		{
+			name:   "grok Custom row → GROK_, not the OpenCode slot",
+			preset: pp("grok", "https://proxy.internal.example/v1"),
+			want:   "GROK_1_API_KEY",
+		},
 		{
 			name:   "no provider → empty",
 			preset: Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{}}},
@@ -866,13 +896,26 @@ func TestProviderRegionURLTablesAreExact(t *testing.T) {
 			{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
 			openCodeGo,
 		}},
+		// kimi and mimo had free-text base_url before they gained a region
+		// table, so both carry the Custom sentinel: a two-row table with no
+		// Custom row makes Enter on the base_url row a no-op and removes the
+		// only in-editor path to a proxy/relay endpoint.
 		{"kimi", []RegionURL{
 			{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
 			openCodeGo,
+			{Label: "Custom", URL: ""},
 		}},
 		{"mimo", []RegionURL{
 			{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
 			openCodeGo,
+			{Label: "Custom", URL: ""},
+		}},
+		// grok is the only provider whose entry [0] — the template default —
+		// is the OpenCode Go row: there is no verified native xAI route, so
+		// the Go subscription is the whole product.
+		{"grok", []RegionURL{
+			openCodeGo,
+			{Label: "Custom", URL: ""},
 		}},
 	}
 
@@ -1006,8 +1049,11 @@ func TestValidateRequiresBaseURLForRegionProviders(t *testing.T) {
 			t.Errorf("%s with explicitly empty base_url validated clean, want a base_url violation", provider)
 		}
 		// Absent base_url is tolerated only where regionSuffix assigns a
-		// default region (zhipu → CN, minimax → INTL); deepseek has no region
-		// fallback, so an absent endpoint is still a violation there.
+		// default region (zhipu → CN, minimax → INTL); deepseek, kimi, mimo
+		// and grok have no region fallback, so an absent endpoint is still a
+		// violation there. kimi and mimo joined that set when they gained a
+		// region table — a base_url-less kimi/mimo preset that validated on
+		// an older TUI must gain an explicit endpoint to save again.
 		wantAbsentViolation := regionSuffix(provider, "") == ""
 		if errs := presetWith(provider, "").Validate(); (len(errs) == 0) == wantAbsentViolation {
 			t.Errorf("%s with absent base_url errs=%v, wantAbsentViolation=%v", provider, errs, wantAbsentViolation)
