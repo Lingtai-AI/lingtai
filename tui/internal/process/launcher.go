@@ -122,7 +122,9 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	cmd := exec.Command(python, "-m", "lingtai", "run", agentDir)
 	// Redirect agent output to a log file instead of the TUI terminal
 	logPath := filepath.Join(agentDir, "logs")
-	os.MkdirAll(logPath, 0o755)
+	if err := os.MkdirAll(logPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
 	logFile, err := os.OpenFile(filepath.Join(logPath, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
 		cmd.Stdout = logFile
@@ -130,7 +132,16 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	}
 
 	if err := cmd.Start(); err != nil {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
 		return nil, fmt.Errorf("launch agent: %w", err)
+	}
+	// The child inherited its own copy of the descriptor for stdout/stderr;
+	// close the parent's copy so repeated launches and /refresh cycles do
+	// not accumulate open handles to agent.log.
+	if logFile != nil {
+		_ = logFile.Close()
 	}
 	return cmd, nil
 }

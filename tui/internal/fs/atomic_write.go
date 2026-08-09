@@ -96,6 +96,15 @@ func writeAtomicBytes(path string, data []byte, mode os.FileMode) error {
 	})
 }
 
+// WriteFileAtomic atomically replaces path with data by writing to a unique
+// sibling temporary file in the same directory, syncing it, and renaming it
+// over the destination. A crash or power loss mid-write leaves the previous
+// content intact instead of a truncated or empty file. Existing files keep
+// their permission bits; new files use mode subject to the process umask.
+func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	return writeAtomicBytes(path, data, mode)
+}
+
 func bestEffortSyncDirectory(path string) {
 	directory, err := os.Open(path)
 	if err != nil {

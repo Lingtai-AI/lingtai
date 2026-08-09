@@ -42,7 +42,7 @@ func SaveSettings(baseDir string, s Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "settings.json"), data, 0o644)
+	return fs.WriteFileAtomic(filepath.Join(dir, "settings.json"), data, 0o644)
 }
 
 // SettingField represents a single configurable setting.
@@ -370,7 +370,7 @@ func (m *SettingsModel) saveNickname() {
 		manifest["nickname"] = m.nickname
 	}
 	if out, err := json.MarshalIndent(manifest, "", "  "); err == nil {
-		os.WriteFile(humanPath, out, 0o644)
+		fs.WriteFileAtomic(humanPath, out, 0o644)
 	}
 }
 
@@ -389,7 +389,7 @@ func (m *SettingsModel) saveAgentName() {
 				manifest["agent_name"] = m.agentName
 			}
 			if out, err := json.MarshalIndent(init, "", "  "); err == nil {
-				os.WriteFile(initPath, out, 0o644)
+				fs.WriteFileAtomic(initPath, out, 0o644)
 			}
 		}
 	}
@@ -417,7 +417,7 @@ func (m *SettingsModel) saveAgentLang(lang string) {
 	delete(initData, "covenant")
 	delete(initData, "principle")
 	if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
-		os.WriteFile(initPath, out, 0o644)
+		fs.WriteFileAtomic(initPath, out, 0o644)
 	}
 }
 
