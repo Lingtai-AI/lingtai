@@ -398,6 +398,8 @@ func TestParseEventLLMResponseCarriesTokenUsage(t *testing.T) {
 		"cached_tokens":   180224.0,
 		"thinking_tokens": 516.0,
 		"estimated":       false,
+		// Kernel timing telemetry: measured provider round-trip for this call.
+		"provider_wait_ms": 12345.0,
 	}
 	line, _ := json.Marshal(raw)
 
@@ -422,6 +424,32 @@ func TestParseEventLLMResponseCarriesTokenUsage(t *testing.T) {
 	}
 	if e.TokenUsage.Estimated {
 		t.Errorf("TokenUsage.Estimated = true, want false")
+	}
+	if e.TokenUsage.ApiDurationMs != 12345 {
+		t.Errorf("TokenUsage.ApiDurationMs = %d, want 12345", e.TokenUsage.ApiDurationMs)
+	}
+}
+
+func TestParseEventLLMResponseWithoutProviderWaitMs(t *testing.T) {
+	// Events predating the kernel timing telemetry carry no provider_wait_ms.
+	// The parse layer must leave ApiDurationMs at 0 so the footer renders the
+	// unchanged four-segment line with no API-duration suffix.
+	raw := map[string]interface{}{
+		"ts":            1781258400.0,
+		"type":          "llm_response",
+		"api_call_id":   "api_legacy",
+		"input_tokens":  1000.0,
+		"output_tokens": 200.0,
+		"cached_tokens": 800.0,
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil || e.TokenUsage == nil {
+		t.Fatal("parseEvent must still populate TokenUsage for legacy events")
+	}
+	if e.TokenUsage.ApiDurationMs != 0 {
+		t.Errorf("TokenUsage.ApiDurationMs = %d, want 0 for legacy event", e.TokenUsage.ApiDurationMs)
 	}
 }
 

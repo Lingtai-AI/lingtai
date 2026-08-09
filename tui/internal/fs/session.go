@@ -74,6 +74,12 @@ type TokenUsage struct {
 	Output    int64 `json:"output"`
 	Cached    int64 `json:"cached"`
 	Estimated bool  `json:"estimated,omitempty"`
+	// ApiDurationMs is the kernel-measured provider round-trip time
+	// (`provider_wait_ms` on the llm_response event — a monotonic-clock
+	// interval around the actual provider send, never derived from token
+	// counts or render-time wall clock). 0 means the event predates the
+	// kernel timing telemetry; the footer omits its duration segment then.
+	ApiDurationMs int64 `json:"api_duration_ms,omitempty"`
 }
 
 // AprioriSummary carries the kernel's `summary=true` (a-priori) tool-result
@@ -1796,6 +1802,11 @@ func parseEventMap(raw map[string]interface{}) *SessionEntry {
 				Output:    output,
 				Cached:    cached,
 				Estimated: estimated,
+				// provider_wait_ms is the kernel's measured provider
+				// round-trip (session.py timing_fields). Absent on events
+				// predating that telemetry — intField returns 0 and the
+				// footer skips the duration segment.
+				ApiDurationMs: intField(raw, "provider_wait_ms"),
 			}
 		}
 	}
