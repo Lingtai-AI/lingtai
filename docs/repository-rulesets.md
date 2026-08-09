@@ -72,8 +72,17 @@ targets a ref:
 > one-line edit, but it is a team-size decision — on a repo where one person does
 > nearly all the pushing, `1` blocks all work until a second reviewer exists.
 
-Applying this ruleset is a real workflow change: `main` currently receives direct
-pushes, including from `github-actions[bot]`. Expect that to start failing.
+Applying this ruleset codifies the workflow already in use rather than changing it.
+The only workflow that pushed to `main` as `github-actions[bot]` was
+`.github/workflows/star-tracker.yml`, removed on 2026-07-23 in `71cf16c6`
+(`chore(actions): remove daily star tracker (#716)`). No workflow pushes to this
+repository any more: `release.yml` pushes to the `Lingtai-AI/homebrew-lingtai` tap and
+`sync-hf.yml` pushes to Hugging Face — neither touches `Lingtai-AI/lingtai`. Recent
+history on `main` is already entirely PR-based.
+
+The one observable change is that with `bypass_actors: []` admins lose the ability to
+push straight to `main` and must go through a PR like everyone else. There is no
+pending migration cost gating this fix.
 
 ### `release-tags.json` — tag ruleset for `refs/tags/v*`
 
@@ -83,18 +92,30 @@ New. Makes release tags immutable once pushed:
 - `update` and `non_fast_forward` — a published release tag cannot be moved to a
   different commit.
 
+With `bypass_actors: []` these bind admins too: once applied, nobody can delete or move
+a `v*` tag. That is the intended property, not an oversight — but read the Recovery
+section below before applying, because it is the only documented way back and the
+improvised alternative is deleting the ruleset.
+
 It deliberately does **not** include `creation`. `creation` restricts tag creation to
 bypass actors only, so with `bypass_actors: []` it would block every release. To
-restrict who may cut a release, add it together with an explicit bypass list:
+restrict who may cut a release, add it together with an explicit bypass list. Both
+fields below go into `release-tags.json` — `creation` appended to the existing `rules`
+array, `bypass_actors` replacing the empty one:
 
 ```json
-{ "type": "creation" }
+{
+  "rules": [
+    { "type": "creation" }
+  ],
+  "bypass_actors": [
+    { "actor_type": "OrganizationAdmin", "actor_id": 1, "bypass_mode": "always" }
+  ]
+}
 ```
-```json
-"bypass_actors": [
-  { "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
-]
-```
+
+`actor_id` is required alongside `actor_type`; the API returns 422 without it.
+`OrganizationAdmin` is `actor_id: 1`.
 
 Decide the bypass list deliberately — it is the only thing standing between the rule
 and a broken release pipeline.
@@ -129,22 +150,97 @@ gh api repos/Lingtai-AI/lingtai/rules/branches/main \
   --jq '[.[] | {type, ruleset_source_type}]'
 ```
 
-There is no per-ref rules endpoint for tags, so verify the tag ruleset by reading it
-back and then by behavior:
+There is no per-ref rules endpoint for tags, so start with a read-only check:
 
 ```bash
 gh api "repos/Lingtai-AI/lingtai/rulesets?targets=tag" \
   --jq '[.[] | {name, enforcement}]'          # -> one active entry
-
-git push origin :refs/tags/<some-old-tag>     # -> must be rejected by the ruleset
 ```
 
 Read back what GitHub actually stored, not what was sent — the API silently accepts
-some shapes it then normalizes:
+some shapes it then normalizes, and a ruleset whose `conditions` match no ref looks
+identical to a working one in the settings UI. That failure is the entire subject of
+this document:
 
 ```bash
-gh api repos/Lingtai-AI/lingtai/rulesets/<id> --jq '{conditions, rules: [.rules[].type]}'
+gh api repos/Lingtai-AI/lingtai/rulesets/<id> \
+  --jq '{conditions, rules: [.rules[].type]}'
 ```
+
+Confirm specifically that `conditions.ref_name.include` came back as
+`["refs/tags/v*"]` and not `[]`, and that `non_fast_forward` survived — it is a
+branch-oriented rule, so it is the field most likely to have been rejected or
+normalized away on a tag target. (`update` already blocks moving a tag, so losing
+`non_fast_forward` is not itself a problem; a POST that failed as a whole is.)
+
+> **Never verify a tag rule by attempting to delete a real release tag.** A command
+> like `git push origin :refs/tags/v1.2.3` proves the rule works only when it is
+> *rejected* — and the case where it is accepted is exactly the case above, a ruleset
+> that looks applied but matches no ref. This repository has 117 `v*` tags, and
+> `release.yml` builds the Homebrew formula from
+> `archive/refs/tags/${TAG}.tar.gz` with a pinned sha256; deleting a published tag
+> 404s that URL and breaks the already-shipped formula for every user of that version.
+
+Probe with a throwaway tag instead, never a release tag:
+
+```bash
+git tag v0.0.0-ruleset-probe
+git push origin v0.0.0-ruleset-probe          # allowed: no `creation` rule
+git push origin :refs/tags/v0.0.0-ruleset-probe   # -> must be rejected by the ruleset
+```
+
+The rejection is the proof. Note that the probe tag is now itself undeletable — that
+is the same property working as intended — so clearing it requires the recovery path
+below.
+
+## Recovery — undoing a tag once `release-tags.json` is active
+
+`release-tags.json` ships `bypass_actors: []` with `deletion`, `update` and
+`non_fast_forward`. That makes a pushed `v*` tag immutable **for everyone**, including
+repository and organization admins. Immutability is the point, but it means a mis-cut
+release has no in-place fix, and the improvised one — deleting the ruleset — is the
+exact drift this document exists to prevent.
+
+**Prefer not to recover.** For a bad release, cut `vX.Y.Z+1` and yank the bad version
+downstream. Moving or deleting a published ref breaks anything that already resolved
+it: the Homebrew formula pins a sha256 against the tag tarball, and consumers may have
+the old tag fetched. A superseding tag is cheaper and leaves history honest.
+
+**When a tag genuinely must go** (a secret was committed, the tag points at the wrong
+repository state entirely), flip enforcement off, act, flip it back — and read back
+after each flip, because a silently-failed re-enable leaves the repository unprotected
+while looking fine:
+
+```bash
+# 1. Find the ruleset id.
+gh api "repos/Lingtai-AI/lingtai/rulesets?targets=tag" --jq '.[] | {id, name}'
+
+# 2. Disable, and confirm the flip took.
+gh api -X PUT repos/Lingtai-AI/lingtai/rulesets/<id> -f enforcement=disabled
+gh api repos/Lingtai-AI/lingtai/rulesets/<id> --jq .enforcement    # -> "disabled"
+
+# 3. Delete or re-cut the tag.
+git push origin :refs/tags/vX.Y.Z
+git tag -f vX.Y.Z <sha> && git push origin vX.Y.Z
+
+# 4. Re-enable, and confirm again. Do not skip this read-back.
+gh api -X PUT repos/Lingtai-AI/lingtai/rulesets/<id> -f enforcement=active
+gh api repos/Lingtai-AI/lingtai/rulesets/<id> \
+  --jq '{enforcement, conditions, rules: [.rules[].type]}'
+```
+
+Step 4's read-back must show `enforcement: "active"` *and* a non-empty
+`conditions.ref_name.include`. Checking only `enforcement` reproduces the original bug:
+an active ruleset that matches nothing.
+
+Do not use `-X DELETE` on the ruleset as a shortcut. Deleting and recreating loses the
+id, and a recreate is one typo away from the empty-`include` state documented above.
+
+The same procedure clears the `v0.0.0-ruleset-probe` tag from the Verify section.
+
+If this becomes routine rather than exceptional, that is the signal to ship a real
+bypass list — `{ "actor_type": "OrganizationAdmin", "actor_id": 1, "bypass_mode":
+"always" }` — instead of toggling enforcement by hand each time.
 
 ## Notes
 
