@@ -544,11 +544,12 @@ func RefreshTemplates() error {
 // selected. Empty Env means "don't touch api_key_env".
 //
 // Env is deliberately present ONLY where a region genuinely implies a
-// distinct credential (deepseek's DeepSeek API vs OpenCode Go are separate
-// accounts). zhipu/minimax CN and INTL are also separate accounts, but their
-// slots are region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
-// MINIMAX_CN_1_API_KEY via AutoEnvVarName); declaring a flat Env on those
-// rows would make a CN<->INTL base_url cycle overwrite the user's
+// distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
+// OpenCode Go row on zhipu/minimax, are separate accounts). The plain
+// region rows (zhipu/minimax CN and INTL) declare none: their slots are
+// region-suffixed and host-stamped (ZHIPU_INTL_1_API_KEY,
+// MINIMAX_CN_1_API_KEY via AutoEnvVarName), and a flat Env on those rows
+// would make a CN<->INTL base_url cycle overwrite the user's
 // region-specific slot with a region-agnostic one.
 type RegionURL struct {
 	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
@@ -575,10 +576,12 @@ var ProviderRegionURLs = map[string][]RegionURL{
 	"zhipu": {
 		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
 		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
 	"minimax": {
 		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
 		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 	},
 }
 

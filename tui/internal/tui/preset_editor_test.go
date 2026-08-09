@@ -1884,12 +1884,13 @@ func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
 // api_key_env. The host stamps region-suffixed slots (ZHIPU_INTL_1_API_KEY,
 // MINIMAX_CN_1_API_KEY) for saved presets, and those are separate accounts;
 // the base_url cycle only adopts an Env when the selected option declares one
-// (deepseek's DeepSeek API / OpenCode Go), never for a plain region toggle.
+// (the OpenCode Go row, which is a genuinely distinct credential), never for
+// a plain CN<->INTL region toggle.
 func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
 	for _, provider := range []string{"zhipu", "minimax"} {
 		regions := preset.ProviderRegionURLs[provider]
-		if len(regions) < 2 {
-			t.Fatalf("%s needs at least two regions for a cycle test", provider)
+		if len(regions) < 3 {
+			t.Fatalf("%s needs at least CN/INTL/OpenCode Go for the cycle test", provider)
 		}
 		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
 		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
@@ -1900,8 +1901,8 @@ func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
 		llm := m.llmMap()
 		m.cursor = editorFieldOrderIndex(t, feBaseURL)
 
-		// INTL -> CN: slot must survive the cycle untouched.
-		m.cycleFocused(+1)
+		// INTL -> CN (cycle backwards): slot must survive untouched.
+		m.cycleFocused(-1)
 		if got := asString(llm["base_url"]); got != regions[0].URL {
 			t.Fatalf("[%s] INTL->CN base_url = %q, want %q", provider, got, regions[0].URL)
 		}
@@ -1909,13 +1910,22 @@ func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
 			t.Fatalf("[%s] INTL->CN api_key_env = %q, want preserved %q", provider, got, slot)
 		}
 
-		// CN -> INTL: still preserved.
-		m.cycleFocused(-1)
+		// CN -> INTL (cycle forward): still preserved.
+		m.cycleFocused(+1)
 		if got := asString(llm["base_url"]); got != regions[1].URL {
 			t.Fatalf("[%s] CN->INTL base_url = %q, want %q", provider, got, regions[1].URL)
 		}
 		if got := asString(llm["api_key_env"]); got != slot {
 			t.Fatalf("[%s] CN->INTL api_key_env = %q, want preserved %q", provider, got, slot)
+		}
+
+		// INTL -> OpenCode Go: adopts the OpenCode credential (distinct account).
+		m.cycleFocused(+1)
+		if got := asString(llm["base_url"]); got != regions[2].URL {
+			t.Fatalf("[%s] INTL->OpenCodeGo base_url = %q, want %q", provider, got, regions[2].URL)
+		}
+		if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
+			t.Fatalf("[%s] INTL->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", provider, got)
 		}
 	}
 }
