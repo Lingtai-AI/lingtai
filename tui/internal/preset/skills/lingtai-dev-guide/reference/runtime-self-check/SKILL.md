@@ -9,8 +9,8 @@ description: >
   evidence safely with secrets redacted. Includes verifying that long-lived
   runtime objects (services/adapters/caches) were actually rebuilt after a
   refresh, not just that new source is imported.
-version: 1.2.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.3.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -113,6 +113,38 @@ auto-upgraded by the TUI (`tui/internal/config/venv.go:isEditableLingtaiInstall`
 so once dev mode is established it stays. An unexpected `site-packages` path means
 the auto-upgrader or a `brew reinstall` clobbered it — re-establish dev mode per
 the setup/gotchas references.
+
+### PYTHONPATH shadowing check
+
+Before trusting an import probe, confirm the live agent process is not carrying a
+stale `PYTHONPATH` that overrides the venv. Debug sessions often `export
+PYTHONPATH=...` to test a scratch/worktree/temp repo, and because LingTai's
+refresh watcher copies the parent environment verbatim, that pollution survives
+refresh — a plain refresh re-inherits it and the wrong import can persist until
+the process is relaunched from a clean environment. See `reference/gotchas/SKILL.md`
+("PYTHONPATH pollution") for the full incident and rules.
+
+```bash
+PID=<agent-parent-pid>
+ps eww -p "$PID" | tr ' ' '\n' | grep '^PYTHONPATH=' && echo 'POLLUTED' || echo 'clean'
+```
+
+Then confirm the import resolves from the intended venv under a clean
+environment (this is the source of truth, not whatever `python` resolves on
+PATH):
+
+```bash
+VENV_PY=<configured-venv>/bin/python   # e.g. ~/.lingtai-tui/runtime/venv/bin/python
+env -u PYTHONPATH "$VENV_PY" - <<'PY'
+import importlib.util, json
+spec = importlib.util.find_spec("lingtai")
+print(json.dumps({"lingtai_file": spec.origin if spec else None}))
+PY
+```
+
+If `ps eww` shows a `PYTHONPATH` and the venv probe differs, a normal
+`system(action="refresh")` will **not** fix it (the watcher re-inherits the
+pollution); use the clean-relaunch recipe in §8 instead.
 
 ## 2. Active binary and dev-mode symlink check
 
@@ -283,6 +315,42 @@ never print env *values*; generalize private absolute paths to
 `<your-lingtai-checkout>` / `~/.lingtai-tui/...`; omit or redact Telegram chat
 IDs, emails, and recipient lists; report "match found" / "uses env reference",
 not the matched secret.
+
+## 8. Clean relaunch of a polluted agent process
+
+When a live agent carries a `PYTHONPATH` that points at another project's source
+and a plain refresh re-inherits it, the only correct recovery is an
+identity-verified clean relaunch of the process with `PYTHONPATH` unset in the
+new parent and children. This is an **authorized owner/operator action** — get
+explicit permission for the exact PID/root before doing it.
+
+1. **Identity-verify the old parent.** Confirm the PID, full command, parent
+   lineage, working directory, and start identity match the agent root you think
+   you are restarting. Never kill on a `ps | grep | xargs kill` hunch.
+2. **SIGTERM the old parent gracefully** and confirm its children exit.
+3. **Launch the new parent from a clean environment**, explicitly unsetting the
+   pollution the session would otherwise inherit:
+
+   ```bash
+   ROOT=<agent-root-dir>                 # e.g. .../.lingtai/<agent>
+   VENV_PY=<configured-venv>/bin/python  # exact venv from init.json
+   env -u PYTHONPATH \
+       -u LINGTAI_RUNTIME_PYTHON \
+       -u LINGTAI_RUNTIME_VENV \
+       -u LINGTAI_REFRESH_ENV_OVERWRITE \
+       "$VENV_PY" -m lingtai run "$ROOT"
+   ```
+4. **Verify the relaunch, not just that a process exists:** new parent/children
+   PIDs and PPID 1; `ps eww` shows `PYTHONPATH` absent; `sys.executable`,
+   `lingtai.__file__`, `kernel.find_spec`, and `direct_url` all resolve from the
+   intended venv/source; heartbeat fresh; a producer-channel read (e.g. Telegram)
+   and a self-email canary both PASS; the old PID is absent. Preserve any old
+   rollback/evidence and do not do a second refresh.
+
+This recipe was proven on 2026-08-09 when a dev agent's live parent inherited
+`PYTHONPATH` from its launch session (pointing at another project's scratch
+`src`), survived the first refresh, and required exactly this clean relaunch
+before `import lingtai` resolved from the intended frozen source.
 
 ## Related references
 

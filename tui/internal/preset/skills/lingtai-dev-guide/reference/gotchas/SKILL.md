@@ -2,8 +2,8 @@
 name: dev-guide-gotchas
 description: >
   Nested lingtai-dev-guide reference for known implementation footguns: Bubble Tea v2 paste, textarea theming, dev-mode rebuilds, editable installs, migrations, localization, authorization gates, config conventions, and rebuild-gate test false-passes.
-version: 1.1.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.2.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -110,6 +110,53 @@ A successful PR merge does not prove running agents execute the merged code. The
 **Symptom:** a feature present on GitHub is missing at runtime; imports such as `lingtai.mcp_servers` fail; an MCP/addon path still points at an old standalone repo or a detached worktree.
 
 **Fix:** probe the exact Python interpreter the agent uses and print `module.__file__` for `lingtai`, `lingtai.kernel`, and the relevant MCP/addon modules; inspect the git root/HEAD behind those paths; fast-forward or editable-reinstall the intended source; then call `system(action="refresh")` and rerun the probe. Command recipe: `reference/setup/SKILL.md` → "Verify the runtime checkout a running agent actually uses". Discipline: `reference/runtime-self-check/SKILL.md`.
+
+## PYTHONPATH pollution shadows the runtime import
+
+A leftover `PYTHONPATH` in the launch environment can silently replace the
+runtime venv's `lingtai` with another project's source. This is a real incident:
+2026-08-09, a dev agent refreshed onto a fresh frozen main, then post-refresh
+probing showed `import lingtai` resolving to a *different* project's scratch
+checkout (`exact-8c44d232/src`) because the live parent process carried
+`PYTHONPATH=/Users/.../dev-2/.../scratch/.../src` from the session that launched
+it. The intended venv was untouched — the import path just pointed elsewhere.
+
+**Root cause:** debug sessions commonly `export PYTHONPATH=...` to test one
+scratch/worktree/temp repo. LingTai's refresh watcher copies the parent
+environment verbatim (`os.environ`), so pollution survives refresh — a plain
+`system(action="refresh")` re-inherits it. The wrong import can persist across
+refreshes until the *process* is relaunched from a clean environment.
+
+**Symptoms:** post-refresh probes disagree with the configured venv
+(`lingtai.__file__` points at another project's `src/`), `direct_url`/git HEAD
+resolve to the wrong checkout, or behavior matches old code that is no longer in
+`init.json`/the venv.
+
+**Prevention (launch-session discipline):** never launch the TUI or an agent
+from a shell session that exports `PYTHONPATH`. If you must test scratch source,
+use `env -u PYTHONPATH` or an isolated venv/preset rather than exporting it into
+the shared launch session.
+
+**Detection:** inspect the live process environment, not just config:
+
+```bash
+PID=<agent-parent-pid>
+ps eww -p "$PID" | tr ' ' '\n' | grep '^PYTHONPATH=' || echo 'PYTHONPATH absent'
+```
+
+Then confirm the import resolves from the intended venv with the same probe
+under a clean environment:
+
+```bash
+VENV_PY=<configured-venv>/bin/python
+env -u PYTHONPATH "$VENV_PY" -c 'import lingtai; print(lingtai.__file__)'
+```
+
+**Recovery when pollution is already live:** a plain refresh re-inherits the
+pollution, so use an identity-verified clean relaunch of the agent process (with
+`PYTHONPATH` unset in the new parent and children) instead of relying on
+refresh. See `reference/runtime-self-check/SKILL.md` §1 for the full probe and
+relaunch recipe.
 
 ## Migration cross-package contract
 

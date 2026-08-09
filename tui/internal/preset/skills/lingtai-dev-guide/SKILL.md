@@ -7,8 +7,8 @@ description: >
   running network, audit security, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.7.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 2.8.0
+last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -54,6 +54,15 @@ generic procedures here for local guidance, or restate local rules from memory.
   not as a reason to paste large content into `SKILL.md`. Put dense material in
   related/nested reference files and link to `skills-manual` for current
   authoring mechanics and limit-aware structure.
+- **Launch-session / PYTHONPATH hygiene rule:** never launch the TUI or an agent
+  from a shell session that exports `PYTHONPATH`. A leftover `PYTHONPATH` pointing
+  at another project's scratch/worktree/temp repo `src` shadows the venv's own
+  `lingtai` import, and because the refresh watcher copies `os.environ` verbatim,
+  the pollution survives refresh — a plain `refresh` re-inherits it. Debug
+  sessions that `export PYTHONPATH=...` for one experiment silently infect every
+  agent they launch. See `reference/gotchas/SKILL.md` ("PYTHONPATH pollution")
+  and `reference/runtime-self-check/SKILL.md` §1 for the probe and clean-relaunch
+  recipe.
 
 ## ANATOMY frontmatter contract
 
