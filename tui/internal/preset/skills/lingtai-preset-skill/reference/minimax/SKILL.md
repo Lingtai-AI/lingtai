@@ -1,14 +1,14 @@
 ---
 name: preset-skill-minimax
 description: Official-source-led manual for the TUI `minimax` template.
-version: 2.1.0
+version: 2.2.0
 last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `minimax`
 
-`minimaxPreset()` (`tui/internal/preset/preset.go:1117-1142`) ships provider
+`minimaxPreset()` (`tui/internal/preset/preset.go:1167-1192`) ships provider
 `minimax`, exact model `MiniMax-M3`, and `MINIMAX_API_KEY` at the
 Anthropic-compatible regional endpoint `https://api.minimaxi.com/anthropic`
 (CN default) or `https://api.minimax.io/anthropic` (INTL). Its manifest
@@ -31,8 +31,15 @@ was in place before it was selected, so the choice is reversible.
 
 ## Template-specific settings
 
+The model picker ships the latest two M-series generations only —
+`MiniMax-M3` and `MiniMax-M2.7` with its `-highspeed` variant. Per the TUI's
+model-curation rule (`tui/CONTRACT.md`) the older `MiniMax-M2.5` /
+`MiniMax-M2.1` / `MiniMax-M2` ids are no longer selectable; a saved preset
+already pinned to one keeps working, the TUI just will not offer it again.
+
 MiniMax-M3 natively accepts image/video content blocks on that same
 endpoint; this native path does not depend on an MCP or a separate plan.
+Both shipped generations are recorded as image-capable in `modelHasVision`.
 
 MiniMax also publishes the separate optional
 [MiniMax-Coding-Plan-MCP](https://github.com/MiniMax-AI/MiniMax-Coding-Plan-MCP),

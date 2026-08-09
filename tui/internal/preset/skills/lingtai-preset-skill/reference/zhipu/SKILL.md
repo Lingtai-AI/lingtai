@@ -1,14 +1,14 @@
 ---
 name: preset-skill-zhipu
 description: Official-source-led manual for the TUI `zhipu` template.
-version: 2.1.0
+version: 2.2.0
 last_changed_at: "2026-08-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `zhipu`
 
-`zhipuPreset()` (`tui/internal/preset/preset.go:1144-1161`) ships provider
+`zhipuPreset()` (`tui/internal/preset/preset.go:1194-1211`) ships provider
 `zhipu` with exact model `GLM-5.2`, `ZHIPU_API_KEY`, and the
 OpenAI-compatible regional endpoints
 `https://open.bigmodel.cn/api/coding/paas/v4` (CN) and
@@ -25,12 +25,27 @@ The TUI preset editor's `base_url` row offers three options
 - **OpenCode Go** — `https://opencode.ai/zen/go/v1`. This is the only row
   that implies a credential: selecting it sets `api_key_env` to
   `OPENCODE_GO_API_KEY` (the shared OpenCode Go account) and saving keeps
-  that slot instead of minting a region-suffixed one.
+  that slot instead of minting a region-suffixed one. Its model ids are
+  LOWERCASE (`glm-5.2`, `glm-5.1`) — an uppercase id is rejected with
+  `Model GLM-5.2 is not supported`, even though the native CN/INTL rows take
+  the uppercase catalog names. `glm-5.2` is the verified datum (uppercase
+  rejected, lowercase accepted); `glm-5.1` is inferred from the native
+  catalog's `GLM-5.1` by the same lowercasing rule and has not been
+  separately confirmed on the Go endpoint. There is no `glm-5`: the catalog
+  has no standalone `GLM-5`, so no lowercase alias for one is shipped.
 
 CN and INTL imply no `api_key_env`, so cycling between them preserves
 whatever slot the host stamped (`ZHIPU_CN_1_API_KEY`,
 `ZHIPU_INTL_1_API_KEY`). Cycling *off* OpenCode Go restores the slot that
 was in place before it was selected, so the choice is reversible.
+
+The model picker holds two mutually exclusive id sets in a single cycle —
+`GLM-5.2`, `GLM-5.1` for the native rows and `glm-5.2`, `glm-5.1` for
+OpenCode Go — and the model row is not coupled to the selected `base_url`
+row, so it is possible to pair an id with an endpoint that rejects it. Match
+the case to the row you are on. Per the TUI's model-curation rule
+(`tui/CONTRACT.md`) only the latest two generations ship, so `GLM-5-Turbo`,
+`GLM-4.7`, and `GLM-4.5-Air` are no longer selectable.
 
 ## Template-specific settings
 

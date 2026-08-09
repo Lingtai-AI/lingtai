@@ -1,14 +1,14 @@
 ---
 name: lingtai-preset-skill
 description: >
-  Thin dual-axis router for preset questions: which of the 12 TUI-shipped
+  Thin dual-axis router for preset questions: which of the 13 TUI-shipped
   built-in preset templates (provider axis), and which cross-cutting preset
   lifecycle mechanic (operation axis) — saving, checking availability,
   activating/refreshing, endpoint/capability facts, or troubleshooting. Read
   a child only when it is relevant; this does not describe arbitrary saved
   presets.
-version: 2.0.0
-last_changed_at: "2026-07-19T00:00:00Z"
+version: 2.1.0
+last_changed_at: "2026-08-09T00:00:00Z"
 related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
   - tui/internal/preset/preset.go
@@ -21,6 +21,7 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/deepseek/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/gemini/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/grok/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
@@ -57,7 +58,7 @@ endpoint, protocol, and plan facts and route to the relevant operation
 child instead of restating shared mechanics; operation pages own the shared
 lifecycle mechanics and never encode provider-specific facts.
 
-## Provider catalog (12 direct children)
+## Provider catalog (13 direct children)
 
 ```yaml
 - name: preset-skill-minimax
@@ -72,6 +73,8 @@ lifecycle mechanics and never encode provider-specific facts.
   location: reference/gemini/SKILL.md
 - name: preset-skill-kimi
   location: reference/kimi/SKILL.md
+- name: preset-skill-grok
+  location: reference/grok/SKILL.md
 - name: preset-skill-nvidia
   location: reference/nvidia/SKILL.md
 - name: preset-skill-openrouter
@@ -94,6 +97,7 @@ lifecycle mechanics and never encode provider-specific facts.
 | `deepseek` | `reference/deepseek/SKILL.md` | DeepSeek, OpenAI-compatible text route |
 | `gemini` | `reference/gemini/SKILL.md` | Google Gemini native multimodal route |
 | `kimi` | `reference/kimi/SKILL.md` | Kimi Code, OpenAI-compatible |
+| `grok` | `reference/grok/SKILL.md` | Grok (xAI) via OpenCode Go, OpenAI-compatible |
 | `nvidia` | `reference/nvidia/SKILL.md` | NVIDIA NIM/API Catalog gateway |
 | `openrouter` | `reference/openrouter/SKILL.md` | OpenRouter gateway |
 | `codex` | `reference/codex/SKILL.md` | ChatGPT OAuth Codex route |

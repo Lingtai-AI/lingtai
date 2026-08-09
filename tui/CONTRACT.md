@@ -11,6 +11,9 @@ related_files:
   - tui/internal/tui/props.go
   - tui/internal/tui/setup.go
   - tui/internal/tui/preset_library.go
+  - tui/internal/tui/preset_editor.go
+  - tui/internal/tui/SKILL.md
+  - tui/internal/preset/preset.go
   - tui/main.go
   - tui/internal/config/global_test.go
   - docs/tui-agent-alignment.md
@@ -104,6 +107,61 @@ appears as the degraded state below.
    (fable F8, D1-D5 below): check agents present (R1), `config.json`
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
    (R1), runtime/version (R1).
+
+## Model list curation
+
+The model ids the TUI offers are a contract with the user: everything the
+picker shows must be something the chosen endpoint actually serves today. A
+retired id in the list is a 4xx the user did not ask for, and a list that
+only ever grows rots into one.
+
+**Two-generation rule.** For every model family, the TUI ships only the
+**latest two generations**. This binds:
+
+- `providerModels` (`tui/internal/tui/preset_editor.go`) — the ←/→ picker
+  on the editor's model row;
+- the default `model` of every built-in preset constructor
+  (`tui/internal/preset/preset.go`), which for a picker-bearing provider must
+  itself be one of that provider's shipped ids;
+- `modelHasVision` (`tui/internal/tui/preset_editor.go`), which carries one
+  entry per id in `providerModels` and no entry for a retired one. The
+  bijection is what `TestModelHasVisionDeclaresEveryShippedModel` enforces,
+  minus two deliberate exemptions it names: `nvidia` (a gateway catalog whose
+  per-vendor vision facts we do not verify) and the `claude*` CLI-alias
+  spellings. The exemptions apply only to the *requirement* to carry an
+  entry — the reverse direction is not exempt: a `modelHasVision` entry for
+  an id no picker ships still fails the test. Adding an exemption is a change
+  to that test, not a silent omission;
+- **not** the providers whose model row is free text. `kimi`, `gemini`,
+  `openrouter`, and `custom` have no `providerModels` entry, so they have no
+  `modelHasVision` entries either and the bijection test never sees them.
+  Their default model is still expected to be a current generation
+  (`kimi-for-coding`, `gemini-3-flash-preview`, `z-ai/glm-5.1`, and `custom`'s
+  empty model), but the maps carry nothing for them and must not be given
+  entries to "complete" the table — for `kimi` in particular, adding a
+  `providerModels` entry flips its row from free text to picker-only and one
+  `→` silently overwrites a typed Moonshot id. That deletion is deliberate and
+  pinned by a negative assertion in `preset_editor_test.go`.
+
+Reading of the rule:
+
+| Term | Meaning |
+|---|---|
+| family | one vendor's model line — `MiniMax-M*`, `GLM-*`, `mimo-v*`, `deepseek-v*`, `gpt-5.*`, `kimi-k*` |
+| generation | the version step within the family — `M3` vs `M2.7`; `GLM-5.2` vs `GLM-5.1`; `gpt-5.6` vs `gpt-5.5` |
+| **not** a generation | a variant inside one generation — `-highspeed`, `-pro`, `-flash`, `-mini`, `-Air`, the `gpt-5.6-sol/-terra/-luna` routes, or the same generation respelled for another endpoint (`GLM-5.2` / `glm-5.2`). All variants of a kept generation stay. |
+| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`), and gateway catalogs that list one current id per vendor (`nvidia`). The rule still applies per family inside such a list. Free-text model rows (`kimi`, `gemini`, `openrouter`, `custom`) are outside the `providerModels`/`modelHasVision` bindings entirely — see the fourth clause above. |
+
+**Standing obligation.** Adding a new generation is the same change that
+removes the third-newest one — from `providerModels`, from `modelHasVision`,
+and from any provider manual under
+`tui/internal/preset/skills/lingtai-preset-skill/reference/` that enumerates
+the lineup. Never rewrite `presets/saved/`: a user pinned to a retired id
+keeps working, the picker just stops offering it.
+
+Per-provider source lists, the rest of the inclusion checklist (served on our
+endpoint, GA not preview, documented vision, subscription gates), and the
+removal procedure live in `tui/internal/tui/SKILL.md`.
 
 ## Doctor checks (TUI-can't-start diagnostic set)
 

@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `nvidia`
 
-`nvidiaPreset()` (`tui/internal/preset/preset.go:1244-1263`) ships exact
+`nvidiaPreset()` (`tui/internal/preset/preset.go:1316-1335`) ships exact
 model `meta/llama-3.3-70b-instruct` at `https://integrate.api.nvidia.com/v1`
 with OpenAI compatibility and `NVIDIA_API_KEY`. This default model is
 text-only and the manifest has no `vision` capability.

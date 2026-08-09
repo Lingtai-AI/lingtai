@@ -32,6 +32,7 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/deepseek/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/gemini/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/grok/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
@@ -229,8 +230,8 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `Save(p)` | `tui/internal/preset/preset.go:373` | ALWAYS to `saved/`; never templates |
 | `RefreshTemplates()` | `tui/internal/preset/preset.go:437` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
 | `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1288` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
-| `BuiltinPresets()` | `tui/internal/preset/preset.go:489` | minimax, zhipu, mimo, deepseek, gemini, kimi, nvidia, openrouter, codex, codex-pool, claude, custom |
-| `skills/lingtai-preset-skill/` | `tui/internal/preset/skills/lingtai-preset-skill/SKILL.md:1` | thin dual-axis router: 12 direct provider children (one per `BuiltinPresets()` name, `reference/<preset>/SKILL.md`) plus 5 nested operation children for cross-cutting lifecycle mechanics (`reference/operations/<op>/SKILL.md`: `saved-presets`, `endpoint-capabilities`, `availability-save-gate`, `activation-session-refresh`, `troubleshooting-migration`). |
+| `BuiltinPresets()` | `tui/internal/preset/preset.go:489` | minimax, zhipu, mimo, deepseek, gemini, kimi, grok, nvidia, openrouter, codex, codex-pool, claude, custom |
+| `skills/lingtai-preset-skill/` | `tui/internal/preset/skills/lingtai-preset-skill/SKILL.md:1` | thin dual-axis router: 13 direct provider children (one per `BuiltinPresets()` name, `reference/<preset>/SKILL.md`) plus 5 nested operation children for cross-cutting lifecycle mechanics (`reference/operations/<op>/SKILL.md`: `saved-presets`, `endpoint-capabilities`, `availability-save-gate`, `activation-session-refresh`, `troubleshooting-migration`). |
 | `IsTemplate(p)` | `tui/internal/preset/preset.go:540` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
 | `RefFor(p)` | `tui/internal/preset/preset.go:549` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for canonical provider `claude-code`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
@@ -256,7 +257,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 12 direct provider children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 13 direct provider children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State
