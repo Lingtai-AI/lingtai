@@ -10,19 +10,26 @@
 //      (see env_file in init.json). Do NOT put the token here.
 //   3. Start the agent — it will long-poll for messages automatically.
 //
-// By default, the bot accepts messages from EVERYONE (open access).
-// To restrict access, add "allowed_users" with Telegram user IDs.
-// Don't know your user ID? Message the bot first, then ask the agent
-// to check telegram messages — the user ID is in the "from" field.
+// This example ships LOCKED DOWN: only the Telegram user IDs listed in
+// "allowed_users" below can talk to the agent. Replace the placeholder
+// with your own numeric ID before starting.
+// Don't know your ID? Message the bot first, then ask the agent to check
+// telegram messages — the user ID is in the "from" field — then add it to
+// "allowed_users" and restart. If the bot never replies, your ID is not
+// on the allowlist yet.
 // =============================================================
 {
+  // Only these Telegram user IDs can talk to the agent.
+  // Replace with your own numeric ID (see header for how to find it).
+  "allowed_users": [123456789],
+
   // Environment variable holding the bot token from @BotFather.
   "bot_token_env": "TELEGRAM_BOT_TOKEN"
 
-  // Optional: restrict to specific Telegram user IDs.
-  // Omit for open access (anyone can message the bot).
-  // "allowed_users": [123456789, 987654321]
-
   // Optional: seconds between poll cycles (default 1.0).
   // "poll_interval": 1.0
+
+  // UNSAFE variant — open access: anyone who finds the bot handle can
+  // command the agent (bash, mail, files). Only for throwaway agents
+  // without such capabilities. To use: delete "allowed_users" above.
 }
