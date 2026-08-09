@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	lingfs "github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // RehydrateNetwork propagates the orchestrator's init.json to every other
@@ -114,7 +116,7 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 		if err != nil {
 			return workersRehydrated, fmt.Errorf("marshal %s/init.json: %w", entry.Name(), err)
 		}
-		if err := os.WriteFile(initPath, out, 0o644); err != nil {
+		if err := lingfs.WriteFileAtomic(initPath, out, 0o644); err != nil {
 			return workersRehydrated, fmt.Errorf("write %s/init.json: %w", entry.Name(), err)
 		}
 		workersRehydrated++

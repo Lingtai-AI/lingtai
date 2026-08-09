@@ -1335,7 +1335,7 @@ func resetActivePresetToDefault(dir string) {
 	if err != nil {
 		return
 	}
-	os.WriteFile(initPath, out, 0o644)
+	fs.WriteFileAtomic(initPath, out, 0o644)
 }
 
 // readAllowedPresets returns the contents of manifest.preset.allowed from
@@ -1484,7 +1484,7 @@ func setActivePreset(dir, presetPath string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(initPath, out, 0o644)
+	return fs.WriteFileAtomic(initPath, out, 0o644)
 }
 
 type childWindowSizeMsg struct {
