@@ -71,6 +71,16 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	}
 	opts.Dir = absDir
 
+	// The agent name doubles as a directory segment under .lingtai/, so it
+	// must be a single contained path segment: reject absolute paths,
+	// parent segments, and either platform's separators before any project
+	// write (issue #849).
+	agentName := opts.resolveAgentName()
+	if err := preset.ValidateSafeName(agentName); err != nil {
+		WriteError(stderr, fmt.Sprintf("invalid agent name %q: %s", agentName, err.Error()), "invalid_args")
+		return 1
+	}
+
 	// Validate: target must not already have .lingtai/
 	lingtaiDir := filepath.Join(opts.Dir, ".lingtai")
 	if _, err := os.Stat(lingtaiDir); err == nil {
@@ -123,7 +133,8 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		return 1
 	}
 
-	agentName := opts.resolveAgentName()
+	// agentName was resolved and validated at the top of RunSpawn (before
+	// any project write).
 	lang := opts.Language
 	if lang == "" {
 		lang = "en"

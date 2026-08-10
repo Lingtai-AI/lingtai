@@ -442,10 +442,37 @@ func (p Preset) Validate() []error {
 	return errs
 }
 
+// ValidateSafeName rejects any name that isn't a single, non-empty path
+// segment safe to use as a directory name or filename stem beneath an
+// owning directory. It rejects blank values, "." and "..", and any path
+// separator — both "/" and "\" — so escapes are blocked regardless of the
+// platform the binary runs on (POSIX treats "\" as a literal filename
+// character; Windows treats it as a separator). A name that passes is
+// guaranteed to stay a direct child of whatever base directory it is
+// joined to (issue #849).
+func ValidateSafeName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("must not be blank")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("must not be %q", name)
+	}
+	if strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("must not contain a path separator")
+	}
+	return nil
+}
+
 // Save writes a preset to the saved/ directory. Save NEVER writes to
 // templates/ — that's owned by Bootstrap. Callers that want to seed
 // a template must use writeTemplate (preset package internal).
 func Save(p Preset) error {
+	// The preset name becomes the filename stem under SavedDir(); enforce
+	// the owning-layer containment invariant here so every caller — current
+	// and future — is protected (issue #849).
+	if err := ValidateSafeName(p.Name); err != nil {
+		return fmt.Errorf("invalid preset name %q: %w", p.Name, err)
+	}
 	if err := p.NormalizeLegacyCapabilities(); err != nil {
 		return fmt.Errorf("canonicalize preset capabilities: %w", err)
 	}
@@ -488,6 +515,12 @@ func Clone(src Preset, newName string) Preset {
 // Bootstrap re-extracts the file anyway). Returns an error only when
 // a saved file existed and the unlink failed.
 func Delete(name string) error {
+	// The name becomes the filename stem under SavedDir(); enforce the
+	// owning-layer containment invariant here so Delete can never target a
+	// path outside saved/ regardless of caller (issue #849).
+	if err := ValidateSafeName(name); err != nil {
+		return fmt.Errorf("invalid preset name %q: %w", name, err)
+	}
 	path := filepath.Join(SavedDir(), name+".json")
 	err := os.Remove(path)
 	if os.IsNotExist(err) {
@@ -1891,6 +1924,12 @@ func stripObsoleteInitFields(initJSON map[string]interface{}) {
 
 // GenerateInitJSONWithOpts creates a full init.json from a preset with explicit agent options.
 func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts) error {
+	// The directory derived from dirName must remain a single contained
+	// child of lingtaiDir: reject absolute paths, parent segments, and
+	// either platform's separators before any join or mkdir (issue #849).
+	if err := ValidateSafeName(dirName); err != nil {
+		return fmt.Errorf("invalid agent directory name %q: %w", dirName, err)
+	}
 	if err := p.NormalizeLegacyCapabilities(); err != nil {
 		return fmt.Errorf("canonicalize preset capabilities: %w", err)
 	}
