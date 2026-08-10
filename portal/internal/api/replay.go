@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -700,9 +702,16 @@ func NewManifestHandler(baseDir string) http.HandlerFunc {
 }
 
 // NewRebuildHandler serves POST /api/topology/rebuild.
-// Reconstructs the full tape from source data (events.jsonl + mailbox),
-// then writes compressed hourly chunks.
-func NewRebuildHandler(baseDir string) http.HandlerFunc {
+// Reconstructs the full tape from source data (events.jsonl + mailbox), then
+// writes compressed hourly chunks.
+//
+// The mutation is protected by an explicit trust boundary (see
+// rebuildRequestAllowed) so a reachable browser origin cannot trigger
+// reconstruction work without reading the response. Reconstruction runs
+// entirely under TopologyMu — the lock is acquired before source scanning or
+// frame allocation begins — so repeated or overlapping requests cannot stack
+// expensive pre-lock work and readers stay consistent with the writer.
+func NewRebuildHandler(baseDir, token string) http.HandlerFunc {
 	topologyPath := filepath.Join(baseDir, ".portal", "topology.jsonl")
 	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
 	progressPath := filepath.Join(baseDir, ".portal", "reconstruct.progress")
@@ -712,8 +721,15 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !rebuildRequestAllowed(r, token) {
+			http.Error(w, "rebuild requires a local, same-origin, or token-authenticated request", http.StatusForbidden)
+			return
+		}
 
-		// Reconstruct from source data
+		// Reconstruct from source data under the topology lock.
+		TopologyMu.Lock()
+		defer TopologyMu.Unlock()
+
 		frames, err := fs.ReconstructTape(baseDir)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -725,9 +741,7 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 			return
 		}
 
-		TopologyMu.Lock()
 		manifest, err := writeReconstructedReplay(topologyPath, replayDir, progressPath, frames)
-		TopologyMu.Unlock()
 		os.Remove(progressPath)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -741,6 +755,72 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(manifest)
 	}
+}
+
+// rebuildRequestAllowed implements the explicit trust boundary for
+// POST /api/topology/rebuild. A request is accepted when any of:
+//
+//  1. Same-machine access: the client connected from a loopback address and
+//     the request Host is a loopback host (localhost / 127.0.0.1 / ::1). This
+//     covers the default bind, the TUI's localhost URL, and same-machine
+//     browser tabs. Requiring a loopback Host rejects DNS-rebinding requests,
+//     which arrive with the attacker's Host over a loopback connection.
+//  2. Intentional non-loopback operation: a browser request from a
+//     non-loopback connection whose Origin matches the request Host (the SPA
+//     is served from the same server, so its rebuild POSTs are same-origin).
+//     Cross-origin browser requests — and any loopback-connection request
+//     with a non-loopback Host, the DNS-rebinding shape — are rejected.
+//  3. Explicit token: the request carries the configured rebuild token in
+//     X-Portal-Rebuild-Token, for CLI/automation on non-loopback binds.
+func rebuildRequestAllowed(r *http.Request, token string) bool {
+	if r == nil {
+		return false
+	}
+	loopbackConn := clientIsLoopback(r.RemoteAddr)
+	if loopbackConn && hostIsLoopback(hostOnly(r.Host)) {
+		return true
+	}
+	if !loopbackConn {
+		// Origin carries host:port; compare against the full Host header.
+		if origin := r.Header.Get("Origin"); origin != "" {
+			return r.Host != "" && strings.EqualFold(originHost(origin), r.Host)
+		}
+	}
+	if token != "" && r.Header.Get("X-Portal-Rebuild-Token") == token {
+		return true
+	}
+	return false
+}
+
+// clientIsLoopback reports whether a RemoteAddr ("host:port") is a loopback
+// connection.
+func clientIsLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	return hostIsLoopback(host)
+}
+
+// hostOnly strips the port from a "host:port" value.
+func hostOnly(hostPort string) string {
+	if h, _, err := net.SplitHostPort(hostPort); err == nil {
+		return h
+	}
+	return hostPort
+}
+
+// originHost extracts the host[:port] from an Origin header value, or "" if
+// the value is not an http(s) origin.
+func originHost(origin string) string {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return u.Host
 }
 
 // NewChunkHandler serves GET /api/topology/chunk?start=<hourMs>.
