@@ -9,8 +9,8 @@ description: >
   evidence safely with secrets redacted. Includes verifying that long-lived
   runtime objects (services/adapters/caches) were actually rebuilt after a
   refresh, not just that new source is imported.
-version: 1.3.0
-last_changed_at: "2026-08-09T00:00:00Z"
+version: 1.3.1
+last_changed_at: "2026-08-10T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -163,15 +163,15 @@ when the portal is in scope.
 ## 3. Rebuild the active TUI from a clean release worktree
 
 To make the running binary reflect `origin/main` (or a release head), rebuild
-from a clean worktree, not a dirty feature branch. After rebuilding either
-binary, rebuild **both** — a stale portal against a freshly migrated project
-fails with `data version N is newer than this binary supports`.
+from a clean worktree, not a dirty feature branch. Rebuild both binaries when
+both are in scope — project migrations are retired, so there is no `.lingtai/meta.json`
+version gate to keep in lockstep (see `reference/architecture/SKILL.md`).
 
 ```bash
 REPO=<your-lingtai-checkout>
 git -C "$REPO" fetch origin main --tags --prune
 
-# Build both so TUI and portal stay at the same meta.json version.
+# Build both when the change touches either binary (no meta.json version lockstep).
 cd "$REPO/tui" && make build
 cd "$REPO/portal" && make build
 ```

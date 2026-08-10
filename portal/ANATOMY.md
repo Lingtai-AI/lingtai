@@ -73,7 +73,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 
 ## Connections
 
-- **Portal → filesystem (read).** `internal/fs/` reads agent manifests, heartbeats, mailboxes, token ledgers, chat history, and `.notification/` payloads — the same files the TUI reads. All communication with running agents is filesystem-only: no sockets, no RPC.
+- **Portal → filesystem (read).** `internal/fs/` reads agent manifests (`.agent.json`), heartbeats (`.agent.heartbeat`), status files (`.status.json`), preset manifests (`init.json`), mailboxes (`mailbox/{inbox,archive}/<uuid>/message.json` plus `mailbox/contacts.json`), token ledgers (`logs/token_ledger.jsonl`), and signal files — feeding network reconstruction (`network.go`, `reconstruct.go`) and the mail UI. It does **not** read `history/chat_history.jsonl` or `.notification/` payloads; those are TUI-side surfaces. All communication with running agents is filesystem-only: no sockets, no RPC.
 - **Portal → filesystem (write).** Writes `.portal/port` (bound port), `.portal/topology.jsonl` (live recording), `.portal/replay/chunks/*.json.gz` (compressed replay caches), and `.portal/reconstruct.progress` (reconstruction progress).
 - **Portal ↔ TUI integration.** The TUI launches `lingtai-portal` as a subprocess when the user opens `/viz`. The TUI reads `.portal/port` to know where to point the browser. The portal and TUI may encounter legacy `meta.json` files, but neither production binary reads, writes, or advances project migration progress. See repo-root `ANATOMY.md` Notes "Migration retirement."
 - **Portal → browser.** Serves the embedded React SPA on `/` and a same-origin JSON API on `/api/*`. The API does not emit wildcard CORS headers.

@@ -2,8 +2,8 @@
 name: dev-guide-contributing
 description: >
   Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, worktree inventory and exact-object approval gates, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
-version: 1.2.1
-last_changed_at: "2026-07-24T00:00:00Z"
+version: 1.2.2
+last_changed_at: "2026-08-10T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -139,7 +139,7 @@ never convert a refusal or uncertainty into cleanup pressure.
 
 - **Screens / UI models:** `tui/internal/tui/` — one file per screen (Bubble Tea convention)
 - **Presets:** `tui/internal/preset/` — `preset.go` (~1900 lines) handles load/save/list
-- **Migrations:** `tui/internal/migrate/` — append a new `m<NNN>_<name>.go` file
+- **Migrations:** `tui/internal/migrate/` — retained historical/test registry (m001–m039); production no longer runs it. Live per-machine migrations live in `tui/internal/globalmigrate/` (under `~/.lingtai-tui/`).
 - **Filesystem access:** `tui/internal/fs/` — read-only window into agent working directories
 - **Subprocess launch:** `tui/internal/process/` — how agents are spawned
 - **i18n:** `tui/i18n/` — en/zh/wen JSON tables
@@ -153,16 +153,16 @@ make cross-compile            # all platforms
 go test ./...                 # run tests
 ```
 
-### Adding a migration
+### Project migrations are retired
 
-1. Create `tui/internal/migrate/m<NNN>_<name>.go` exporting `func migrate<Name>(lingtaiDir string) error`.
-2. Register in `migrate.go`: append to the `migrations` slice, bump `CurrentVersion`.
-3. **Also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`** — TUI and portal share the `meta.json` version space.
-4. If it touches shared on-disk state (init.json schema, preset paths), implement it in both packages with identical logic.
-5. If it's TUI-only, add a no-op stub `Fn: func(_ string) error { return nil }` in the portal registry to preserve the version slot.
-
-Version collisions and the `data version N is newer than this binary supports`
-failure have their own recovery checklist in `reference/gotchas/SKILL.md`.
+`tui/internal/migrate/` and `portal/internal/migrate/` are retained historical/test
+registries (m001–m039): source and tests remain for Git history and direct
+historical unit coverage, but no production binary reads, writes, advances, or
+gates on `.lingtai/meta.json`. Do NOT add new project migrations or bump
+`CurrentVersion` expecting them to run — the cross-binary version contract is
+retired. Live migrations remain only in `tui/internal/globalmigrate/`, the
+TUI-owned per-machine registry under `~/.lingtai-tui/` (run at TUI startup);
+Portal has no equivalent.
 
 ### Adding a new screen
 
@@ -178,7 +178,7 @@ failure have their own recovery checklist in `reference/gotchas/SKILL.md`.
 - **API handlers:** `portal/internal/api/` — `server.go`, `handlers.go`, `replay.go`
 - **Filesystem access:** `portal/internal/fs/` — same shape as TUI's, portal-tailored
 - **Web frontend:** `portal/web/src/` — React 19 + TypeScript + Vite
-- **Migrations:** `portal/internal/migrate/` — shares version space with TUI
+- **Migrations:** `portal/internal/migrate/` — retained historical/test registry; Portal production does not run it
 - **i18n:** `portal/i18n/` — independent of TUI's i18n, same three-locale rule
 
 ### Build and test
@@ -200,7 +200,8 @@ Pipeline: `npm install` → `npm run build` (in `web/`) → `go build` (embeds `
 
 ### Migrations
 
-Same contract as TUI — see "Adding a migration" above. Portal-only migrations get a no-op stub in the TUI registry.
+Retired with the project migration registries — Portal production no longer runs
+`portal/internal/migrate/`. See "Project migrations are retired" above.
 
 ## Changing the kernel (`lingtai-kernel/`)
 
