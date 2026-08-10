@@ -385,6 +385,13 @@ func CheckTUIUpgrade(currentVersion string) string {
 // pip-install per addon. This function only checks importability and returns
 // a clear error if an addon is missing, so callers can surface the failure
 // instead of silently launching an agent that will crash on first use.
+//
+// Legacy addon object keys (the pre-m028 "addons" dict shape) are validated
+// structurally as addon/module identifiers BEFORE any interpreter source or
+// command is constructed: a key containing a semicolon or any other
+// source-boundary/non-identifier character fails here instead of altering
+// the generated "import lingtai.addons.<key>" program during an ordinary
+// launch-time check.
 func EnsureAddons(python, agentDir string) error {
 	initPath := filepath.Join(agentDir, "init.json")
 	data, err := os.ReadFile(initPath)
@@ -398,6 +405,16 @@ func EnsureAddons(python, agentDir string) error {
 	addonsRaw, ok := init["addons"].(map[string]interface{})
 	if !ok || len(addonsRaw) == 0 {
 		return nil // no addons declared
+	}
+
+	// Validate every legacy addon key up front so a malformed or untrusted
+	// key can never reach interpreter construction. The importability check
+	// below interpolates each key verbatim into Python source, so the
+	// validation boundary must come first.
+	for addonName := range addonsRaw {
+		if err := ValidateAddonKey(addonName); err != nil {
+			return fmt.Errorf("invalid legacy addon key in init.json at %s: %w", initPath, err)
+		}
 	}
 
 	for addonName := range addonsRaw {

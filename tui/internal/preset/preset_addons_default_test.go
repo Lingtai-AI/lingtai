@@ -245,6 +245,54 @@ func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
 	}
 }
 
+// Verifies that a legacy dict-shape addons object containing a key that is
+// not a valid addon/module identifier (semicolon source-boundary character)
+// has that key dropped during regen instead of being carried into the
+// regenerated init.json, while valid keys are preserved.
+func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
+	tmp := t.TempDir()
+	lingtaiDir := filepath.Join(tmp, ".lingtai")
+	globalDir := filepath.Join(tmp, ".lingtai-tui")
+	agentDir := filepath.Join(lingtaiDir, "alice")
+	os.MkdirAll(agentDir, 0o755)
+	os.MkdirAll(globalDir, 0o755)
+
+	legacy := map[string]interface{}{
+		"manifest": map[string]interface{}{},
+		"addons": map[string]interface{}{
+			"imap":    map[string]interface{}{"config": ".secrets/imap.json"},
+			"imap;rm": map[string]interface{}{"config": ".secrets/evil.json"},
+		},
+	}
+	data, _ := json.Marshal(legacy)
+	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
+
+	p := DefaultPreset()
+	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{}); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedData, _ := os.ReadFile(filepath.Join(agentDir, "init.json"))
+	var got map[string]interface{}
+	json.Unmarshal(updatedData, &got)
+	addons, ok := got["addons"].([]interface{})
+	if !ok {
+		t.Fatalf("addons should now be a list, got %T (%v)", got["addons"], got["addons"])
+	}
+	names := map[string]bool{}
+	for _, raw := range addons {
+		if s, ok := raw.(string); ok {
+			names[s] = true
+		}
+	}
+	if !names["imap"] {
+		t.Errorf("expected imap preserved from legacy dict, got %v", addons)
+	}
+	if names["imap;rm"] {
+		t.Errorf("invalid legacy key must not be preserved, got %v", addons)
+	}
+}
+
 // Cosmetic: confirm runtime.GOOS-aware venv python path resolution
 // produces a sensible string. Not a behavior test; just makes sure the
 // fragment matching in TestGenerateInitJSONWritesNewShapeWithLocalVenv
