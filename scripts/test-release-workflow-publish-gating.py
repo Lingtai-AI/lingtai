@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Static assertions for the tag release workflow.
 
-The tag workflow must create a GitHub source release, update the Homebrew
-source-build formula, and publish exactly one prebuilt asset: a Windows
-AMD64 TUI/portal archive plus its checksum sidecar and bundle manifest. Only
-the windows-release job may upload release assets; source-release must
-remain upload-free and Homebrew must remain source-tarball-based. The Windows
-archive must fail closed unless both binaries are built and packaged, and
-exact-tag smoke must verify both installed binaries.
+The tag workflow must create a GitHub source release as a DRAFT, update the
+Homebrew source-build formula only after the Windows publication boundary,
+and publish exactly one prebuilt asset: a Windows AMD64 TUI/portal archive
+plus its checksum sidecar and bundle manifest. Only the windows-release job
+may upload release assets or flip the draft to public; source-release must
+remain upload-free and draft-only, and Homebrew must remain
+source-tarball-based. The Windows archive must fail closed unless both
+binaries are built and packaged, the Homebrew checksum must fail closed on
+HTTP error status, and exact-tag smoke must verify both installed binaries
+through the maintained bounded version-probe helper.
 """
 from __future__ import annotations
 
@@ -55,12 +58,22 @@ def main() -> int:
         script = create.get("run", "")
         check("gh release create" in script, "source-release must create the GitHub release")
         check("--verify-tag" in script, "source-release must verify the pushed tag")
+        check("--draft" in script, "source-release must create the release as a draft (draft-first)")
+        check("--draft=false" not in script, "source-release must never publish the draft")
         check("gh release upload" not in script, "source-release must not upload binary assets")
 
     homebrew = jobs.get("update-homebrew", {})
+    check(homebrew.get("needs") == "windows-release",
+          "update-homebrew must depend on windows-release so it waits for the same publication boundary")
     checksum = find_step(homebrew, "compute source tarball checksum")
     formula = find_step(homebrew, "write formula")
     check(checksum is not None, "update-homebrew must checksum the GitHub source tarball")
+    if checksum:
+        script = checksum.get("run", "")
+        check("curl -fsSL" in script or "curl -fSL" in script or "curl --fail" in script,
+              "update-homebrew checksum must fail closed on HTTP error status (curl -f)")
+        check("curl -sL" not in script,
+              "update-homebrew checksum must not use bare curl -sL (an HTTP error body must not be hashed)")
     check(formula is not None, "update-homebrew must write the source-build formula")
     if formula:
         script = formula.get("run", "")
@@ -94,6 +107,21 @@ def main() -> int:
         check("gh release upload" in script, "windows-release must upload the Windows assets")
         check("$zip_name" in script and "$zip_name.sha256" in script and "lingtai-bundle-manifest.json" in script,
               "windows-release must upload the ZIP, its sha256 sidecar, and the bundle manifest")
+
+    publish_step = find_step(windows, "publish github release after windows assets")
+    check(publish_step is not None,
+          "windows-release must publish the draft after the Windows assets are verified and uploaded")
+    if publish_step:
+        script = publish_step.get("run", "")
+        check("gh release edit" in script and "--draft=false" in script,
+              "windows-release must publish the draft via gh release edit --draft=false")
+        check("gh release upload" not in script, "publish step must not upload assets")
+        check("grep -qx" in script and "missing required Windows asset" in script,
+              "publish step must verify the required Windows assets exist on the release before publishing")
+    if upload_step and publish_step:
+        steps = windows.get("steps", [])
+        check(steps.index(upload_step) < steps.index(publish_step),
+              "draft publish must come after the Windows asset upload step (publish-last)")
 
     portal_build = find_step(windows, "build lingtai-portal.exe")
     check(portal_build is not None, "windows-release must have a portal build step")
@@ -131,6 +159,10 @@ def main() -> int:
 
     check(text.count("gh release upload") == 1,
           "gh release upload must appear exactly once, in windows-release")
+    check(text.count("gh release edit") == 1,
+          "gh release edit must appear exactly once, in windows-release")
+    check(text.count("--draft=false") == 1,
+          "the draft must be published exactly once (--draft=false), in windows-release")
 
     smoke = yaml.safe_load(SMOKE_WORKFLOW_PATH.read_text())
     exact_smoke = smoke.get("jobs", {}).get("windows-release-asset-smoke", {})
@@ -139,12 +171,16 @@ def main() -> int:
           "exact-tag smoke must install with -SkipVenv")
     check("lingtai-portal.exe" in exact_steps and "Test-Path" in exact_steps,
           "exact-tag smoke must require the installed portal executable")
-    check("$portalPath" in exact_steps and "& $portalPath version" in exact_steps,
-          "exact-tag smoke must execute the portal version surface")
-    check('"lingtai-portal $env:LINGTAI_VERSION"' in exact_steps,
-          "exact-tag smoke must assert the portal version")
-    check("& $tuiPath version" in exact_steps and '"lingtai-tui $env:LINGTAI_VERSION"' in exact_steps,
-          "exact-tag smoke must preserve the TUI version assertion")
+    check("function Invoke-BoundedVersion" in exact_steps,
+          "exact-tag smoke must define the bounded version-probe helper Invoke-BoundedVersion")
+    check("WaitForExit" in exact_steps and "$p.ExitCode -ne 0" in exact_steps,
+          "Invoke-BoundedVersion must bound the probe timeout and fail closed on a non-zero exit")
+    check("$reported -ne $Expected" in exact_steps,
+          "Invoke-BoundedVersion must assert the probed version output against the expected string")
+    check('Invoke-BoundedVersion $tuiPath "lingtai-tui $env:LINGTAI_VERSION"' in exact_steps,
+          "exact-tag smoke must run the TUI version surface through Invoke-BoundedVersion and assert its output")
+    check('Invoke-BoundedVersion $portalPath "lingtai-portal $env:LINGTAI_VERSION"' in exact_steps,
+          "exact-tag smoke must run the portal version surface through Invoke-BoundedVersion and assert its output")
 
     if FAILURES:
         print("FAILED release workflow checks:", file=sys.stderr)

@@ -22,11 +22,20 @@ jobs:
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "GitHub release $TAG already exists; preserving it."
           else
-            gh release create "$TAG" --repo "$REPO" --verify-tag \
+            # Draft-first: the release must not become public/latest until
+            # windows-release has validated, built, packaged, and uploaded the
+            # Windows assets. source-release never publishes; windows-release
+            # flips the draft to a public release only after its upload passes.
+            gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
               --title "$TAG" --notes "Release $TAG"
           fi
 
   update-homebrew:
+    # Wait for the same publication boundary: this job must only run after
+    # windows-release has validated, built, packaged, uploaded, and published
+    # the release, so the formula can never advertise a tag whose Windows
+    # assets (or whose public release itself) do not yet exist.
+    needs: windows-release
     runs-on: ubuntu-latest
     steps:
       - name: Compute source tarball checksum
@@ -40,7 +49,10 @@ jobs:
             exit 1
           fi
           url="https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
-          sha=$(curl -sL "$url" | shasum -a 256 | cut -d' ' -f1)
+          # Fail closed: curl -f turns any HTTP error status into a non-zero
+          # exit, and pipefail (set above) propagates it through the pipeline,
+          # so a checksum of an error response can never reach the formula.
+          sha=$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)
           echo "source=$sha" >> "$GITHUB_OUTPUT"
           echo "Source tarball SHA256: $sha"
 
@@ -333,3 +345,21 @@ jobs:
           set -euo pipefail
           gh release upload "$TAG" --repo "$REPO" --clobber \
             "$zip_name" "$zip_name.sha256" lingtai-bundle-manifest.json
+
+      - name: Publish GitHub release after Windows assets verified and uploaded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The source release was created as a draft; it only becomes
+          # public/latest here, after every kernel/validation/build/package/
+          # manifest/upload gate in this job has passed. Any earlier failure
+          # leaves the draft unpublished (never a partially public release).
+          names="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+          for asset in "$zip_name" "$zip_name.sha256" lingtai-bundle-manifest.json; do
+            if ! grep -qx "$asset" <<< "$names"; then
+              echo "::error::release $TAG is missing required Windows asset $asset" >&2
+              exit 1
+            fi
+          done
+          gh release edit "$TAG" --repo "$REPO" --draft=false
