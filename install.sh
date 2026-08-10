@@ -2354,7 +2354,7 @@ build_from_source() {
   ensure_go_for_source "$BUILD_DIR"
 
   say "Building lingtai-tui ($VERSION) ..."
-  (cd "$BUILD_DIR/tui" && CGO_ENABLED=0 go build -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)
+  (cd "$BUILD_DIR/tui" && CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)
 
   PORTAL_BUILT=0
   if [[ "$SKIP_PORTAL" == "1" ]]; then
@@ -2362,7 +2362,7 @@ build_from_source() {
   else
     if ensure_node_for_portal; then
       say "Building lingtai-portal ($VERSION) ..."
-      if (cd "$BUILD_DIR/portal/web" && npm ci --silent && npm run build --silent) &&          (cd "$BUILD_DIR/portal" && CGO_ENABLED=0 go build -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-portal" .); then
+      if (cd "$BUILD_DIR/portal/web" && npm ci --silent && npm run build --silent) &&          (cd "$BUILD_DIR/portal" && CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-portal" .); then
         PORTAL_BUILT=1
       else
         warn "Skipping portal — portal build failed; continuing with lingtai-tui only."
