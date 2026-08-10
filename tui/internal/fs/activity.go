@@ -56,7 +56,10 @@ func normalizeAgentLiveness(nodes []AgentNode) {
 			continue
 		}
 		nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec)
-		if !nodes[i].Alive && nodes[i].State != "" {
+		// Heartbeat is ground truth — no heartbeat means SUSPENDED. Malformed
+		// manifests keep their explicit repair state instead of being
+		// relabeled as suspended (issue #846).
+		if !nodes[i].Alive && nodes[i].State != "" && nodes[i].State != "MALFORMED" {
 			nodes[i].State = "SUSPENDED"
 		}
 	}
