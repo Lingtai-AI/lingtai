@@ -13,7 +13,7 @@ import (
 // describing what was inspected. It issues no install/brew commands.
 type KernelStatus struct {
 	Installed   string // installed lingtai version, or "" if unimportable
-	Latest      string // latest PyPI version, or "" if lookup failed
+	Latest      string // latest kernel GitHub release version, or "" if lookup failed
 	Editable    bool   // editable/dev install detected
 	NeedsUpdate bool   // false when editable, missing-latest, or installed==latest
 	Lines       []DoctorLine
@@ -30,9 +30,9 @@ type inspectKernelOptions struct {
 }
 
 // InspectKernel reads the managed venv's installed `lingtai` version and the
-// latest PyPI release WITHOUT mutating anything: no brew, no pip/uv install.
+// latest kernel GitHub release WITHOUT mutating anything: no brew, no pip/uv install.
 // It reuses the same helpers the upgrade path uses (VenvPython,
-// pythonLingtaiVersion, isEditableLingtaiInstall, fetchLatestPyPIVersion) so
+// pythonLingtaiVersion, isEditableLingtaiInstall, fetchLatestKernelGitHubRelease) so
 // the read-only classification cannot drift from the apply step
 // (RunKernelUpdate). Editable dev installs report Editable=true and
 // NeedsUpdate=false — they are never reinstalled.
@@ -101,15 +101,15 @@ func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 		}
 	}
 
-	latest, err := fetchLatestPyPIVersion(opts.HTTPClient)
+	latest, err := fetchLatestKernelGitHubRelease(opts.HTTPClient)
 	if err != nil {
-		status.add(DoctorWarn, "Could not check latest Python lingtai on PyPI: %v", err)
+		status.add(DoctorWarn, "Could not check latest Python lingtai on GitHub: %v", err)
 		// Without a latest version we cannot say an update is available.
 		status.NeedsUpdate = false
 		return status
 	}
 	status.Latest = latest
-	status.add(DoctorInfo, "Latest Python lingtai on PyPI: %s", latest)
+	status.add(DoctorInfo, "Latest Python lingtai on GitHub: %s", latest)
 
 	if installed == latest {
 		status.NeedsUpdate = false

@@ -178,7 +178,7 @@ func TestUpgradePythonRuntimeSkipsPyPIForBundleProvenance(t *testing.T) {
 	mkdirTestVenv(t, venvPath)
 
 	// Only one version probe queued (the installed-version read); if the gate
-	// fails to trip, fetchLatestPyPIVersion/runtimeUpgradeCommand would run
+	// fails to trip, fetchLatestKernelGitHubRelease/runtimeUpgradeCommand would run
 	// next and the fakeRunner would either be starved of a queued version or
 	// (worse) actually attempt a mutating install call. HTTPClient panics on
 	// any use, proving the gate trips BEFORE any PyPI network call — not just

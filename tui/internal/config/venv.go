@@ -426,7 +426,7 @@ func EnsureAddons(python, agentDir string) error {
 	return nil
 }
 
-// CheckUpgrade compares installed lingtai version to PyPI latest.
+// CheckUpgrade compares installed lingtai version to the latest kernel GitHub release.
 // Runs pip install --upgrade if a newer version is available.
 // Returns true if an upgrade was performed.
 // Non-blocking: silently returns false on any error (offline, timeout, etc.).
@@ -1287,7 +1287,7 @@ func (r *UpgradeRuntimeResult) add(sev DoctorSeverity, format string, args ...in
 	}
 }
 
-// UpgradePythonRuntime compares installed lingtai to PyPI and runs a forced
+// UpgradePythonRuntime compares installed lingtai to the latest kernel GitHub release and runs a forced
 // `pip install --upgrade lingtai` when force=true, even if versions already
 // match. All command failures and post-install verification failures are
 // reported in the returned lines.
@@ -1423,27 +1423,28 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 		return result
 	}
 
-	// Legacy PyPI-compare/upgrade path: reached only for a runtime that is
+	// Legacy upgrade path: reached only for a runtime that is
 	// neither an editable dev install nor bundle-provisioned (no
 	// kernel_source metadata at all — installs that predate install.sh's
 	// bundle path, or that were never upgraded through it). This is
 	// pre-existing migration behavior, kept minimal and unchanged rather than
-	// retracted here: doing so is out of scope for this fix, and PyPI is not
-	// being newly introduced as a source for LingTai by keeping it. It is
+	// retracted here: doing so is out of scope for this fix. It is
 	// NOT the product's canonical install path going forward — every new
 	// install goes through install.sh's mandatory bundle path (RELEASING.md)
 	// and is never reached here (see the bundle-provenance gate above). A
 	// legacy runtime naturally migrates to kernel_source=="bundle" bookkeeping
 	// the next time a human re-runs the one-command installer.
-	latest, err := fetchLatestPyPIVersion(opts.HTTPClient)
+	// The latest-version lookup reads the kernel GitHub release (tag vX.Y.Z),
+	// never PyPI, so the check stays aligned with the canonical release source.
+	latest, err := fetchLatestKernelGitHubRelease(opts.HTTPClient)
 	if err != nil {
-		result.add(DoctorWarn, "Could not check latest Python lingtai on PyPI: %v", err)
+		result.add(DoctorWarn, "Could not check latest Python lingtai on GitHub: %v", err)
 		if !force {
 			writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
 			return result
 		}
 	} else {
-		result.add(DoctorInfo, "Latest Python lingtai on PyPI: %s", latest)
+		result.add(DoctorInfo, "Latest Python lingtai on GitHub: %s", latest)
 		if !force && installed == latest {
 			result.add(DoctorOK, "Python lingtai runtime is up to date")
 			writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
@@ -1476,31 +1477,29 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 	return result
 }
 
-func fetchLatestPyPIVersion(client *http.Client) (string, error) {
+func fetchLatestKernelGitHubRelease(client *http.Client) (string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Second}
 	}
-	resp, err := client.Get("https://pypi.org/pypi/lingtai/json")
+	resp, err := client.Get("https://api.github.com/repos/Lingtai-AI/lingtai-kernel/releases/latest")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("PyPI returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("GitHub returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	var pypi struct {
-		Info struct {
-			Version string `json:"version"`
-		} `json:"info"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&pypi); err != nil {
+	var release latestRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return "", err
 	}
-	if pypi.Info.Version == "" {
-		return "", fmt.Errorf("PyPI response had no info.version")
+	if release.TagName == "" {
+		return "", fmt.Errorf("GitHub latest kernel release had no tag_name")
 	}
-	return pypi.Info.Version, nil
+	// Kernel releases are tagged vX.Y.Z; the installed lingtai version and all
+	// comparisons in this file use the bare X.Y.Z form.
+	return strings.TrimPrefix(release.TagName, "v"), nil
 }
 
 func pythonLingtaiVersion(runner CommandRunner, python string) (string, error) {

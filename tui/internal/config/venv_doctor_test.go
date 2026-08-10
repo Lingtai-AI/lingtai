@@ -77,21 +77,21 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 	return CommandResult{Stdout: "ok\n"}
 }
 
-func testVersionClient(t *testing.T, latestPyPI, latestTUI string) *http.Client {
+func testVersionClient(t *testing.T, latestKernel, latestTUI string) *http.Client {
 	t.Helper()
-	return &http.Client{Transport: versionRoundTripper{latestPyPI: latestPyPI, latestTUI: latestTUI}}
+	return &http.Client{Transport: versionRoundTripper{latestKernel: latestKernel, latestTUI: latestTUI}}
 }
 
 type versionRoundTripper struct {
-	latestPyPI string
-	latestTUI  string
+	latestKernel string
+	latestTUI    string
 }
 
 func (rt versionRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	var body string
 	switch {
-	case req.URL.Host == "pypi.org" && req.URL.Path == "/pypi/lingtai/json":
-		body = fmt.Sprintf(`{"info":{"version":%q}}`, rt.latestPyPI)
+	case req.URL.Host == "api.github.com" && req.URL.Path == "/repos/Lingtai-AI/lingtai-kernel/releases/latest":
+		body = fmt.Sprintf(`{"tag_name":%q}`, "v"+rt.latestKernel)
 	case req.URL.Host == "api.github.com" && req.URL.Path == "/repos/Lingtai-AI/lingtai/releases/latest":
 		body = fmt.Sprintf(`{"tag_name":%q}`, rt.latestTUI)
 	default:
