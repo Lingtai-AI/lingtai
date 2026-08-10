@@ -384,9 +384,7 @@ func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
 	m := NewPresetEditorModel(p, "en", keys, "")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	for i := 0; i < 9; i++ {
-		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
+	m.cursor = editorFieldOrderIndex(t, feAPIKey)
 	if editorFieldOrder[m.cursor] != feAPIKey {
 		t.Fatalf("expected cursor on feAPIKey, got %v", editorFieldOrder[m.cursor])
 	}
@@ -814,31 +812,39 @@ func TestPresetEditorCodexThinkingDisplayAndCommitNormalization(t *testing.T) {
 	}
 }
 
-func TestPresetEditorThinkingHiddenAndRemovedForNonCodex(t *testing.T) {
+// Providers with a native, non-OpenAI/Anthropic kernel adapter (gemini,
+// claude-code) do not accept manifest.llm.thinking at all: the row stays
+// hidden and a stale value is stripped on commit.
+func TestPresetEditorThinkingHiddenAndRemovedForNonThinkingProvider(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	llm := m.working.Manifest["llm"].(map[string]interface{})
+	llm["provider"] = "gemini"
+	delete(llm, "api_compat")
 	llm["thinking"] = "low"
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
 	if m.fieldVisible(feThinking) {
-		t.Fatalf("reasoning effort row should be hidden for non-codex provider")
+		t.Fatalf("reasoning effort row should be hidden for a non-thinking provider")
+	}
+	if m.isCyclable(feThinking) {
+		t.Fatalf("reasoning effort row should not be cyclable for a non-thinking provider")
 	}
 	if strings.Contains(view, "Reasoning effort") || strings.Contains(view, "llm.thinking") {
-		t.Fatalf("non-codex editor should not render thinking row; view:\n%s", view)
+		t.Fatalf("non-thinking editor should not render thinking row; view:\n%s", view)
 	}
 
 	m.cursor = editorFieldOrderIndex(t, feServiceTier)
 	m.normalizeCursor()
 	if editorFieldOrder[m.cursor] == feThinking {
-		t.Fatalf("cursor landed on hidden thinking field for non-codex preset")
+		t.Fatalf("cursor landed on hidden thinking field for non-thinking preset")
 	}
 
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
 	if _, ok := committedLLM["thinking"]; ok {
-		t.Fatalf("non-codex commit should remove llm.thinking; got %#v", committedLLM["thinking"])
+		t.Fatalf("non-thinking commit should remove llm.thinking; got %#v", committedLLM["thinking"])
 	}
 }
 
@@ -864,7 +870,9 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 }
 
 func TestPresetEditorServiceTierHiddenForNonCodexAndPreserved(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+	// gemini has no api_compat and is outside the thinking scope, so the field
+	// layout matches the classic non-codex editor (thinking row hidden).
+	m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset("gemini", "", nil), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
@@ -1585,29 +1593,293 @@ func TestPresetEditorCustomResponsesThinkingCyclesAndOmitsDefault(t *testing.T) 
 	}
 }
 
-func TestPresetEditorCustomThinkingCleansWhenResponsesScopeEnds(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		field editorField
-	}{
-		{name: "provider", field: feProvider},
-		{name: "api compat", field: feAPICompat},
-		{name: "wire api", field: feWireAPI},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := testCustomOpenAIPresetEditorPreset()
-			llm := p.Manifest["llm"].(map[string]interface{})
-			llm["wire_api"] = "responses"
-			llm["thinking"] = "xhigh"
-			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+// Leaving the thinking-capable scope entirely (api_compat cleared, so the
+// preset declares no OpenAI/Anthropic wire) strips the value and hides the
+// row. Switching wire_api does NOT: manifest.llm.thinking is accepted on
+// either OpenAI wire, so the level survives.
+func TestPresetEditorThinkingCleansWhenCompatScopeEnds(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	llm["thinking"] = "xhigh"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 
-			m.cursor = editorFieldOrderIndex(t, tc.field)
-			m.cycleFocused(+1)
-			if _, ok := m.llmMap()["thinking"]; ok {
-				t.Fatal("leaving custom Responses scope must remove thinking")
+	m.cursor = editorFieldOrderIndex(t, feAPICompat)
+	m.cycleFocused(-1) // openai -> "" (no declared wire compatibility)
+	if got := m.llmMap()["api_compat"]; got != "" {
+		t.Fatalf("api_compat after cycling = %#v, want empty", got)
+	}
+	if _, ok := m.llmMap()["thinking"]; ok {
+		t.Fatal("leaving the OpenAI/Anthropic compat scope must remove thinking")
+	}
+	if m.fieldVisible(feThinking) {
+		t.Fatal("thinking must be hidden after leaving the compat scope")
+	}
+}
+
+func TestPresetEditorThinkingSurvivesWireAPIChange(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	llm["thinking"] = "high"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+	m.cursor = editorFieldOrderIndex(t, feWireAPI)
+	m.cycleFocused(+1) // responses -> auto (wraps)
+	if got := m.fieldString(feWireAPI); got != "auto" {
+		t.Fatalf("wire_api after cycling = %q, want auto", got)
+	}
+	if got := m.llmMap()["thinking"]; got != "high" {
+		t.Fatalf("thinking after wire_api change = %#v, want high", got)
+	}
+	if !m.fieldVisible(feThinking) || !m.isCyclable(feThinking) {
+		t.Fatal("thinking must stay visible and cyclable on any OpenAI wire")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// reasoning effort for every non-Codex thinking-capable provider
+// ─────────────────────────────────────────────────────────────────────────────
+
+// testLevelThinkingPreset builds a minimal preset for a provider that takes
+// the canonical THINKING_LEVELS ladder. A nil thinking omits the field.
+func testLevelThinkingPreset(provider, apiCompat string, thinking interface{}) preset.Preset {
+	llm := map[string]interface{}{
+		"provider":    provider,
+		"model":       "test-model",
+		"base_url":    "https://api.example.com/v1",
+		"api_key_env": "TEST_API_KEY",
+	}
+	if apiCompat != "" {
+		llm["api_compat"] = apiCompat
+	}
+	if thinking != nil {
+		llm["thinking"] = thinking
+	}
+	return preset.Preset{
+		Name:        provider + "-thinking-test",
+		Description: preset.PresetDescription{Summary: "Thinking-capable editor test preset"},
+		Manifest: map[string]interface{}{
+			"llm":          llm,
+			"capabilities": map[string]interface{}{},
+		},
+	}
+}
+
+func TestPresetEditorThinkingRowVisibleForThinkingCapableProviders(t *testing.T) {
+	cases := []struct {
+		name      string
+		provider  string
+		compat    string
+		wantShown bool
+	}{
+		{name: "anthropic", provider: "anthropic", compat: "", wantShown: true},
+		{name: "custom anthropic compat", provider: "custom", compat: "anthropic", wantShown: true},
+		{name: "openai", provider: "openai", compat: "", wantShown: true},
+		// No wire_api anywhere in these manifests: the row must not depend on
+		// an explicit Responses selection.
+		{name: "deepseek openai compat", provider: "deepseek", compat: "openai", wantShown: true},
+		{name: "custom openai compat", provider: "custom", compat: "openai", wantShown: true},
+		{name: "minimax native", provider: "minimax", compat: "", wantShown: false},
+		{name: "gemini", provider: "gemini", compat: "", wantShown: false},
+		{name: "claude code", provider: "claude-code", compat: "", wantShown: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, tc.compat, nil), "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+			if got := m.fieldVisible(feThinking); got != tc.wantShown {
+				t.Fatalf("fieldVisible(feThinking) = %v, want %v", got, tc.wantShown)
 			}
-			if m.fieldVisible(feThinking) {
-				t.Fatal("thinking must be hidden after leaving custom Responses scope")
+			if got := m.isCyclable(feThinking); got != tc.wantShown {
+				t.Fatalf("isCyclable(feThinking) = %v, want %v", got, tc.wantShown)
+			}
+			view := m.View()
+			if got := strings.Contains(view, "Reasoning effort"); got != tc.wantShown {
+				t.Fatalf("view renders Reasoning effort = %v, want %v; view:\n%s", got, tc.wantShown, view)
+			}
+			if !tc.wantShown {
+				if got := m.thinkingValue(); got != "" {
+					t.Fatalf("thinkingValue() = %q, want empty for a non-thinking provider", got)
+				}
+				if got := m.thinkingOptions(); got != nil {
+					t.Fatalf("thinkingOptions() = %#v, want nil", got)
+				}
+				return
+			}
+			if got := m.thinkingValue(); got != "default" {
+				t.Fatalf("absent thinking displays %q, want default", got)
+			}
+			if got := m.thinkingOptions(); !reflect.DeepEqual(got, customResponsesThinkingOptions) {
+				t.Fatalf("thinking options = %#v, want %#v", got, customResponsesThinkingOptions)
+			}
+			for _, effort := range customResponsesThinkingOptions {
+				if !strings.Contains(view, effort) {
+					t.Fatalf("thinking picker does not render %q; view:\n%s", effort, view)
+				}
+			}
+		})
+	}
+}
+
+func TestPresetEditorLevelThinkingCyclesAndCommits(t *testing.T) {
+	for _, provider := range []struct{ name, compat string }{
+		{name: "anthropic", compat: ""},
+		{name: "deepseek", compat: "openai"},
+	} {
+		t.Run(provider.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(provider.name, provider.compat, nil), "en", nil, "", false)
+			m.cursor = editorFieldOrderIndex(t, feThinking)
+
+			for _, want := range customResponsesThinkingOptions[1:] {
+				m.cycleFocused(+1)
+				if got := m.fieldString(feThinking); got != want {
+					t.Fatalf("thinking cycle = %q, want %q", got, want)
+				}
+				if got := m.llmMap()["thinking"]; got != want {
+					t.Fatalf("manifest thinking = %#v, want %q", got, want)
+				}
+			}
+
+			// xhigh wraps back to default, represented by an omitted field.
+			m.cycleFocused(+1)
+			if got := m.fieldString(feThinking); got != "default" {
+				t.Fatalf("thinking wrap = %q, want default", got)
+			}
+			if _, ok := m.llmMap()["thinking"]; ok {
+				t.Fatal("default must omit manifest.llm.thinking")
+			}
+
+			_, cmd := m.commit()
+			committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+			if _, ok := committed["thinking"]; ok {
+				t.Fatal("committed default must omit manifest.llm.thinking")
+			}
+		})
+	}
+}
+
+func TestPresetEditorLevelThinkingSetPersistsThroughCommit(t *testing.T) {
+	cases := []struct {
+		name      string
+		provider  string
+		compat    string
+		set       string
+		wantSaved bool
+		wantValue string
+	}{
+		{name: "anthropic high", provider: "anthropic", set: "high", wantSaved: true, wantValue: "high"},
+		{name: "anthropic none", provider: "anthropic", set: "none", wantSaved: true, wantValue: "none"},
+		{name: "anthropic default", provider: "anthropic", set: "default"},
+		{name: "anthropic invalid", provider: "anthropic", set: "turbo"},
+		{name: "openai compat xhigh", provider: "deepseek", compat: "openai", set: "xhigh", wantSaved: true, wantValue: "xhigh"},
+		{name: "openai compat default", provider: "deepseek", compat: "openai", set: "default"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, tc.compat, "medium"), "en", nil, "", false)
+			m.setThinking(tc.set)
+
+			wantDisplay := tc.wantValue
+			if !tc.wantSaved {
+				wantDisplay = "default"
+			}
+			if got := m.fieldString(feThinking); got != wantDisplay {
+				t.Fatalf("thinking display = %q, want %q", got, wantDisplay)
+			}
+
+			_, cmd := m.commit()
+			committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+			got, saved := committed["thinking"].(string)
+			if saved != tc.wantSaved {
+				t.Fatalf("committed thinking saved=%v, want %v; value=%#v", saved, tc.wantSaved, committed["thinking"])
+			}
+			if saved && got != tc.wantValue {
+				t.Fatalf("committed thinking = %q, want %q", got, tc.wantValue)
+			}
+		})
+	}
+}
+
+// An invalid stored value is normalized away for level providers (omitted ==
+// the kernel default) while Codex keeps its explicit xhigh default.
+func TestNormalizeThinkingByProviderScope(t *testing.T) {
+	cases := []struct {
+		name      string
+		llm       map[string]interface{}
+		wantSaved bool
+		wantValue string
+	}{
+		{
+			name:      "anthropic invalid dropped",
+			llm:       map[string]interface{}{"provider": "anthropic", "thinking": "turbo"},
+			wantSaved: false,
+		},
+		{
+			name:      "anthropic wrong type dropped",
+			llm:       map[string]interface{}{"provider": "anthropic", "thinking": 12},
+			wantSaved: false,
+		},
+		{
+			name:      "anthropic valid kept",
+			llm:       map[string]interface{}{"provider": "anthropic", "thinking": "medium"},
+			wantSaved: true,
+			wantValue: "medium",
+		},
+		{
+			name:      "anthropic absent stays absent",
+			llm:       map[string]interface{}{"provider": "anthropic"},
+			wantSaved: false,
+		},
+		{
+			name:      "openai compat invalid dropped",
+			llm:       map[string]interface{}{"provider": "deepseek", "api_compat": "openai", "thinking": "turbo"},
+			wantSaved: false,
+		},
+		{
+			name:      "openai compat valid kept without wire_api",
+			llm:       map[string]interface{}{"provider": "deepseek", "api_compat": "openai", "thinking": "minimal"},
+			wantSaved: true,
+			wantValue: "minimal",
+		},
+		{
+			name:      "out of scope dropped",
+			llm:       map[string]interface{}{"provider": "gemini", "thinking": "high"},
+			wantSaved: false,
+		},
+		{
+			name:      "codex invalid falls back to xhigh",
+			llm:       map[string]interface{}{"provider": "codex", "thinking": "turbo"},
+			wantSaved: true,
+			wantValue: "xhigh",
+		},
+		{
+			name:      "codex absent gains xhigh",
+			llm:       map[string]interface{}{"provider": "codex"},
+			wantSaved: true,
+			wantValue: "xhigh",
+		},
+		{
+			name:      "codex valid kept",
+			llm:       map[string]interface{}{"provider": "codex-pool", "thinking": "low"},
+			wantSaved: true,
+			wantValue: "low",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := map[string]interface{}{"llm": tc.llm}
+			normalizeThinking(manifest)
+			got, saved := tc.llm["thinking"].(string)
+			if saved != tc.wantSaved {
+				t.Fatalf("normalized thinking saved=%v, want %v; value=%#v", saved, tc.wantSaved, tc.llm["thinking"])
+			}
+			if saved && got != tc.wantValue {
+				t.Fatalf("normalized thinking = %q, want %q", got, tc.wantValue)
 			}
 		})
 	}

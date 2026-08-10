@@ -194,6 +194,14 @@ var codexServiceTierOptions = []string{"normal", "fast"}
 
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 
+// customResponsesThinkingOptions is the reasoning-effort ladder every
+// non-Codex thinking-capable provider offers: the kernel's canonical
+// THINKING_LEVELS tuple (lingtai/kernel/config.py) plus a leading
+// "default" pseudo-option. "default" is NOT a payload value — the kernel
+// treats an omitted manifest.llm.thinking as its own default, so selecting
+// it deletes the key. Anthropic maps these levels to a thinking budget;
+// OpenAI-compatible providers pass them through as Responses
+// reasoning.effort.
 var customResponsesThinkingOptions = []string{"default", "none", "minimal", "low", "medium", "high", "xhigh"}
 
 var wireAPIOptions = []string{"auto", "chat_completions", "responses"}
@@ -727,8 +735,55 @@ func (m PresetEditorModel) hasCodexThinking() bool {
 	return isCodexThinkingProvider(asString(m.llmMap()["provider"]))
 }
 
+// isThinkingLevel reports whether v is one of the kernel's canonical
+// THINKING_LEVELS payload values. "default" is deliberately absent: it is a
+// UI-only pseudo-option meaning "omit manifest.llm.thinking".
+func isThinkingLevel(v string) bool {
+	switch v {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return true
+	}
+	return false
+}
+
+// llmHasLevelThinking reports whether an llm block takes the canonical
+// THINKING_LEVELS ladder — every thinking-capable provider except the Codex
+// family, which keeps its own ladder and its own xhigh default.
+//
+// Scope: Anthropic (the adapter turns the level into an extended-thinking
+// budget) and every OpenAI-compatible provider (api_compat=openai), whose
+// level rides through as Responses reasoning.effort. wire_api does NOT gate
+// this: the field is accepted regardless of which OpenAI wire the preset
+// selects. Providers with a native non-OpenAI adapter and no api_compat
+// declaration — gemini, claude-code, minimax — stay out of scope.
+func llmHasLevelThinking(llm map[string]interface{}) bool {
+	if llm == nil {
+		return false
+	}
+	provider := asString(llm["provider"])
+	if isCodexThinkingProvider(provider) {
+		return false // Codex owns its ladder; see codexThinkingOptions.
+	}
+	switch provider {
+	case "anthropic", "openai":
+		return true
+	}
+	// api_compat is the explicit declaration of which wire protocol (and so
+	// which kernel adapter) the provider speaks; both adapters behind it
+	// honor a configured thinking level.
+	switch asString(llm["api_compat"]) {
+	case "openai", "anthropic":
+		return true
+	}
+	return false
+}
+
+func (m PresetEditorModel) hasLevelThinking() bool {
+	return llmHasLevelThinking(m.llmMap())
+}
+
 func (m PresetEditorModel) hasThinking() bool {
-	return m.hasCodexThinking() || m.isCustomOpenAIResponses()
+	return m.hasCodexThinking() || m.hasLevelThinking()
 }
 
 // isCustomOpenAI reports whether the working preset is in the narrow scope
@@ -743,8 +798,9 @@ func (m PresetEditorModel) isCustomOpenAI() bool {
 
 // isCustomOpenAIResponses is the narrow custom-provider scope built on the
 // only Kernel path that supports the Responses adapter: custom + OpenAI
-// compatibility + explicit Responses. It gates both the transport selector
-// and the reasoning.effort selector.
+// compatibility + explicit Responses. It gates the transport selector. The
+// reasoning-effort selector is NOT gated on it — see llmHasLevelThinking,
+// which accepts every OpenAI-compatible provider on any wire.
 func (m PresetEditorModel) isCustomOpenAIResponses() bool {
 	return m.isCustomOpenAI() && m.fieldString(feWireAPI) == "responses"
 }
@@ -856,13 +912,13 @@ func (m PresetEditorModel) thinkingValue() string {
 	if m.hasCodexThinking() {
 		return m.codexThinking()
 	}
-	if m.isCustomOpenAIResponses() {
-		switch asString(m.llmMap()["thinking"]) {
-		case "none", "minimal", "low", "medium", "high", "xhigh":
-			return asString(m.llmMap()["thinking"])
-		default:
-			return "default"
+	if m.hasLevelThinking() {
+		if v := asString(m.llmMap()["thinking"]); isThinkingLevel(v) {
+			return v
 		}
+		// Absent or invalid: the kernel's own default applies, which the
+		// editor shows (and stores) as omission.
+		return "default"
 	}
 	return ""
 }
@@ -871,7 +927,7 @@ func (m PresetEditorModel) thinkingOptions() []string {
 	if m.hasCodexThinking() {
 		return codexThinkingOptions
 	}
-	if m.isCustomOpenAIResponses() {
+	if m.hasLevelThinking() {
 		return customResponsesThinkingOptions
 	}
 	return nil
@@ -883,16 +939,13 @@ func (m *PresetEditorModel) setThinking(effort string) {
 		return
 	}
 	llm := m.llmMap()
-	if !m.isCustomOpenAIResponses() || effort == "default" {
+	if !m.hasLevelThinking() || !isThinkingLevel(effort) {
+		// Out of scope, "default", or an unknown value — all of which mean
+		// "carry no thinking field".
 		delete(llm, "thinking")
 		return
 	}
-	switch effort {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
-		llm["thinking"] = effort
-	default:
-		delete(llm, "thinking")
-	}
+	llm["thinking"] = effort
 }
 
 func normalizeServiceTier(manifest map[string]interface{}) {
@@ -923,18 +976,15 @@ func normalizeThinking(manifest map[string]interface{}) {
 			return
 		}
 	}
-	if asString(llm["provider"]) == "custom" &&
-		asString(llm["api_compat"]) == "openai" &&
-		asString(llm["wire_api"]) == "responses" {
-		switch asString(llm["thinking"]) {
-		case "none", "minimal", "low", "medium", "high", "xhigh":
-			return
-		default:
-			// Custom's "default" is represented by omission. The Kernel's
-			// existing main-session default then remains "high".
-			delete(llm, "thinking")
+	if llmHasLevelThinking(llm) {
+		if isThinkingLevel(asString(llm["thinking"])) {
 			return
 		}
+		// "default" is represented by omission for every non-Codex provider:
+		// the Kernel's own main-session default then applies. No default is
+		// forced here, so an absent field stays absent.
+		delete(llm, "thinking")
+		return
 	}
 	delete(llm, "thinking")
 }
@@ -1733,8 +1783,8 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 		}
 	}
 	separator := "  "
-	if m.isCustomOpenAIResponses() {
-		// Seven custom choices still need to fit in the standard 80-column form.
+	if m.hasLevelThinking() {
+		// Seven level choices still need to fit in the standard 80-column form.
 		separator = " "
 	}
 	return strings.Join(parts, separator)
