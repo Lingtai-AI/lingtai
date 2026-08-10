@@ -32,14 +32,14 @@ func CleanSignals(dir string) {
 // SuspendAndWait sends a suspend signal and waits for the agent to die.
 // Returns after the agent stops heartbeating or after timeout.
 func SuspendAndWait(dir string, timeout time.Duration) {
-	if !IsAlive(dir, 2.0) {
+	if !IsAlive(dir, AgentAliveThresholdSec) {
 		return
 	}
 	TouchSignal(dir, SignalSuspend)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
-		if !IsAlive(dir, 2.0) {
+		if !IsAlive(dir, AgentAliveThresholdSec) {
 			return
 		}
 	}

@@ -886,7 +886,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				if agent.IsHuman {
 					continue
 				}
-				if fs.IsAlive(agent.WorkingDir, 3.0) {
+				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) {
 					os.WriteFile(filepath.Join(agent.WorkingDir, ".sleep"), []byte(""), 0o644)
 					count++
 				}
@@ -905,7 +905,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				if agent.IsHuman {
 					continue
 				}
-				if fs.IsAlive(agent.WorkingDir, 3.0) {
+				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) {
 					os.WriteFile(filepath.Join(agent.WorkingDir, ".suspend"), []byte(""), 0o644)
 					count++
 				}
@@ -925,7 +925,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				if agent.IsHuman {
 					continue
 				}
-				if !fs.IsAlive(agent.WorkingDir, 3.0) && a.lingtaiCmd != "" {
+				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) && a.lingtaiCmd != "" {
 					count++
 					if err := reviveDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
 						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
@@ -938,7 +938,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				addMsg(i18n.TF("mail.cpr_all", count))
 			}
 		} else if targetDir != "" && a.lingtaiCmd != "" {
-			if !fs.IsAlive(targetDir, 3.0) {
+			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 				if err := reviveDir(a.lingtaiCmd, targetDir); err != nil {
 					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
 				} else {
@@ -1097,7 +1097,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("mail.goal_no_agent"))
 			return a, nil
 		}
-		if !fs.IsAlive(targetDir, 3.0) {
+		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
@@ -1166,7 +1166,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("export.no_agent"))
 			return a, nil
 		}
-		if !fs.IsAlive(targetDir, 3.0) {
+		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
@@ -1177,7 +1177,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		if targetDir == "" {
 			return a, nil
 		}
-		if !fs.IsAlive(targetDir, 3.0) {
+		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
@@ -1193,7 +1193,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "insights":
 		if targetDir != "" {
-			if !fs.IsAlive(targetDir, 3.0) {
+			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 				addMsg(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
@@ -1204,7 +1204,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "btw":
 		if targetDir != "" && args != "" {
-			if !fs.IsAlive(targetDir, 3.0) {
+			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
 				addMsg(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
@@ -1769,7 +1769,7 @@ func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) er
 	started := time.Now()
 	deadline := started.Add(timeout)
 	for {
-		if launchHeartbeatIsAlive(dir, 3.0) {
+		if launchHeartbeatIsAlive(dir, fs.AgentAliveThresholdSec) {
 			return nil
 		}
 		if cmd != nil && !launchHeartbeatIsRunning(dir) {

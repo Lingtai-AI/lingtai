@@ -650,7 +650,7 @@ func (m MailModel) issueRefreshRequest() (MailModel, tea.Cmd) {
 }
 
 func resolveAgentLifecycle(directory string) (bool, string, fs.AgentNode) {
-	alive := directory != "" && fs.IsAlive(directory, 3.0)
+	alive := directory != "" && fs.IsAlive(directory, fs.AgentAliveThresholdSec)
 	var node fs.AgentNode
 	if directory != "" {
 		node, _ = fs.ReadAgent(directory)
