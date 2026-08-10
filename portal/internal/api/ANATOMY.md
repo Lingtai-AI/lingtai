@@ -30,7 +30,7 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 
 - **`portal/internal/api/server.go:20-28`** — `Server` struct. Wraps `http.Server` with bound `host`/`port`, `baseDir`, `cancel`/`done` for the recording goroutine.
 - **`portal/internal/api/server.go:35-52`** — `NewServer(baseDir, staticFS)`. Registers 6 API routes (`portal/internal/api/server.go:37-42`) and mounts `staticFS` at `/` (`portal/internal/api/server.go:43`). Routes fixed before the Server is returned. `NewServer` also resolves the rebuild authorization token (see `rebuildTokenFor`) and passes it to `NewRebuildHandler`.
-- **`portal/internal/api/server.go:52-72`** — `Start(portFile, host, fixedPort)`. Resolves an empty host to `127.0.0.1`, listens with `net.JoinHostPort`, stores the effective host, writes only the bound port to `portFile`, and serves in a goroutine.
+- **`portal/internal/api/server.go:52-72`** — `Start(portFile, host, fixedPort)`. Resolves an empty host to `127.0.0.1`, listens with `net.JoinHostPort`, stores the effective host, writes only the bound port to `portFile` **before** serving, then serves in a goroutine. If the port-file write fails, `Start` closes the listener and returns a surfaced `publish discovery port` error instead of serving — a failed start leaves no active listener.
 - **`portal/internal/api/server.go:74-121`** — `StartRecording(baseDir)`. Background goroutine with a 3-second ticker (`portal/internal/api/server.go:82`). On first run: checks `needsReconstruction`, rebuilds tape from source via `agentfs.ReconstructTape` **while holding `TopologyMu`** (the lock is acquired before source scanning or frame allocation begins), writes replay caches through `writeReconstructedReplay` (`portal/internal/api/server.go:86-97`), then records complete `agentfs.BuildNetwork` snapshots immediately and on every tick via `AppendTopology` (`portal/internal/api/server.go:100-114`).
 - **`portal/internal/api/server.go:123-173`** — `Port`, `Host`, `URL`, and host helpers. `URL()` keeps `http://localhost:<port>` for loopback and wildcard binds, but renders explicit named/non-loopback hosts directly. `ExternalAccessWarning()` reports unauthenticated non-loopback/wildcard binds for the CLI.
 - **`portal/internal/api/server.go:175-186`** — `Stop(ctx)`. Cancels the recording goroutine, waits for `s.done`, shuts down the HTTP server.
@@ -67,7 +67,7 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 
 ## Connections
 
-- **Called by `portal/main.go:73-88`.** `NewServer` + `srv.StartRecording` + `srv.Start` + `srv.URL` — the HTTP server is the portal's only runtime component.
+- **Called by `portal/main.go:50-54`** via `startPortal` (`portal/main.go:110-118`). `NewServer` + `srv.Start` + `srv.StartRecording` + `srv.URL` — the HTTP server is the portal's only runtime component. `startPortal` starts the recorder only after `srv.Start` publishes the bound port; any startup failure surfaces and leaves no listener or recorder behind.
 - **Calls `portal/internal/fs/`:** `BuildNetworkWithOptions` (typed fast/full live snapshot), `BuildNetwork`'s full default for explicit callers, `ReconstructTape` (full rebuild from events + mailbox), and all types (`TapeFrame`, `Network`, `AgentNode`, `MailEdge`, etc.).
 - **Calls `portal/i18n/`:** `i18n.Lang()` for the language field on `/api/network` responses.
 - **Port file consumed by the TUI.** `main.go` writes `.portal/port` via `srv.Start`; the TUI reads it to discover the portal URL. See `tui/ANATOMY.md`.

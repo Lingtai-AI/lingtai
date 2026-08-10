@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,6 +40,38 @@ func TestServerStartDefaultsToLoopbackAndKeepsPortFilePortOnly(t *testing.T) {
 	}
 	if strings.Contains(portText, ":") {
 		t.Fatalf("port file = %q, want port only without host", portText)
+	}
+}
+
+func TestServerStartFailsWhenPortFileCannotBeWritten(t *testing.T) {
+	dir := t.TempDir()
+	// Occupy the port path with a directory so the port-file write fails
+	// deterministically on every platform.
+	portFile := filepath.Join(dir, "port")
+	if err := os.Mkdir(portFile, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", portFile, err)
+	}
+
+	srv := NewServer(dir, nil)
+	err := srv.Start(portFile, "", 0)
+	if err == nil {
+		t.Fatal("Start succeeded, want error because the port file could not be written")
+	}
+	if !strings.Contains(err.Error(), "publish discovery port") {
+		t.Fatalf("Start error %q should identify the discovery-port publication failure", err)
+	}
+
+	// A failed start must leave no active listener: the previously bound
+	// port is released and can be rebound immediately.
+	ln, err := net.Listen("tcp", net.JoinHostPort(defaultHost, strconv.Itoa(srv.Port())))
+	if err != nil {
+		t.Fatalf("port %d still bound after failed Start: %v", srv.Port(), err)
+	}
+	ln.Close()
+
+	// A failed start must leave no background recorder: Stop must not block.
+	if err := srv.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop after failed Start: %v", err)
 	}
 }
 

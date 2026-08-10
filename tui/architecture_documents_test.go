@@ -61,7 +61,7 @@ func TestRuntimeControlSurfaceAnatomyRoute(t *testing.T) {
 		}},
 		{"portal/ANATOMY.md", []string{
 			"Runtime/control-surface boundary",
-			"portal/main.go:91-97",
+			"portal/main.go:66-72",
 			"tui/ANATOMY.md",
 			"lingtai-kernel-anatomy",
 		}},
