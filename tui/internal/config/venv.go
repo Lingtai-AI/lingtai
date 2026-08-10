@@ -408,9 +408,9 @@ func EnsureAddons(python, agentDir string) error {
 		if err := cmd.Run(); err != nil {
 			errMsg := strings.TrimSpace(stderr.String())
 			if errMsg != "" {
-				return fmt.Errorf("addon %q not importable as %s: %s (try: pip install --upgrade lingtai)", addonName, modulePath, errMsg)
+				return fmt.Errorf("addon %q not importable as %s: %s (re-run the official LingTai installer to repair the managed runtime)", addonName, modulePath, errMsg)
 			}
-			return fmt.Errorf("addon %q not importable as %s: %w (try: pip install --upgrade lingtai)", addonName, modulePath, err)
+			return fmt.Errorf("addon %q not importable as %s: %w (re-run the official LingTai installer to repair the managed runtime)", addonName, modulePath, err)
 		}
 	}
 
@@ -1038,7 +1038,7 @@ func (r *DoctorReport) checkFileSearchNative(globalDir string, opts DoctorOption
 		return
 	}
 	if status.Unsupported {
-		r.add(DoctorInfo, "File search native backend: installed Python runtime does not expose Rust sidecar diagnostics yet; upgrade the lingtai Python package after the Rust sidecar release to enable this check")
+		r.add(DoctorInfo, "File search native backend: installed Python runtime does not expose Rust sidecar diagnostics yet; update the managed kernel with the official LingTai installer after the Rust sidecar release to enable this check")
 		return
 	}
 	if status.SidecarPath != "" {
@@ -1250,6 +1250,20 @@ func parseReleaseVersion(version string) []int {
 	return parsed
 }
 
+func sameReleaseVersion(a, b string) bool {
+	aParsed := parseReleaseVersion(a)
+	bParsed := parseReleaseVersion(b)
+	if aParsed == nil || bParsed == nil || len(aParsed) != len(bParsed) {
+		return false
+	}
+	for i := range aParsed {
+		if aParsed[i] != bParsed[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // UpgradeRuntimeOptions injects side effects for tests.
 type UpgradeRuntimeOptions struct {
 	HTTPClient *http.Client
@@ -1438,8 +1452,27 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 		}
 	} else {
 		result.add(DoctorInfo, "Latest Python lingtai on GitHub: %s", latest)
-		if !force && installed == latest {
-			result.add(DoctorOK, "Python lingtai runtime is up to date")
+		comparison := CompareReleaseVersions(installed, latest)
+		switch comparison.Kind {
+		case ReleaseComparisonUpdateAvailable:
+			// Continue to the release install command below.
+		case ReleaseComparisonUpToDate:
+			if !sameReleaseVersion(installed, latest) {
+				result.add(DoctorOK, "Python lingtai %s is newer than the latest published release %s; skipping downgrade", installed, latest)
+				writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+				return result
+			}
+			if !force {
+				result.add(DoctorOK, "Python lingtai runtime is up to date")
+				writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+				return result
+			}
+		case ReleaseComparisonDevBuild:
+			result.add(DoctorOK, "Python lingtai %s is a development build; skipping release update", installed)
+			writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+			return result
+		case ReleaseComparisonCurrentNonSemver, ReleaseComparisonLatestNonSemver:
+			result.add(DoctorWarn, "Cannot compare installed Python lingtai version %q with latest release %q; skipping update", installed, latest)
 			writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
 			return result
 		}

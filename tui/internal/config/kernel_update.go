@@ -15,7 +15,7 @@ type KernelStatus struct {
 	Installed   string // installed lingtai version, or "" if unimportable
 	Latest      string // latest kernel GitHub release version, or "" if lookup failed
 	Editable    bool   // editable/dev install detected
-	NeedsUpdate bool   // false when editable, missing-latest, or installed==latest
+	NeedsUpdate bool   // true only when a strict installed release is older than latest
 	Lines       []DoctorLine
 }
 
@@ -82,11 +82,11 @@ func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 		return status
 	}
 
-	// Dev-checkout machines: even when the runtime is a PyPI wheel, the apply
+	// Dev-checkout machines: even when the runtime is a regular wheel, the apply
 	// step (UpgradePythonRuntime) converts it to an editable install against the
-	// discovered local source rather than running a PyPI upgrade. Mirror that
+	// discovered local source rather than running a release upgrade. Mirror that
 	// classification here so the confirm prompt never shows a misleading
-	// "X → Y" PyPI diff that the apply step would not actually perform. This is
+	// "X → Y" release diff that the apply step would not actually perform. This is
 	// the one place inspect/apply could otherwise drift.
 	home := opts.Home
 	if home == "" {
@@ -96,7 +96,7 @@ func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 		if dev, ok := findDevCheckouts(home, opts.LookupEnv); ok {
 			status.Editable = true
 			status.NeedsUpdate = false
-			status.add(DoctorOK, "Local dev checkout detected at %s; the kernel update would reinstall editable, not upgrade from PyPI — skipping", dev.KernelSrc)
+			status.add(DoctorOK, "Local dev checkout detected at %s; the kernel update would reinstall editable, not upgrade from a release — skipping", dev.KernelSrc)
 			return status
 		}
 	}
@@ -111,13 +111,30 @@ func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 	status.Latest = latest
 	status.add(DoctorInfo, "Latest Python lingtai on GitHub: %s", latest)
 
-	if installed == latest {
+	comparison := CompareReleaseVersions(installed, latest)
+	switch comparison.Kind {
+	case ReleaseComparisonUpdateAvailable:
+		status.NeedsUpdate = true
+		status.add(DoctorWarn, "Python lingtai update available: %s → %s", installed, latest)
+	case ReleaseComparisonUpToDate:
 		status.NeedsUpdate = false
-		status.add(DoctorOK, "Python lingtai runtime is up to date")
-		return status
+		if sameReleaseVersion(installed, latest) {
+			status.add(DoctorOK, "Python lingtai runtime is up to date")
+		} else {
+			status.add(DoctorOK, "Python lingtai %s is newer than the latest published release %s; skipping downgrade", installed, latest)
+		}
+	case ReleaseComparisonDevBuild:
+		status.NeedsUpdate = false
+		status.add(DoctorOK, "Python lingtai %s is a development build; skipping release update", installed)
+	case ReleaseComparisonCurrentNonSemver:
+		status.NeedsUpdate = false
+		status.add(DoctorWarn, "Cannot compare installed Python lingtai version %q with latest release %q; skipping update", installed, latest)
+	case ReleaseComparisonLatestNonSemver:
+		status.NeedsUpdate = false
+		status.add(DoctorWarn, "Cannot compare latest Python lingtai release %q with installed version %q; skipping update", latest, installed)
+	default:
+		status.NeedsUpdate = false
 	}
-	status.NeedsUpdate = true
-	status.add(DoctorWarn, "Python lingtai update available: %s → %s", installed, latest)
 	return status
 }
 
