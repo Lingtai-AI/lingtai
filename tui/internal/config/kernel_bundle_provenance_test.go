@@ -250,7 +250,7 @@ func TestUpgradePythonRuntimeForcedUpdateRespectsBundleProvenance(t *testing.T) 
 	assertNoMutatingCalls(t, runner.calls)
 	upgrades := 0
 	for _, call := range runner.calls {
-		if strings.Contains(call, "install --upgrade lingtai") {
+		if strings.Contains(call, "install --upgrade lingtai") || strings.Contains(call, "releases/download/") {
 			upgrades++
 		}
 	}
@@ -310,7 +310,9 @@ func TestUpgradePythonRuntimeLegacyNoProvenanceStillComparesToPyPI(t *testing.T)
 	// repair, requirement 4): a runtime with NO kernel_source metadata at
 	// all — installed before install.sh's bundle path existed, or never
 	// updated through it — is NOT bundle-provisioned, so the pre-existing
-	// PyPI-compare/upgrade behavior is intentionally left unchanged for it.
+	// compare-then-upgrade behavior is intentionally left unchanged for it.
+	// The version compared against is the kernel GitHub release and the
+	// upgrade installs that release's pinned wheel; neither reads PyPI.
 	// This is legacy migration behavior, not a claim that PyPI is the
 	// product's canonical install source going forward (every NEW install
 	// goes through install.sh's mandatory bundle path instead).
@@ -336,8 +338,11 @@ func TestUpgradePythonRuntimeLegacyNoProvenanceStillComparesToPyPI(t *testing.T)
 	}
 	upgrades := 0
 	for _, call := range runner.calls {
-		if strings.Contains(call, "install --upgrade lingtai") {
+		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".whl#sha256=") {
 			upgrades++
+		}
+		if strings.Contains(call, "install --upgrade lingtai") {
+			t.Fatalf("even the legacy path installs the pinned release wheel, never the package name: %q", call)
 		}
 	}
 	if upgrades != 1 {

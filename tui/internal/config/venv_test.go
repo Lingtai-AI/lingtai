@@ -243,7 +243,7 @@ func TestInspectKernelDevCheckoutNeedsNoUpdate(t *testing.T) {
 
 func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	// Non-editable, out-of-date install: RunKernelUpdate runs exactly one
-	// uv/pip install --upgrade lingtai (the kernel path) and no brew.
+	// uv/pip install --upgrade <release wheel URL> (the kernel path) and no brew.
 	// Version probes consumed in order: pre-check import (repair gate),
 	// UpgradePythonRuntime's installed read, then the post-upgrade verify.
 	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.6", "0.9.7"}}
@@ -261,8 +261,11 @@ func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	}
 	upgrades := 0
 	for _, call := range runner.calls {
-		if strings.Contains(call, "install --upgrade lingtai") {
+		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".whl#sha256=") {
 			upgrades++
+		}
+		if strings.Contains(call, "install --upgrade lingtai") {
+			t.Fatalf("the kernel upgrade must never request the package name from an index: %q", call)
 		}
 		if strings.Contains(call, "brew") {
 			t.Fatalf("RunKernelUpdate must not run brew, got %q", call)
@@ -293,7 +296,7 @@ func TestRunKernelUpdateSkipsEditableInstall(t *testing.T) {
 		t.Fatalf("editable install must remain Healthy: %+v", report.Lines)
 	}
 	for _, call := range runner.calls {
-		if strings.Contains(call, "install --upgrade lingtai") {
+		if strings.Contains(call, "releases/download/") || strings.Contains(call, "install --upgrade lingtai") {
 			t.Fatalf("editable install must not run kernel upgrade: %#v", runner.calls)
 		}
 		if strings.Contains(call, "brew") {

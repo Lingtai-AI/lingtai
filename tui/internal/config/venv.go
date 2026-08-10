@@ -247,26 +247,17 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return fmt.Errorf("Python 3.11+ is required. Found older version in venv. Install python@3.13 and try again")
 	}
 
-	// Step 2: install lingtai
+	// Step 2: install lingtai — from the local dev checkout when one is
+	// configured, otherwise from the pinned kernel GitHub release wheel. Never
+	// from PyPI: the kernel is never installed by requesting the package name
+	// from an index (RELEASING.md; install.sh's install_kernel_from_bundle).
 	progress("welcome.step_install")
 	home, _ := os.UserHomeDir()
-	dev, devMode := findDevCheckouts(home, nil)
-
-	var install *exec.Cmd
-	if devMode {
-		name, args := devEditableInstallCommand(globalDir, venvPython, dev, exec.LookPath)
-		install = exec.Command(name, args...)
-	} else if uvCmd != "" {
-		install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
-	} else {
-		var pipCmd string
-		if runtime.GOOS == "windows" {
-			pipCmd = filepath.Join(venvPath, "Scripts", "pip.exe")
-		} else {
-			pipCmd = filepath.Join(venvPath, "bin", "pip")
-		}
-		install = exec.Command(pipCmd, "install", "lingtai")
+	installName, installArgs, err := ensureVenvInstallCommand(globalDir, venvPython, home, exec.LookPath, nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to resolve the lingtai kernel release wheel to install: %w", err)
 	}
+	install := exec.Command(installName, installArgs...)
 	if !quiet {
 		install.Stdout = os.Stdout
 		install.Stderr = os.Stderr
@@ -1287,9 +1278,11 @@ func (r *UpgradeRuntimeResult) add(sev DoctorSeverity, format string, args ...in
 	}
 }
 
-// UpgradePythonRuntime compares installed lingtai to the latest kernel GitHub release and runs a forced
-// `pip install --upgrade lingtai` when force=true, even if versions already
-// match. All command failures and post-install verification failures are
+// UpgradePythonRuntime compares installed lingtai to the latest kernel GitHub
+// release and, when force=true, reinstalls the pinned kernel release wheel
+// even if versions already match. The install itself is always the GitHub
+// release wheel (pinned URL + sha256), never `pip install lingtai` from an
+// index. All command failures and post-install verification failures are
 // reported in the returned lines.
 func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOptions) UpgradeRuntimeResult {
 	if opts == nil {
@@ -1452,7 +1445,11 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 		}
 	}
 
-	argsName, args := runtimeUpgradeCommand(globalDir, python, opts.LookPath)
+	argsName, args, err := runtimeUpgradeCommand(globalDir, python, opts.LookPath, opts.Runner, opts.HTTPClient)
+	if err != nil {
+		result.add(DoctorFail, "Could not resolve the lingtai kernel release wheel to install: %v", err)
+		return result
+	}
 	result.add(DoctorInfo, "Running: %s %s", argsName, strings.Join(args, " "))
 	cmdResult := opts.Runner.Run(argsName, args...)
 	appendCommandOutputToRuntime(&result, cmdResult)
@@ -1500,6 +1497,257 @@ func fetchLatestKernelGitHubRelease(client *http.Client) (string, error) {
 	// Kernel releases are tagged vX.Y.Z; the installed lingtai version and all
 	// comparisons in this file use the bare X.Y.Z form.
 	return strings.TrimPrefix(release.TagName, "v"), nil
+}
+
+// The kernel GitHub release is the ONLY source the TUI installs the Python
+// `lingtai` runtime from. Every release publishes a
+// `lingtai-kernel-release-manifest.json` asset listing the wheels it built
+// (filename + sha256 + wheel tags) plus the sdist fallback; the installer
+// picks the wheel matching the managed venv's Python and this host's
+// platform and installs it by pinned URL with a `#sha256=` fragment so
+// uv/pip verify the artifact. LingTai is never installed by requesting the
+// package name "lingtai" from PyPI or any other index (RELEASING.md; see
+// install.sh's install_kernel_from_bundle) — when the manifest cannot be
+// read or no matching wheel exists, the install fails with a descriptive
+// error rather than falling back to an index.
+const (
+	kernelReleaseManifestURL  = "https://github.com/Lingtai-AI/lingtai-kernel/releases/latest/download/lingtai-kernel-release-manifest.json"
+	kernelReleaseDownloadBase = "https://github.com/Lingtai-AI/lingtai-kernel/releases/download"
+	kernelReleaseSchema       = "lingtai.kernel.release/v1"
+)
+
+// kernelReleaseArtifact is one entry of the release manifest's artifacts list.
+// Wheels carry the three wheel tags; the sdist fallback entry leaves them
+// empty (JSON null).
+type kernelReleaseArtifact struct {
+	Filename    string `json:"filename"`
+	SHA256      string `json:"sha256"`
+	Kind        string `json:"kind"`
+	PythonTag   string `json:"python_tag"`
+	ABITag      string `json:"abi_tag"`
+	PlatformTag string `json:"platform_tag"`
+}
+
+// kernelReleaseManifest is the `lingtai.kernel.release/v1` asset published on
+// every lingtai-kernel GitHub release.
+type kernelReleaseManifest struct {
+	Schema        string                  `json:"schema"`
+	KernelVersion string                  `json:"kernel_version"`
+	KernelTag     string                  `json:"kernel_tag"`
+	Artifacts     []kernelReleaseArtifact `json:"artifacts"`
+	SdistFallback string                  `json:"sdist_fallback"`
+}
+
+// fetchKernelReleaseManifest downloads the latest kernel release manifest.
+// GitHub redirects `releases/latest/download/<asset>` to the newest release,
+// so no separate API call is needed to resolve the tag.
+func fetchKernelReleaseManifest(client *http.Client) (*kernelReleaseManifest, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := client.Get(kernelReleaseManifestURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("GitHub returned HTTP %d for the kernel release manifest: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var manifest kernelReleaseManifest
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("kernel release manifest is not valid JSON: %w", err)
+	}
+	if manifest.Schema != kernelReleaseSchema {
+		return nil, fmt.Errorf("kernel release manifest has schema %q, want %q", manifest.Schema, kernelReleaseSchema)
+	}
+	if manifest.KernelTag == "" {
+		if manifest.KernelVersion == "" {
+			return nil, fmt.Errorf("kernel release manifest has neither kernel_tag nor kernel_version")
+		}
+		manifest.KernelTag = "v" + manifest.KernelVersion
+	}
+	// Keep only what the installer can act on: wheels, plus the sdist fallback
+	// entry so callers can report it. Anything else in the manifest is ignored.
+	kept := make([]kernelReleaseArtifact, 0, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Kind == "wheel" || (manifest.SdistFallback != "" && artifact.Filename == manifest.SdistFallback) {
+			kept = append(kept, artifact)
+		}
+	}
+	manifest.Artifacts = kept
+	if len(manifest.Artifacts) == 0 {
+		return nil, fmt.Errorf("kernel release manifest %s lists no installable artifacts", manifest.KernelTag)
+	}
+	return &manifest, nil
+}
+
+// kernelWheelPlatformPrefixes maps a Go platform to the wheel platform_tag
+// prefixes the kernel publishes for it. Prefix matching (not equality) is
+// deliberate: manylinux wheels carry compound tags such as
+// `manylinux_2_17_x86_64.manylinux2014_x86_64`.
+func kernelWheelPlatformPrefixes(goos, goarch string) ([]string, error) {
+	switch goos + "/" + goarch {
+	case "darwin/arm64":
+		return []string{"macosx_11_0_arm64"}, nil
+	case "darwin/amd64":
+		return []string{"macosx_10_12_x86_64", "macosx_10_13_x86_64"}, nil
+	case "linux/amd64":
+		return []string{"manylinux_2_17_x86_64"}, nil
+	case "linux/arm64":
+		return []string{"manylinux_2_17_aarch64"}, nil
+	case "windows/amd64":
+		return []string{"win_amd64"}, nil
+	case "windows/arm64":
+		return []string{"win_arm64"}, nil
+	}
+	return nil, fmt.Errorf("no lingtai kernel wheel platform is known for %s/%s", goos, goarch)
+}
+
+// normalizeKernelPythonTag accepts both the wheel form ("cp313") and the bare
+// version form ("3.13") so callers can pass whichever they have.
+func normalizeKernelPythonTag(pythonMajorMinor string) string {
+	tag := strings.TrimSpace(pythonMajorMinor)
+	if tag == "" || strings.HasPrefix(tag, "cp") {
+		return tag
+	}
+	return "cp" + strings.ReplaceAll(tag, ".", "")
+}
+
+// selectKernelWheel picks the manifest wheel built for this Python version and
+// host platform. It never falls back to a different interpreter, a different
+// platform, or the sdist: a wrong wheel is worse than a clear error.
+func selectKernelWheel(manifest *kernelReleaseManifest, pythonMajorMinor string, goos string, goarch string) (kernelReleaseArtifact, error) {
+	if manifest == nil {
+		return kernelReleaseArtifact{}, fmt.Errorf("no kernel release manifest to select a wheel from")
+	}
+	want := normalizeKernelPythonTag(pythonMajorMinor)
+	if want == "" {
+		return kernelReleaseArtifact{}, fmt.Errorf("cannot select a kernel wheel without a Python version tag")
+	}
+	prefixes, err := kernelWheelPlatformPrefixes(goos, goarch)
+	if err != nil {
+		return kernelReleaseArtifact{}, err
+	}
+	var available []string
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Kind != "wheel" {
+			continue
+		}
+		available = append(available, artifact.PythonTag+"-"+artifact.PlatformTag)
+		if artifact.PythonTag != want {
+			continue
+		}
+		for _, prefix := range prefixes {
+			if !strings.HasPrefix(artifact.PlatformTag, prefix) {
+				continue
+			}
+			if artifact.Filename == "" || artifact.SHA256 == "" {
+				return kernelReleaseArtifact{}, fmt.Errorf("kernel release %s %s wheel for %s/%s is missing a filename or sha256", manifest.KernelTag, want, goos, goarch)
+			}
+			return artifact, nil
+		}
+	}
+	return kernelReleaseArtifact{}, fmt.Errorf(
+		"kernel release %s publishes no %s wheel for %s/%s (want platform_tag %s; manifest has: %s)",
+		manifest.KernelTag, want, goos, goarch, strings.Join(prefixes, " or "), strings.Join(available, ", "))
+}
+
+const kernelPythonTagProbe = "import sys; print('cp%d%d' % (sys.version_info[0], sys.version_info[1]))"
+
+var kernelPythonTagPattern = regexp.MustCompile(`^cp[0-9]{2,3}$`)
+
+// venvPythonTag asks the managed venv's interpreter for its CPython wheel tag
+// (e.g. "cp313") so the right wheel is chosen for the interpreter that will
+// actually import lingtai — not for whatever Python the TUI was built against.
+func venvPythonTag(runner CommandRunner, python string) (string, error) {
+	if runner == nil {
+		runner = timeoutCommandRunner{timeout: 10 * time.Second}
+	}
+	res := runner.Run(python, "-c", kernelPythonTagProbe)
+	if res.Err != nil {
+		detail := strings.TrimSpace(res.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(res.Stdout)
+		}
+		if detail == "" {
+			detail = res.Err.Error()
+		}
+		return "", fmt.Errorf("could not read the Python version of %s: %s", python, lastNonEmptyLine(detail))
+	}
+	tag := strings.TrimSpace(res.Stdout)
+	if !kernelPythonTagPattern.MatchString(tag) {
+		return "", fmt.Errorf("unexpected Python version tag %q from %s", tag, python)
+	}
+	return tag, nil
+}
+
+// kernelWheelInstallURL builds the pinned release download URL, including the
+// `#sha256=` fragment uv/pip verify the download against.
+func kernelWheelInstallURL(tag string, artifact kernelReleaseArtifact) string {
+	url := fmt.Sprintf("%s/%s/%s", kernelReleaseDownloadBase, tag, artifact.Filename)
+	if artifact.SHA256 != "" {
+		url += "#sha256=" + artifact.SHA256
+	}
+	return url
+}
+
+// kernelInstallCommand builds the uv/pip invocation that installs the kernel
+// from the pinned GitHub release wheel. Every failure — manifest unreachable,
+// schema mismatch, unknown platform, no matching wheel — is returned as an
+// error so the caller can surface it; there is deliberately no PyPI fallback.
+// Pass upgrade=true for the UpgradePythonRuntime path, which must replace an
+// already-installed runtime.
+func kernelInstallCommand(globalDir, python string, lookPath func(string) (string, error), runner CommandRunner, client *http.Client, upgrade bool) (string, []string, error) {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	manifest, err := fetchKernelReleaseManifest(client)
+	if err != nil {
+		return "", nil, fmt.Errorf("could not read the lingtai kernel release manifest: %w", err)
+	}
+	pythonTag, err := venvPythonTag(runner, python)
+	if err != nil {
+		return "", nil, err
+	}
+	artifact, err := selectKernelWheel(manifest, pythonTag, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", nil, err
+	}
+	wheelURL := kernelWheelInstallURL(manifest.KernelTag, artifact)
+	if uv, err := lookPath("uv"); err == nil && uv != "" {
+		args := []string{"pip", "install"}
+		if upgrade {
+			args = append(args, "--upgrade")
+		}
+		args = append(args, wheelURL, "-p", RuntimeVenvDir(globalDir))
+		return uv, args, nil
+	}
+	pipCmd := filepath.Join(filepath.Dir(python), "pip")
+	if runtime.GOOS == "windows" {
+		pipCmd = filepath.Join(filepath.Dir(python), "pip.exe")
+	}
+	args := []string{"install"}
+	if upgrade {
+		args = append(args, "--upgrade")
+	}
+	args = append(args, wheelURL)
+	return pipCmd, args, nil
+}
+
+// ensureVenvInstallCommand is EnsureVenv's step-2 command selection: a local
+// dev checkout is installed editable, everything else installs the pinned
+// kernel release wheel. Factored out of ensureVenv so the choice is testable
+// without creating a real venv.
+func ensureVenvInstallCommand(globalDir, venvPython, home string, lookPath func(string) (string, error), lookupEnv func(string) (string, bool), runner CommandRunner, client *http.Client) (string, []string, error) {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if dev, devMode := findDevCheckouts(home, lookupEnv); devMode {
+		name, args := devEditableInstallCommand(globalDir, venvPython, dev, lookPath)
+		return name, args, nil
+	}
+	return kernelInstallCommand(globalDir, venvPython, lookPath, runner, client, false)
 }
 
 func pythonLingtaiVersion(runner CommandRunner, python string) (string, error) {
@@ -1554,15 +1802,13 @@ except Exception:
 	return true, source
 }
 
-func runtimeUpgradeCommand(globalDir, python string, lookPath func(string) (string, error)) (string, []string) {
-	if uv, err := lookPath("uv"); err == nil && uv != "" {
-		return uv, []string{"pip", "install", "--upgrade", "lingtai", "-p", RuntimeVenvDir(globalDir)}
-	}
-	pipCmd := filepath.Join(filepath.Dir(python), "pip")
-	if runtime.GOOS == "windows" {
-		pipCmd = filepath.Join(filepath.Dir(python), "pip.exe")
-	}
-	return pipCmd, []string{"install", "--upgrade", "lingtai"}
+// runtimeUpgradeCommand is the upgrade flavour of kernelInstallCommand: the
+// same pinned release wheel, installed with --upgrade so it replaces the
+// runtime already in the managed venv. The error is returned rather than
+// swallowed — a runtime that cannot resolve its release wheel must report that
+// instead of quietly installing "lingtai" from an index.
+func runtimeUpgradeCommand(globalDir, python string, lookPath func(string) (string, error), runner CommandRunner, client *http.Client) (string, []string, error) {
+	return kernelInstallCommand(globalDir, python, lookPath, runner, client, true)
 }
 
 // devRuntimeKind labels the runtime being replaced, for the log line.
