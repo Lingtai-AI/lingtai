@@ -45,8 +45,8 @@ func TestUpgradeConvertsPyPIToEditableWhenDevCheckoutsPresent(t *testing.T) {
 		t.Fatalf("expected editable install of kernel, got %#v", runner.calls)
 	}
 	// Must NOT run the PyPI upgrade path.
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("dev-mode conversion must not run PyPI upgrade: %#v", runner.calls)
+	if containsKernelWheelInstall(runner.calls) {
+		t.Fatalf("dev-mode conversion must not run the release-wheel upgrade: %#v", runner.calls)
 	}
 	if !containsLine(result.Lines, "dev checkout") {
 		t.Fatalf("expected a dev-checkout info line: %+v", result.Lines)
@@ -82,8 +82,8 @@ func TestUpgradeSkipsReinstallWhenAlreadyEditableForCheckout(t *testing.T) {
 	if containsCall(runner.calls, "pip install -e") {
 		t.Fatalf("already-editable-for-checkout must not reinstall: %#v", runner.calls)
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("already-editable must not run PyPI upgrade: %#v", runner.calls)
+	if containsKernelWheelInstall(runner.calls) {
+		t.Fatalf("already-editable must not run the release-wheel upgrade: %#v", runner.calls)
 	}
 }
 
@@ -164,8 +164,8 @@ func TestUpgradeNoDevCheckoutsExistingEditableStillSkips(t *testing.T) {
 	if result.Updated {
 		t.Fatalf("editable install must not be clobbered when no checkout found")
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("existing editable must not trigger PyPI upgrade: %#v", runner.calls)
+	if containsKernelWheelInstall(runner.calls) {
+		t.Fatalf("existing editable must not trigger the release-wheel upgrade: %#v", runner.calls)
 	}
 	if !containsLine(result.Lines, "editable install") {
 		t.Fatalf("expected editable-install skip line: %+v", result.Lines)

@@ -14,6 +14,7 @@ import (
 
 type fakeRunner struct {
 	versions          []string
+	pythonTag         string // when non-empty, returned for the cp<major><minor> probe (default cp313)
 	failPip           bool
 	editableSource    string // when non-empty, the editable-detect probe reports EDITABLE <source>
 	envMarkerStdout   string // when non-empty, returned for delegated runtime env marker checks
@@ -63,6 +64,14 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 	if strings.Contains(call, "sysconfig.get_platform") && strings.Contains(call, "version_major") {
 		return CommandResult{Stdout: `{"implementation":"CPython","machine":"arm64","sys_platform":"darwin","sysconfig_platform":"macosx-14.0-arm64","version":"3.13.5","version_major":3,"version_minor":13,"version_micro":5}` + "\n"}
 	}
+	if strings.Contains(call, "sys.version_info[0]") {
+		// venvPythonTag probe: which CPython wheel tag the managed venv needs.
+		tag := r.pythonTag
+		if tag == "" {
+			tag = "cp313"
+		}
+		return CommandResult{Stdout: tag + "\n"}
+	}
 	if strings.Contains(call, "import lingtai") {
 		if len(r.versions) == 0 {
 			return CommandResult{Err: errors.New("no version queued"), Stderr: "ModuleNotFoundError: lingtai"}
@@ -94,6 +103,10 @@ func (rt versionRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		body = fmt.Sprintf(`{"tag_name":%q}`, "v"+rt.latestKernel)
 	case req.URL.Host == "api.github.com" && req.URL.Path == "/repos/Lingtai-AI/lingtai/releases/latest":
 		body = fmt.Sprintf(`{"tag_name":%q}`, rt.latestTUI)
+	case req.URL.String() == kernelReleaseManifestURL:
+		// The kernel install paths resolve their wheel from this manifest; it
+		// advertises the same version the latest-release API reports above.
+		body = kernelReleaseManifestFixture(rt.latestKernel)
 	default:
 		body = `{}`
 	}
@@ -474,8 +487,11 @@ func TestUpgradePythonRuntimeVerifiesPostInstallVersion(t *testing.T) {
 	if !result.Healthy || !result.Updated {
 		t.Fatalf("expected healthy updated result: %+v", result)
 	}
-	if !containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("expected pip upgrade call, got %#v", runner.calls)
+	if !containsCall(runner.calls, "pip install --upgrade https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v0.9.7/") {
+		t.Fatalf("expected a pinned release-wheel pip upgrade call, got %#v", runner.calls)
+	}
+	if containsCall(runner.calls, "install --upgrade lingtai") {
+		t.Fatalf("the upgrade must never request the package name from an index: %#v", runner.calls)
 	}
 	if !containsLine(result.Lines, "after upgrade: 0.9.7") {
 		t.Fatalf("expected post-upgrade version line: %+v", result.Lines)
@@ -508,8 +524,8 @@ func TestUpgradePythonRuntimeSkipsEditableInstall(t *testing.T) {
 	if !containsLine(result.Lines, "editable install") {
 		t.Fatalf("expected editable-install info line: %+v", result.Lines)
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("editable install must not trigger pip upgrade: %#v", runner.calls)
+	if containsKernelWheelInstall(runner.calls) {
+		t.Fatalf("editable install must not trigger a kernel wheel upgrade: %#v", runner.calls)
 	}
 }
 
@@ -534,8 +550,8 @@ func TestUpgradePythonRuntimeForceRespectsEditableInstall(t *testing.T) {
 	if result.Updated {
 		t.Fatalf("forced editable upgrade must not report Updated")
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("forced editable must not trigger pip upgrade: %#v", runner.calls)
+	if containsKernelWheelInstall(runner.calls) {
+		t.Fatalf("forced editable must not trigger a kernel wheel upgrade: %#v", runner.calls)
 	}
 }
 
@@ -1060,6 +1076,18 @@ func containsLine(lines []DoctorLine, sub string) bool {
 func containsCall(calls []string, sub string) bool {
 	for _, call := range calls {
 		if strings.Contains(call, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsKernelWheelInstall reports whether any recorded command installs the
+// pinned kernel release wheel — the only shape a kernel install takes now that
+// nothing is fetched from PyPI by package name.
+func containsKernelWheelInstall(calls []string) bool {
+	for _, call := range calls {
+		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".whl#sha256=") {
 			return true
 		}
 	}
