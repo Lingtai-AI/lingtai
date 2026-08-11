@@ -8,7 +8,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # `grok`
 
-`grokPreset()` (`tui/internal/preset/preset.go:1294-1314`) ships provider
+`grokPreset()` in `tui/internal/preset/preset.go` ships provider
 `grok`, model `grok-4.5`, `api_compat: openai`, and the OpenCode Go endpoint
 `https://opencode.ai/zen/go/v1` with `OPENCODE_GO_API_KEY`. The manifest has
 no `vision` capability: the Go endpoint's image-input mapping for `grok-4.5`
