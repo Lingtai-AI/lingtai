@@ -706,7 +706,13 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 						}
 					}
 				case map[string]interface{}:
+					// Legacy dict shape — apply the same addon/module identifier
+					// validation contract as the launch-time addon check so
+					// malformed keys are never offered as selectable addons.
 					for name := range v {
+						if config.ValidateAddonKey(name) != nil {
+							continue
+						}
 						m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
 					}
 				}

@@ -164,6 +164,16 @@ func convertAddonsInInitFile(initPath, agentDir, globalDir string) error {
 	}
 
 	for addonName, addonCfgRaw := range addonsDict {
+		// Same structured identifier contract as the launch-time addon check
+		// (config.ValidateAddonKey): a legacy key containing a semicolon or
+		// any other source-boundary/non-identifier character is not an addon
+		// name and must never be carried into the converted file.
+		if err := config.ValidateAddonKey(addonName); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"m028: %s — invalid legacy addon key %q, skipping (file unchanged for this entry)\n",
+				initPath, addonName)
+			continue
+		}
 		spec, known := addonSpecs[addonName]
 		if !known {
 			fmt.Fprintf(os.Stderr,

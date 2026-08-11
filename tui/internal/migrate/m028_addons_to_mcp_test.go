@@ -477,6 +477,44 @@ func TestM028SkipsUnknownAddon(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Legacy addon keys that are not valid addon/module identifiers (semicolons,
+// other source-boundary characters) are skipped and never carried into the
+// converted file
+// ---------------------------------------------------------------------------
+
+func TestM028SkipsInvalidAddonKey(t *testing.T) {
+	tmp := t.TempDir()
+	lingtaiDir := filepath.Join(tmp, ".lingtai")
+	initPath := writeM028Init(t, lingtaiDir, "alice", map[string]interface{}{
+		"manifest": map[string]interface{}{"agent_name": "alice"},
+		"addons": map[string]interface{}{
+			"imap":    map[string]interface{}{"config": ".secrets/imap.json"},
+			"imap;rm": map[string]interface{}{"config": ".secrets/evil.json"}, // source-boundary char
+		},
+	})
+
+	if err := migrateAddonsToMCP(lingtaiDir); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readM028Init(t, initPath)
+	addons, _ := got["addons"].([]interface{})
+	for _, a := range addons {
+		if a == "imap;rm" {
+			t.Errorf("invalid addon key should have been skipped (got %v)", addons)
+		}
+	}
+	mcp, _ := got["mcp"].(map[string]interface{})
+	if _, ok := mcp["imap;rm"]; ok {
+		t.Error("invalid addon key should not have an mcp entry")
+	}
+	// The valid key must still be converted.
+	if len(addons) != 1 || addons[0] != "imap" {
+		t.Errorf("addons = %v, want [\"imap\"]", addons)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Empty addons dict -> empty list
 // ---------------------------------------------------------------------------
 

@@ -2115,8 +2115,14 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	case []interface{}:
 		existingAddonsList = v
 	case map[string]interface{}:
-		// Legacy dict shape — extract just the names.
+		// Legacy dict shape — extract just the names. Apply the same
+		// identifier validation contract as the launch-time addon check so a
+		// malformed or untrusted key can never be carried into a regenerated
+		// init.json.
 		for name := range v {
+			if config.ValidateAddonKey(name) != nil {
+				continue
+			}
 			existingAddonsList = append(existingAddonsList, name)
 		}
 	}

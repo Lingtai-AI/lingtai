@@ -872,7 +872,13 @@ func checkAddonSecrets(orchDir string) []doctorLine {
 			}
 		}
 	case map[string]interface{}:
+		// Legacy dict shape — keys must satisfy the same addon/module
+		// identifier contract as the launch-time addon check; anything else
+		// is not an addon name and cannot be diagnosed.
 		for name := range v {
+			if config.ValidateAddonKey(name) != nil {
+				continue
+			}
 			addons = append(addons, name)
 		}
 	}

@@ -167,6 +167,25 @@ func TestCheckAddonSecrets_LegacyConfigPath(t *testing.T) {
 	assertLineFlag(t, lines, "imap secrets present", true, false)
 }
 
+func TestCheckAddonSecrets_SkipsInvalidLegacyKey(t *testing.T) {
+	// A legacy dict key with a source-boundary character is not an addon
+	// name and must never surface in doctor output; the valid key is still
+	// diagnosed normally.
+	orchDir, _ := startupFixture(t,
+		`{"addons": {"imap": {"config": ".secrets/imap.json"}, "imap;rm -rf /": {"config": ".secrets/evil.json"}}}`,
+		"", "",
+	)
+	writeTestFile(t, filepath.Join(orchDir, ".secrets", "imap.json"), `{"host": "x"}`)
+
+	lines := checkAddonSecrets(orchDir)
+	assertLineFlag(t, lines, "imap secrets present", true, false)
+	for _, line := range lines {
+		if strings.Contains(line.Text, "imap;rm") {
+			t.Errorf("invalid legacy addon key leaked into doctor output: %q", line.Text)
+		}
+	}
+}
+
 func TestCheckAddonSecrets_NoAddons(t *testing.T) {
 	orchDir, _ := startupFixture(t, `{}`, "", "")
 	lines := checkAddonSecrets(orchDir)

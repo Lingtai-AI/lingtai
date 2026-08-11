@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -92,6 +93,16 @@ var addonSpecs = map[string]addonSpec{
 	"whatsapp": {module: "lingtai.mcp_servers.whatsapp", envVarName: "LINGTAI_WHATSAPP_CONFIG", defaultRel: ".secrets/whatsapp.json"},
 }
 
+// addonKeyRe mirrors the TUI's legacy addon key validation contract
+// (tui/internal/config.ValidateAddonKey). The portal is a separate Go module
+// and cannot import the TUI package, so the identical identifier grammar is
+// enforced locally: legacy "addons" object keys must be valid addon/module
+// identifiers (dot-separated Python identifier segments) before they are
+// accepted anywhere. Keys containing semicolons or any other
+// source-boundary/non-identifier characters are not addon names and must
+// never be carried into a converted file.
+var addonKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
 // convertAddonsInInitFile is the per-init.json workhorse. A returned error
 // means the file is still in legacy form and the migration must not be
 // considered complete.
@@ -139,6 +150,15 @@ func convertAddonsInInitFile(initPath, agentDir, globalDir string) error {
 	}
 
 	for addonName, addonCfgRaw := range addonsDict {
+		// Same structured identifier contract as the TUI's launch-time addon
+		// check: a legacy key containing a semicolon or any other
+		// source-boundary/non-identifier character is not an addon name and
+		// must never be carried into the converted file.
+		if !addonKeyRe.MatchString(addonName) {
+			fmt.Fprintf(os.Stderr,
+				"m028: %s — invalid legacy addon key %q, skipping\n", initPath, addonName)
+			continue
+		}
 		spec, known := addonSpecs[addonName]
 		if !known {
 			fmt.Fprintf(os.Stderr,
