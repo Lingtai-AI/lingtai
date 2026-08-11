@@ -1365,6 +1365,13 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 			m.saveErr = "name cannot be empty"
 			return m, nil
 		}
+		// The name becomes a filename stem under presets/saved/ via
+		// preset.Save; reject path forms up front so the user sees a
+		// clear error instead of an escape attempt (issue #849).
+		if err := preset.ValidateSafeName(newName); err != nil {
+			m.saveErr = "invalid name: " + err.Error()
+			return m, nil
+		}
 		if newName == m.original.Name {
 			m.saveErr = "pick a different name (or press Ctrl+E to overwrite the built-in)"
 			return m, nil

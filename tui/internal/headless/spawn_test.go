@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,5 +284,89 @@ func TestRunSpawn_LanguageDefault(t *testing.T) {
 	manifest := initJSON["manifest"].(map[string]interface{})
 	if manifest["language"] != "zh" {
 		t.Errorf("language = %q, want %q", manifest["language"], "zh")
+	}
+}
+
+// TestRunSpawn_RejectsUnsafeAgentName proves issue #849 at the headless
+// boundary: path-form agent names (relative-parent, absolute, slash, and
+// backslash forms) are rejected with a clear error before any project write,
+// and cannot create an artifact outside the owning directory.
+func TestRunSpawn_RejectsUnsafeAgentName(t *testing.T) {
+	unsafe := []string{
+		"..",
+		".",
+		"../escape",
+		"..\\escape",
+		"..\\..\\escape",
+		"a/b",
+		"a\\b",
+		"/abs",
+		"a/../b",
+	}
+	for _, name := range unsafe {
+		withTempHome(t)
+		globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
+		preset.RefreshTemplates()
+		preset.Bootstrap(globalDir)
+
+		parent := t.TempDir()
+		dir := filepath.Join(parent, "project")
+
+		var stdout, stderr bytes.Buffer
+		code := RunSpawn(&stdout, &stderr, SpawnOpts{
+			Dir:        dir,
+			Preset:     "minimax",
+			AgentName:  name,
+			Language:   "en",
+			SkipLaunch: true,
+		})
+		if code != 1 {
+			t.Fatalf("agent name %q: exit code = %d, want 1\nstderr: %s", name, code, stderr.String())
+		}
+		var errResp map[string]string
+		if err := json.Unmarshal(stderr.Bytes(), &errResp); err != nil {
+			t.Fatalf("agent name %q: stderr not valid JSON: %v\nbody: %s", name, err, stderr.String())
+		}
+		if errResp["code"] != "invalid_args" {
+			t.Errorf("agent name %q: error code = %q, want invalid_args", name, errResp["code"])
+		}
+		if !strings.Contains(errResp["error"], "invalid agent name") {
+			t.Errorf("agent name %q: error = %q, want a clear validation error", name, errResp["error"])
+		}
+		// No project write may have happened, and nothing may exist at the
+		// escaped target path (parent/escape for "../escape").
+		if _, err := os.Stat(filepath.Join(dir, ".lingtai")); err == nil {
+			t.Errorf("agent name %q: .lingtai/ was created despite rejection", name)
+		}
+		if _, err := os.Stat(filepath.Join(parent, "escape")); err == nil {
+			t.Errorf("agent name %q: escaped artifact created at %s", name, filepath.Join(parent, "escape"))
+		}
+	}
+}
+
+// TestRunSpawn_AcceptsNormalAgentName is the positive control: a normal
+// single-segment agent name still creates the agent dir and init.json.
+func TestRunSpawn_AcceptsNormalAgentName(t *testing.T) {
+	withTempHome(t)
+	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
+	preset.RefreshTemplates()
+	preset.Bootstrap(globalDir)
+
+	dir := filepath.Join(t.TempDir(), "test-project")
+	os.MkdirAll(dir, 0o755)
+
+	var stdout, stderr bytes.Buffer
+	code := RunSpawn(&stdout, &stderr, SpawnOpts{
+		Dir:        dir,
+		Preset:     "minimax",
+		AgentName:  "ok-agent",
+		Language:   "en",
+		SkipLaunch: true,
+	})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".lingtai", "ok-agent", "init.json")); err != nil {
+		t.Errorf("init.json not created for normal agent name: %v", err)
 	}
 }
