@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -42,25 +44,32 @@ func NewNetworkHandler(baseDir string) http.HandlerFunc {
 	}
 }
 
-// NewTopologyHandler serves the full topology tape as a JSON array.
+// maxTopologyResponseFrames bounds how many tape frames /api/topology serves.
+// The endpoint returns the most recent frames of the tape, not the full
+// history — long-lived tapes must not scale the response with all retained
+// history. The replay timeline uses the bounded manifest/chunk API instead.
+const maxTopologyResponseFrames = 1000
+
+// NewTopologyHandler serves the most recent frames of the topology tape as a
+// JSON array. Bounded retrieval contract: at most maxTopologyResponseFrames
+// frames, streamed line by line (the whole file is never materialized), read
+// under TopologyMu so readers see a consistent snapshot relative to append
+// and rebuild writers.
 func NewTopologyHandler(baseDir string) http.HandlerFunc {
 	topologyPath := filepath.Join(baseDir, ".portal", "topology.jsonl")
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := os.ReadFile(topologyPath)
+		TopologyMu.Lock()
+		entries, err := readTopologyTail(topologyPath, maxTopologyResponseFrames)
+		TopologyMu.Unlock()
 		if err != nil {
+			// Missing tape is not an error: serve an empty array, matching the
+			// historical fallback behavior.
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("[]"))
 			return
 		}
 
-		// Parse JSONL → JSON array
-		var entries []json.RawMessage
-		for _, line := range splitLines(data) {
-			if len(line) > 0 {
-				entries = append(entries, json.RawMessage(line))
-			}
-		}
 		if entries == nil {
 			entries = []json.RawMessage{}
 		}
@@ -70,21 +79,36 @@ func NewTopologyHandler(baseDir string) http.HandlerFunc {
 	}
 }
 
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i, b := range data {
-		if b == '\n' {
-			if i > start {
-				lines = append(lines, data[start:i])
-			}
-			start = i + 1
+// readTopologyTail streams topology.jsonl and returns the last n non-empty
+// lines as raw JSON messages. Memory is bounded by n and the per-line token
+// limit; the file is never fully read into memory.
+func readTopologyTail(path string, n int) ([]json.RawMessage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), maxTapeLineBytes)
+	var entries []json.RawMessage
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
 		}
+		if len(entries) == n {
+			// Ring behavior: drop the oldest frame to keep only the last n.
+			copy(entries, entries[1:])
+			entries[len(entries)-1] = json.RawMessage(append([]byte(nil), line...))
+			continue
+		}
+		entries = append(entries, json.RawMessage(append([]byte(nil), line...)))
 	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
-	return lines
+	return entries, nil
 }
 
 // AppendTopology writes one JSONL line: {"t": <unix_ms>, "net": <network>}

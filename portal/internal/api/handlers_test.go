@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -274,4 +276,150 @@ func TestAppendTopologyAt_CreatesDirectory(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file not created: %v", err)
 	}
+}
+
+// TestTopologyHandler_BoundedTail proves the bounded retrieval contract: a
+// large tape is served as the most recent maxTopologyResponseFrames frames,
+// not the full retained history.
+func TestTopologyHandler_BoundedTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".portal", "topology.jsonl")
+	const total = maxTopologyResponseFrames + 50
+	for i := 0; i < total; i++ {
+		AppendTopologyAt(path, fs.Network{Nodes: []fs.AgentNode{}}, int64(1000+i))
+	}
+
+	handler := NewTopologyHandler(dir)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var entries []fs.TapeFrame
+	if err := json.NewDecoder(rr.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entries) != maxTopologyResponseFrames {
+		t.Fatalf("got %d entries, want %d (bounded retrieval contract)", len(entries), maxTopologyResponseFrames)
+	}
+	wantFirst := int64(1000 + total - maxTopologyResponseFrames)
+	if entries[0].T != wantFirst {
+		t.Fatalf("first entry t = %d, want %d (newest %d-frame window)", entries[0].T, wantFirst, maxTopologyResponseFrames)
+	}
+	if last := entries[len(entries)-1].T; last != int64(1000+total-1) {
+		t.Fatalf("last entry t = %d, want %d", last, 1000+total-1)
+	}
+}
+
+// TestTopologyHandler_BlocksUntilTopologyMuAvailable proves the read path takes
+// TopologyMu: concurrent read/write behavior is serialized, so a reader cannot
+// observe an append/rebuild in progress.
+func TestTopologyHandler_BlocksUntilTopologyMuAvailable(t *testing.T) {
+	dir := t.TempDir()
+	AppendTopologyAt(filepath.Join(dir, ".portal", "topology.jsonl"), fs.Network{}, 1000)
+	handler := NewTopologyHandler(dir)
+
+	TopologyMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+	}()
+
+	select {
+	case <-done:
+		TopologyMu.Unlock()
+		t.Fatal("topology handler completed while TopologyMu was held: read path did not take the lock")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: the reader is blocked behind the writer.
+	}
+
+	TopologyMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("topology handler did not complete after the lock was released")
+	}
+}
+
+// TestLastLine_TailInspection proves lastLine returns the final non-empty line
+// from the tail of a tape without reading the whole file, and reports ok=false
+// for missing/empty files.
+func TestLastLine_TailInspection(t *testing.T) {
+	t.Run("large file returns final line", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "tape.jsonl")
+		var buf bytes.Buffer
+		for i := 0; i < 100000; i++ {
+			fmt.Fprintf(&buf, "{\"t\":%d}\n", i)
+		}
+		buf.WriteString("{\"t\":999999,\"last\":true}\n")
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		line, ok := lastLine(path, maxTapeTailBytes)
+		if !ok || !strings.Contains(string(line), "\"last\":true") {
+			t.Fatalf("lastLine = %q, ok = %v; want the final line", line, ok)
+		}
+	})
+
+	t.Run("single line without newline", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "single")
+		if err := os.WriteFile(path, []byte("{\"t\":1}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		line, ok := lastLine(path, maxTapeTailBytes)
+		if !ok || string(line) != "{\"t\":1}" {
+			t.Fatalf("lastLine = %q, ok = %v", line, ok)
+		}
+	})
+
+	t.Run("final line longer than tail window falls back to full scan", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "bigline")
+		var buf bytes.Buffer
+		for i := 0; i < 5; i++ {
+			fmt.Fprintf(&buf, "{\"t\":%d}\n", i)
+		}
+		long := strings.Repeat("x", 1000)
+		buf.WriteString(long)
+		buf.WriteByte('\n')
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// A tiny tail window forces the backward read to miss the newline, so
+		// lastLine must fall back to the forward scan and return the full
+		// final line rather than a partial one.
+		line, ok := lastLine(path, 100)
+		if !ok || string(line) != long {
+			t.Fatalf("lastLine = %q (len %d), ok = %v; want the full %d-byte final line", line, len(line), ok, len(long))
+		}
+	})
+
+	t.Run("trailing blank lines", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "blanks")
+		if err := os.WriteFile(path, []byte("{\"t\":1}\n\n\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		line, ok := lastLine(path, maxTapeTailBytes)
+		if !ok || string(line) != "{\"t\":1}" {
+			t.Fatalf("lastLine = %q, ok = %v", line, ok)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		if _, ok := lastLine(filepath.Join(t.TempDir(), "nope"), maxTapeTailBytes); ok {
+			t.Fatal("expected ok=false for missing file")
+		}
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "empty")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := lastLine(path, maxTapeTailBytes); ok {
+			t.Fatal("expected ok=false for empty file")
+		}
+	})
 }

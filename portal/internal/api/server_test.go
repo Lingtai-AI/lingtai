@@ -106,3 +106,74 @@ func TestHostWarningsOnlyForExternalOrWildcardBinds(t *testing.T) {
 		t.Fatalf("warning %q should mention unauthenticated trusted-LAN exposure", warning)
 	}
 }
+
+func writeTapeFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestNeedsReconstruction_TailInspection proves the startup format check
+// inspects the final tape line and keeps its historical semantics: missing or
+// empty tapes need reconstruction, new-format lines (mail edge with direct)
+// do not, and old-format lines (mail edge without direct) do.
+func TestNeedsReconstruction_TailInspection(t *testing.T) {
+	const newFormat = "{\"t\":1000,\"net\":{\"nodes\":[],\"avatar_edges\":[],\"contact_edges\":[],\"mail_edges\":[{\"sender\":\"a\",\"recipient\":\"b\",\"count\":1,\"direct\":1,\"cc\":0,\"bcc\":0}],\"stats\":{}}}\n"
+	const oldFormat = "{\"t\":1000,\"net\":{\"nodes\":[],\"avatar_edges\":[],\"contact_edges\":[],\"mail_edges\":[{\"sender\":\"a\",\"recipient\":\"b\",\"count\":1}],\"stats\":{}}}\n"
+	const noMailFormat = "{\"t\":1000,\"net\":{\"nodes\":[],\"avatar_edges\":[],\"contact_edges\":[],\"mail_edges\":[],\"stats\":{}}}\n"
+
+	t.Run("missing tape", func(t *testing.T) {
+		if !needsReconstruction(filepath.Join(t.TempDir(), "topology.jsonl")) {
+			t.Fatal("missing tape should need reconstruction")
+		}
+	})
+
+	t.Run("empty tape", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".portal", "topology.jsonl")
+		writeTapeFile(t, path, "")
+		if !needsReconstruction(path) {
+			t.Fatal("empty tape should need reconstruction")
+		}
+	})
+
+	t.Run("new format", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".portal", "topology.jsonl")
+		writeTapeFile(t, path, newFormat)
+		if needsReconstruction(path) {
+			t.Fatal("new-format tape should not need reconstruction")
+		}
+	})
+
+	t.Run("old format", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".portal", "topology.jsonl")
+		writeTapeFile(t, path, oldFormat)
+		if !needsReconstruction(path) {
+			t.Fatal("old-format tape should need reconstruction")
+		}
+	})
+
+	t.Run("new format after many old lines", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".portal", "topology.jsonl")
+		var buf strings.Builder
+		for i := 0; i < 5000; i++ {
+			buf.WriteString(oldFormat)
+		}
+		buf.WriteString(newFormat)
+		writeTapeFile(t, path, buf.String())
+		if needsReconstruction(path) {
+			t.Fatal("the final new-format line should win over older old-format lines")
+		}
+	})
+
+	t.Run("no mail edges", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".portal", "topology.jsonl")
+		writeTapeFile(t, path, noMailFormat)
+		if needsReconstruction(path) {
+			t.Fatal("tape without mail edges should not need reconstruction")
+		}
+	})
+}

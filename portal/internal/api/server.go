@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -34,7 +38,7 @@ func NewServer(baseDir string, staticFS fs.FS) *Server {
 	mux.Handle("/api/topology", NewTopologyHandler(baseDir))
 	mux.Handle("/api/topology/manifest", NewManifestHandler(baseDir))
 	mux.Handle("/api/topology/chunk", NewChunkHandler(baseDir))
-	mux.Handle("/api/topology/rebuild", NewRebuildHandler(baseDir))
+	mux.Handle("/api/topology/rebuild", NewRebuildHandler(baseDir, rebuildTokenFor(baseDir)))
 	mux.Handle("/api/topology/progress", NewProgressHandler(baseDir))
 	if staticFS != nil {
 		mux.Handle("/", http.FileServer(http.FS(staticFS)))
@@ -84,12 +88,15 @@ func (s *Server) StartRecording(baseDir string) {
 			progressPath := filepath.Join(baseDir, ".portal", "reconstruct.progress")
 			os.WriteFile(progressPath, []byte("0/0"), 0o644)
 
+			// Serialize reconstruction with all other topology I/O: the lock
+			// is acquired before source scanning or frame allocation begins, so
+			// repeated rebuilds cannot stack expensive pre-lock work.
+			TopologyMu.Lock()
 			frames, err := agentfs.ReconstructTape(baseDir)
 			if err == nil && len(frames) > 0 {
-				TopologyMu.Lock()
 				_, _ = writeReconstructedReplay(topologyPath, replayDir, progressPath, frames)
-				TopologyMu.Unlock()
 			}
+			TopologyMu.Unlock()
 			os.Remove(progressPath)
 		}
 
@@ -175,16 +182,17 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // needsReconstruction checks if topology.jsonl is missing, empty,
 // or uses the old format (missing direct/cc/bcc on mail edges).
+// It inspects only the final line of the tape — reading the whole file at
+// startup would scale with all retained history — and runs under TopologyMu
+// like every other tape read.
 func needsReconstruction(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
+	TopologyMu.Lock()
+	defer TopologyMu.Unlock()
+
+	line, ok := lastLine(path, maxTapeTailBytes)
+	if !ok {
 		return true
 	}
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	if len(lines) == 0 {
-		return true
-	}
-	lastLine := lines[len(lines)-1]
 	var frame struct {
 		Net struct {
 			MailEdges []struct {
@@ -192,11 +200,134 @@ func needsReconstruction(path string) bool {
 			} `json:"mail_edges"`
 		} `json:"net"`
 	}
-	if json.Unmarshal(lastLine, &frame) != nil {
+	if json.Unmarshal(line, &frame) != nil {
 		return true
 	}
 	if len(frame.Net.MailEdges) == 0 {
 		return false
 	}
 	return frame.Net.MailEdges[0].Direct == nil
+}
+
+// maxTapeLineBytes bounds a single topology.jsonl line (matching the replay
+// scanners) and maxTapeTailBytes the backward tail window used to locate the
+// final line without reading the whole tape.
+const (
+	maxTapeLineBytes = 10 << 20 // 10 MiB
+	maxTapeTailBytes = maxTapeLineBytes + 2<<20
+)
+
+// lastLine returns the final non-empty line of path. In the common case it
+// reads only the last maxTapeTailBytes of the file; for pathologically long
+// final lines it falls back to a forward scan that retains only the last line
+// (memory stays bounded either way). ok is false when the file is missing,
+// empty, or unreadable.
+func lastLine(path string, maxTail int64) ([]byte, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return nil, false
+	}
+	size := st.Size()
+	readLen := maxTail
+	if size < maxTail {
+		readLen = size
+	}
+	buf := make([]byte, readLen)
+	if _, err := f.ReadAt(buf, size-readLen); err != nil {
+		return nil, false
+	}
+
+	// Walk the window backward from the end. Skip a trailing newline, then
+	// return the text after the previous newline; skip blank trailing lines.
+	end := len(buf)
+	if buf[end-1] == '\n' {
+		end--
+	}
+	for i := end - 1; i >= 0; i-- {
+		if buf[i] == '\n' {
+			line := bytes.TrimSpace(buf[i+1 : end])
+			if len(line) > 0 {
+				return line, true
+			}
+			end = i
+		}
+	}
+
+	// No newline in the window. If the window covered the whole file this is a
+	// single-line file; otherwise the final line is longer than the tail
+	// window, so fall back to a bounded forward scan (never return a partial
+	// line from the middle of an oversized final line).
+	if size <= maxTail {
+		if line := bytes.TrimSpace(buf[:end]); len(line) > 0 {
+			return line, true
+		}
+		return nil, false
+	}
+	return scanLastLine(f)
+}
+
+// scanLastLine streams path from the start and returns the last non-empty
+// line, retaining only one line in memory.
+func scanLastLine(f *os.File) ([]byte, bool) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, false
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), maxTapeLineBytes)
+	var last []byte
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		last = append(last[:0], line...)
+	}
+	if scanner.Err() != nil {
+		return nil, false
+	}
+	if len(last) == 0 {
+		return nil, false
+	}
+	return last, true
+}
+
+// rebuildTokenFile is the per-project rebuild authorization token file,
+// written next to .portal/port so operators and automation on non-loopback
+// binds can discover the token and authorize rebuilds.
+const rebuildTokenFile = "rebuild-token"
+
+// rebuildTokenFor returns the rebuild authorization token for a project: an
+// explicit LINGTAI_PORTAL_REBUILD_TOKEN environment override, otherwise a
+// fresh per-process random token persisted to .portal/rebuild-token (0600).
+// An empty token disables the token-authenticated rebuild path.
+func rebuildTokenFor(baseDir string) string {
+	if tok := os.Getenv("LINGTAI_PORTAL_REBUILD_TOKEN"); tok != "" {
+		return tok
+	}
+	token := generateRebuildToken()
+	if token == "" {
+		return ""
+	}
+	dir := filepath.Join(baseDir, ".portal")
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		os.WriteFile(filepath.Join(dir, rebuildTokenFile), []byte(token+"\n"), 0o600)
+	}
+	return token
+}
+
+// generateRebuildToken returns a 128-bit random hex token, or "" if the
+// platform entropy source fails (which disables token-authenticated rebuilds
+// rather than shipping a guessable fallback).
+func generateRebuildToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }

@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/lingtai-portal/internal/fs"
 )
@@ -847,9 +849,9 @@ func TestReplayHandlersDoNotSetCORSHeadersOnFallbackAndErrorPaths(t *testing.T) 
 	})
 
 	t.Run("rebuild method error", func(t *testing.T) {
-		handler := NewRebuildHandler(t.TempDir())
+		handler := NewRebuildHandler(t.TempDir(), "")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/rebuild", nil))
+		handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodGet))
 		if rr.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("status = %d, want 405", rr.Code)
 		}
@@ -857,9 +859,9 @@ func TestReplayHandlersDoNotSetCORSHeadersOnFallbackAndErrorPaths(t *testing.T) 
 	})
 
 	t.Run("rebuild filesystem error", func(t *testing.T) {
-		handler := NewRebuildHandler(filepath.Join(t.TempDir(), "missing"))
+		handler := NewRebuildHandler(filepath.Join(t.TempDir(), "missing"), "")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/topology/rebuild", nil))
+		handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodPost))
 		if rr.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", rr.Code)
 		}
@@ -867,9 +869,9 @@ func TestReplayHandlersDoNotSetCORSHeadersOnFallbackAndErrorPaths(t *testing.T) 
 	})
 
 	t.Run("rebuild empty tape", func(t *testing.T) {
-		handler := NewRebuildHandler(t.TempDir())
+		handler := NewRebuildHandler(t.TempDir(), "")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/topology/rebuild", nil))
+		handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodPost))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rr.Code)
 		}
@@ -967,4 +969,208 @@ func staleReplayChunk(times []int64) ReplayChunk {
 		chunk.Frames = append(chunk.Frames, ReplayFrame{T: t})
 	}
 	return chunk
+}
+
+// --- rebuild trust boundary and serialization tests ---
+
+// trustedRebuildRequest builds a request that crosses the rebuild trust
+// boundary the way the TUI or a same-machine browser would: a loopback
+// connection addressed via a loopback Host.
+func trustedRebuildRequest(method string) *http.Request {
+	req := httptest.NewRequest(method, "http://localhost/api/topology/rebuild", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	return req
+}
+
+// rebuildFixtureAgent writes a minimal non-human agent with the given events
+// into baseDir so ReconstructTape has real work to do.
+func rebuildFixtureAgent(t *testing.T, baseDir string, events ...map[string]interface{}) {
+	t.Helper()
+	agentDir := filepath.Join(baseDir, "agent-a")
+	if err := os.MkdirAll(filepath.Join(agentDir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]interface{}{
+		"agent_name": "agent-a",
+		"address":    "agent-a",
+		"state":      "ACTIVE",
+		"admin":      agentDir, // non-null admin → is_human=false
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		return
+	}
+	var buf bytes.Buffer
+	for _, ev := range events {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "logs", "events.jsonl"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRebuildHandler_RejectsUntrustedRequests proves the explicit rebuild
+// trust boundary: untrusted browser-origin requests are rejected with 403
+// before any reconstruction work begins.
+func TestRebuildHandler_RejectsUntrustedRequests(t *testing.T) {
+	handler := NewRebuildHandler(t.TempDir(), "topsecret")
+
+	t.Run("cross-origin browser origin", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://portal.test/api/topology/rebuild", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		req.Header.Set("Origin", "http://evil.example")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("non-loopback no origin no token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://portal.test/api/topology/rebuild", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("dns-rebinding shape: loopback connection, attacker host", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://attacker.example/api/topology/rebuild", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Origin", "http://attacker.example")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("wrong token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://portal.test/api/topology/rebuild", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		req.Header.Set("X-Portal-Rebuild-Token", "nope")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rr.Code)
+		}
+	})
+}
+
+// TestRebuildHandler_AcceptsTrustedRequests proves the boundary accepts the
+// legitimate paths: loopback clients, same-origin browser requests on
+// intentionally non-loopback binds, and explicit-token automation.
+func TestRebuildHandler_AcceptsTrustedRequests(t *testing.T) {
+	t.Run("loopback localhost", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir(), "")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodPost))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("loopback ipv6", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir(), "")
+		req := httptest.NewRequest(http.MethodPost, "http://[::1]:8080/api/topology/rebuild", nil)
+		req.RemoteAddr = "[::1]:12345"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("same-origin on non-loopback bind", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir(), "")
+		req := httptest.NewRequest(http.MethodPost, "http://portal.test:8080/api/topology/rebuild", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		req.Header.Set("Origin", "http://portal.test:8080")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("explicit token", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir(), "topsecret")
+		req := httptest.NewRequest(http.MethodPost, "http://portal.test/api/topology/rebuild", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		req.Header.Set("X-Portal-Rebuild-Token", "topsecret")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+		}
+	})
+}
+
+// TestRebuildHandler_BlocksUntilTopologyMuAvailable proves concurrent rebuild
+// attempts cannot stack pre-lock work: while TopologyMu is held (as by a live
+// append or another rebuild), a rebuild request must not begin until the lock
+// is released.
+func TestRebuildHandler_BlocksUntilTopologyMuAvailable(t *testing.T) {
+	handler := NewRebuildHandler(t.TempDir(), "")
+
+	TopologyMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodPost))
+	}()
+
+	select {
+	case <-done:
+		TopologyMu.Unlock()
+		t.Fatal("rebuild handler completed while TopologyMu was held: reconstruction ran before serialization")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: the handler is blocked on the lock before doing any work.
+	}
+
+	TopologyMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rebuild handler did not complete after the lock was released")
+	}
+}
+
+// TestRebuildHandler_SurfacesReconstructionRangeError covers the regression
+// case from the issue: a ten-year range between plausible timestamps must be
+// rejected by the span budget and surfaced as a 500, not expanded into
+// millions of minute frames.
+func TestRebuildHandler_SurfacesReconstructionRangeError(t *testing.T) {
+	base := t.TempDir()
+	t0 := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	t1 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	rebuildFixtureAgent(t, base,
+		map[string]interface{}{"type": "agent_state", "ts": float64(t0), "address": "agent-a", "agent_name": "agent-a", "old": "asleep", "new": "active"},
+		map[string]interface{}{"type": "agent_state", "ts": float64(t1), "address": "agent-a", "agent_name": "agent-a", "old": "active", "new": "suspended"},
+	)
+
+	handler := NewRebuildHandler(base, "")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, trustedRebuildRequest(http.MethodPost))
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %s)", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "span") {
+		t.Fatalf("error body %q should mention the span budget", rr.Body.String())
+	}
 }

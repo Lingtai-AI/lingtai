@@ -3,6 +3,7 @@ package fs
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -33,6 +34,40 @@ type timestampedMail struct {
 	ts  float64 // unix seconds
 }
 
+// Sampling grid and reconstruction budgets. Hostile or corrupt timestamps in
+// events.jsonl or mailbox records must not be able to expand the reconstructed
+// tape into millions of frames, so every timestamp is validated against an
+// explicit plausibility window and the derived range is bounded by explicit
+// span and frame-count budgets before any frame allocation begins.
+const (
+	// intervalMs is the activity-driven sampling grid (3s, matching the live
+	// recorder) and maxGapMs the longest quiet stretch between heartbeat
+	// samples (one frame per minute during long gaps).
+	intervalMs int64 = 3000
+	maxGapMs   int64 = 60 * 1000
+
+	// minPlausibleTs / maxPlausibleTs bound accepted unix-seconds timestamps
+	// (2001-09-09 .. year ~33658). Non-finite values and values outside this
+	// window are treated as corrupt input and reject the reconstruction.
+	minPlausibleTs = 1e9
+	maxPlausibleTs = 1e12
+
+	// maxReconstructSpanMs caps the wall-clock span of a reconstructed tape.
+	// 5 years (365.25 days each) is far beyond any real project history and
+	// keeps the worst-case minute-gap frame count within the frame budget.
+	maxReconstructSpanMs int64 = 157788000000 // 5 * 365.25 * 86400 * 1000
+
+	// maxReconstructFrames caps the total frames a single reconstruction may
+	// allocate. The worst case is estimated cheaply from the span and the
+	// number of activity samples before any frames are built.
+	maxReconstructFrames = 3000000
+
+	// maxEventLineBytes bounds a single events.jsonl line; oversized lines
+	// fail the scan and surface as a reconstruction error instead of being
+	// silently ignored.
+	maxEventLineBytes = 4 << 20 // 4 MiB
+)
+
 // ReconstructTape scans agent directories under baseDir, reads events.jsonl
 // and mailbox contents, and reconstructs the full topology tape as a sequence
 // of TapeFrame snapshots at 3-second intervals.
@@ -54,7 +89,10 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	// 2. Read all events across all agents
 	var allEvents []eventRecord
 	for _, a := range agents {
-		events := readEventsJSONL(a.WorkingDir)
+		events, err := readEventsJSONL(a.WorkingDir)
+		if err != nil {
+			return nil, fmt.Errorf("read events for %s: %w", a.WorkingDir, err)
+		}
 		allEvents = append(allEvents, events...)
 	}
 
@@ -76,9 +114,16 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	// real first-seen time. maxTs uses only mutation-causing events (state
 	// changes + mail), so heartbeats during long-idle tails don't push the
 	// timeline up to "now" with nothing happening.
+	//
+	// Every timestamp must be finite and inside the plausibility window: a
+	// corrupt or hostile timestamp must reject the rebuild rather than being
+	// allowed to expand the tape.
 	minTs := math.MaxFloat64
 	maxTs := 0.0
 	for _, e := range allEvents {
+		if !plausibleTimestamp(e.Ts) {
+			return nil, fmt.Errorf("rejecting reconstruction: event timestamp %v is non-finite or implausible (window [%v, %v])", e.Ts, minPlausibleTs, maxPlausibleTs)
+		}
 		if e.Ts < minTs {
 			minTs = e.Ts
 		}
@@ -87,6 +132,9 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 		}
 	}
 	for _, m := range allMail {
+		if !plausibleTimestamp(m.ts) {
+			return nil, fmt.Errorf("rejecting reconstruction: mail timestamp %v is non-finite or implausible (window [%v, %v])", m.ts, minPlausibleTs, maxPlausibleTs)
+		}
 		if m.ts < minTs {
 			minTs = m.ts
 		}
@@ -175,8 +223,6 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	// This produces O(events + mail + duration/maxGapMs) frames instead of
 	// O(duration/3s). For a 2-week-old project with a few hundred events that
 	// drops frame count by roughly 100x.
-	const intervalMs int64 = 3000
-	const maxGapMs int64 = 60 * 1000 // emit at least one frame per minute
 	startMs := int64(minTs * 1000)
 	endMs := int64(maxTs * 1000)
 
@@ -188,6 +234,14 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	endMs = ((endMs + intervalMs - 1) / intervalMs) * intervalMs
 	if endMs < startMs {
 		endMs = startMs
+	}
+
+	// Explicit span budget: long gaps add one sample per minute, so an
+	// unbounded range is the primary frame-amplification vector. Reject the
+	// reconstruction before any frame allocation begins.
+	spanMs := endMs - startMs
+	if spanMs > maxReconstructSpanMs {
+		return nil, fmt.Errorf("rejecting reconstruction: range %d ms exceeds maximum span %d ms", spanMs, maxReconstructSpanMs)
 	}
 
 	// Build the sorted set of activity-driven sample timestamps. Each
@@ -210,6 +264,14 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	for _, ft := range firstEventTs {
 		sampleSet[snapUp(int64(ft*1000))] = struct{}{}
 	}
+
+	// Explicit frame-count budget, estimated before the gap-fill materializes
+	// anything: at most one heartbeat sample per maxGapMs across the span plus
+	// one sample per activity point. Reject before any large slice allocation.
+	if worst := reconstructionWorstCaseFrames(spanMs, len(sampleSet)); worst > maxReconstructFrames {
+		return nil, fmt.Errorf("rejecting reconstruction: worst-case %d frames exceeds frame budget %d", worst, maxReconstructFrames)
+	}
+
 	// Add heartbeat samples during long gaps so the scrubber feels alive.
 	sorted := make([]int64, 0, len(sampleSet))
 	for t := range sampleSet {
@@ -355,16 +417,23 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 
 // readEventsJSONL reads logs/events.jsonl and returns parsed event records
 // for event types we care about: agent_state, heartbeat_start, refresh_start.
-func readEventsJSONL(agentDir string) []eventRecord {
+// A missing file is not an error (an agent without a log contributes no
+// events); a scan failure (including an oversized line) is surfaced so the
+// reconstruction cannot silently proceed on truncated input.
+func readEventsJSONL(agentDir string) ([]eventRecord, error) {
 	path := filepath.Join(agentDir, "logs", "events.jsonl")
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	defer f.Close()
 
 	var events []eventRecord
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), maxEventLineBytes)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -379,7 +448,34 @@ func readEventsJSONL(agentDir string) []eventRecord {
 			events = append(events, ev)
 		}
 	}
-	return events
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan %s: %w", path, err)
+	}
+	return events, nil
+}
+
+// plausibleTimestamp reports whether a unix-seconds timestamp is finite and
+// inside the explicit plausibility window. Values outside the window cannot
+// be real project timestamps and would otherwise be free to expand the
+// reconstructed tape.
+func plausibleTimestamp(ts float64) bool {
+	if math.IsNaN(ts) || math.IsInf(ts, 0) {
+		return false
+	}
+	return ts >= minPlausibleTs && ts <= maxPlausibleTs
+}
+
+// reconstructionWorstCaseFrames upper-bounds the frames activity-driven
+// sampling can produce for a span: at most one heartbeat sample per maxGapMs
+// across the span, plus one sample per activity point, plus the aligned
+// start/end anchors. It is a cheap pre-allocation estimate used to enforce
+// the frame-count budget.
+func reconstructionWorstCaseFrames(spanMs int64, activitySamples int) int64 {
+	gapFrames := int64(0)
+	if spanMs > 0 {
+		gapFrames = (spanMs + maxGapMs - 1) / maxGapMs
+	}
+	return gapFrames + int64(activitySamples) + 2
 }
 
 // mailTimestamp extracts the best timestamp from a mail message as unix seconds.

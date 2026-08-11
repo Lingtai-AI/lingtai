@@ -1,9 +1,11 @@
 package fs
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -270,5 +272,108 @@ func TestReconstructTape_StateTransitions(t *testing.T) {
 	s3 := agentStateAt(t0.Add(27 * time.Second))
 	if s3 != "ACTIVE" {
 		t.Errorf("expected ACTIVE at t0+27s, got %q", s3)
+	}
+}
+
+// --- reconstruction budgets and error surfacing ---
+
+// TestReconstructTape_RejectsImplausibleTimestamp proves non-finite or
+// implausible timestamps reject the reconstruction instead of being allowed
+// to expand the tape.
+func TestReconstructTape_RejectsImplausibleTimestamp(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "agent-x")
+	writeAgentManifest(t, agentDir, "agent-x", false)
+	writeEvent(t, agentDir, map[string]interface{}{
+		"type":       "agent_state",
+		"ts":         1e300, // finite but far outside the plausibility window
+		"address":    "agent-x",
+		"agent_name": "agent-x",
+		"old":        "asleep",
+		"new":        "active",
+	})
+
+	_, err := ReconstructTape(base)
+	if err == nil {
+		t.Fatal("expected error for implausible timestamp")
+	}
+	if !strings.Contains(err.Error(), "implausible") {
+		t.Fatalf("error %q should mention the implausible timestamp", err)
+	}
+}
+
+// TestReconstructTape_RejectsExcessiveSpan covers the issue's regression case:
+// a ten-year range between plausible timestamps must be rejected by the span
+// budget before any minute-gap frames are allocated (~5.2M frames).
+func TestReconstructTape_RejectsExcessiveSpan(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "agent-s")
+	writeAgentManifest(t, agentDir, "agent-s", false)
+
+	t0 := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i, ts := range []time.Time{t0, t1} {
+		state := map[string]interface{}{
+			"type":       "agent_state",
+			"ts":         float64(ts.Unix()),
+			"address":    "agent-s",
+			"agent_name": "agent-s",
+			"old":        "asleep",
+			"new":        "active",
+		}
+		if i == 1 {
+			state["new"] = "suspended"
+		}
+		writeEvent(t, agentDir, state)
+	}
+
+	_, err := ReconstructTape(base)
+	if err == nil {
+		t.Fatal("expected error for ten-year span")
+	}
+	if !strings.Contains(err.Error(), "span") {
+		t.Fatalf("error %q should mention the span budget", err)
+	}
+}
+
+// TestReconstructionWorstCaseFrames_Budget proves the frame-count budget
+// arithmetic: a ten-year gap exceeds the budget, the allowed maximum span
+// alone fits, and a large activity-sample count on top of a maximal span trips
+// the budget.
+func TestReconstructionWorstCaseFrames_Budget(t *testing.T) {
+	tenYearsMs := int64(10) * 365 * 24 * 3600 * 1000
+	if got := reconstructionWorstCaseFrames(tenYearsMs, 0); got <= maxReconstructFrames {
+		t.Fatalf("ten-year span worst case %d should exceed frame budget %d", got, maxReconstructFrames)
+	}
+	if got := reconstructionWorstCaseFrames(maxReconstructSpanMs, 0); got > maxReconstructFrames {
+		t.Fatalf("max-span worst case %d should fit frame budget %d", got, maxReconstructFrames)
+	}
+	if got := reconstructionWorstCaseFrames(maxReconstructSpanMs, 400000); got <= maxReconstructFrames {
+		t.Fatalf("max span with 400k activity samples (%d) should exceed frame budget %d", got, maxReconstructFrames)
+	}
+}
+
+// TestReconstructTape_SurfacesEventScannerError proves scanner failures (here
+// an oversized events.jsonl line) surface as reconstruction errors instead of
+// being silently ignored.
+func TestReconstructTape_SurfacesEventScannerError(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "agent-z")
+	writeAgentManifest(t, agentDir, "agent-z", false)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hugeLine := bytes.Repeat([]byte{'x'}, maxEventLineBytes+1024)
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), append(hugeLine, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReconstructTape(base)
+	if err == nil {
+		t.Fatal("expected error for oversized event line")
+	}
+	if !strings.Contains(err.Error(), "scan") {
+		t.Fatalf("error %q should mention the scan failure", err)
 	}
 }
