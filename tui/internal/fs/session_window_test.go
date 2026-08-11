@@ -204,12 +204,24 @@ func TestWindowedExactEqualWindowIsComplete(t *testing.T) {
 		t.Fatal("an exact authoritative window reaching offset zero must be complete")
 	}
 
-	// A larger request remains complete and stable.
-	scNext := NewSessionCache(humanDir, root, MainAggregateWriter)
-	scNext.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 8)
-	assertSessionBodiesExactly(t, scNext.Entries(), "e0", "e1", "e2", "e3")
-	if !scNext.Complete() {
-		t.Fatal("the request after an exact-equal window must resolve to complete — no endless partial")
+	// Larger requests remain complete and stable. Keep both the immediate
+	// post-boundary input and a window much larger than the whole history; the
+	// latter may be persisted like an ordinary full rebuild because it is complete.
+	for _, tc := range []struct {
+		name   string
+		window int
+	}{
+		{name: "next_after_exact_equal", window: 8},
+		{name: "much_larger_than_history", window: 2000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scNext := NewSessionCache(humanDir, root, MainAggregateWriter)
+			scNext.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", tc.window)
+			assertSessionBodiesExactly(t, scNext.Entries(), "e0", "e1", "e2", "e3")
+			if !scNext.Complete() {
+				t.Fatalf("window %d >= history must resolve to complete — no endless partial", tc.window)
+			}
+		})
 	}
 }
 

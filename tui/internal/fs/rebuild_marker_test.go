@@ -7,7 +7,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+type recentEventTimesCase struct {
+	name           string
+	eventType      string
+	recentTimes    func(string, int) []time.Time
+	tailOnlyUnix   int64
+	hugePrefixUnix int64
+}
+
+// Exercise each event-type-independent tail mechanic through both public entry
+// points. The timestamp literals preserve the formerly separate rebuild and
+// refresh-complete fixtures while sharing their filesystem setup.
+var recentEventTimesCases = []recentEventTimesCase{
+	{name: "rebuild", eventType: "psyche_molt", recentTimes: RecentRebuildTimes, tailOnlyUnix: 99999, hugePrefixUnix: 88888},
+	{name: "refresh_complete", eventType: "refresh_complete", recentTimes: RecentRefreshCompleteTimes, tailOnlyUnix: 77777, hugePrefixUnix: 66666},
+}
 
 func TestRecentRebuildTimesJSONLFallback(t *testing.T) {
 	agentDir := t.TempDir()
@@ -37,29 +54,33 @@ func TestRecentRebuildTimesJSONLFallback(t *testing.T) {
 }
 
 func TestRecentRebuildTimesJSONLTailOnly(t *testing.T) {
-	agentDir := t.TempDir()
-	logsDir := filepath.Join(agentDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A molt event far above the tail window must NOT be seen; only the
-	// recent tail is inspected, per the no-full-scan constraint.
-	var b strings.Builder
-	b.WriteString(`{"type":"psyche_molt","ts":1.0}` + "\n") // line 1 — outside the tail
-	for i := 0; i < tailScanLines+50; i++ {
-		fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
-	}
-	b.WriteString(`{"type":"psyche_molt","ts":99999.0}` + "\n") // near end — inside the tail
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range recentEventTimesCases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentDir := t.TempDir()
+			logsDir := filepath.Join(agentDir, "logs")
+			if err := os.MkdirAll(logsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// An event far above the tail window must NOT be seen; only the
+			// recent tail is inspected, per the no-full-scan constraint.
+			var b strings.Builder
+			fmt.Fprintf(&b, `{"type":%q,"ts":1.0}`+"\n", tc.eventType) // line 1 — outside the tail
+			for i := 0; i < tailScanLines+50; i++ {
+				fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
+			}
+			fmt.Fprintf(&b, `{"type":%q,"ts":%d.0}`+"\n", tc.eventType, tc.tailOnlyUnix) // near end — inside the tail
+			if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	times := RecentRebuildTimes(agentDir, 10)
-	if len(times) != 1 {
-		t.Fatalf("expected only the in-tail molt, got %d", len(times))
-	}
-	if times[0].Unix() != 99999 {
-		t.Fatalf("expected the recent molt (99999), got %d", times[0].Unix())
+			times := tc.recentTimes(agentDir, 10)
+			if len(times) != 1 {
+				t.Fatalf("expected only the in-tail %s, got %d", tc.eventType, len(times))
+			}
+			if times[0].Unix() != tc.tailOnlyUnix {
+				t.Fatalf("expected the recent %s (%d), got %d", tc.eventType, tc.tailOnlyUnix, times[0].Unix())
+			}
+		})
 	}
 }
 
@@ -91,38 +112,46 @@ func TestRecentRebuildTimesJSONLTailIncludesOldestLineInWindow(t *testing.T) {
 }
 
 func TestRecentRebuildTimesHugePrefixLineDoesNotBlockTail(t *testing.T) {
-	agentDir := t.TempDir()
-	logsDir := filepath.Join(agentDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A >1MiB prefix line, far outside the last-1000-line window. A naive
-	// bufio.Scanner with a 1MiB token cap chokes on this line and stops,
-	// hiding the recent molt. The true tail reader must seek past it.
-	var b strings.Builder
-	huge := strings.Repeat("x", 2*1024*1024)
-	fmt.Fprintf(&b, `{"type":"text_input","ts":1.0,"junk":"%s"}`+"\n", huge)
-	for i := 0; i < tailScanLines+50; i++ {
-		fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
-	}
-	b.WriteString(`{"type":"psyche_molt","ts":88888.0}` + "\n") // in the tail
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range recentEventTimesCases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentDir := t.TempDir()
+			logsDir := filepath.Join(agentDir, "logs")
+			if err := os.MkdirAll(logsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// A >1MiB prefix line, far outside the last-1000-line window. A naive
+			// bufio.Scanner with a 1MiB token cap chokes on this line and stops,
+			// hiding the recent event. The true tail reader must seek past it.
+			var b strings.Builder
+			huge := strings.Repeat("x", 2*1024*1024)
+			fmt.Fprintf(&b, `{"type":"text_input","ts":1.0,"junk":"%s"}`+"\n", huge)
+			for i := 0; i < tailScanLines+50; i++ {
+				fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
+			}
+			fmt.Fprintf(&b, `{"type":%q,"ts":%d.0}`+"\n", tc.eventType, tc.hugePrefixUnix) // in the tail
+			if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	times := RecentRebuildTimes(agentDir, 10)
-	if len(times) != 1 {
-		t.Fatalf("expected the in-tail molt despite huge prefix line, got %d", len(times))
-	}
-	if times[0].Unix() != 88888 {
-		t.Fatalf("expected the recent molt (88888), got %d", times[0].Unix())
+			times := tc.recentTimes(agentDir, 10)
+			if len(times) != 1 {
+				t.Fatalf("expected the in-tail %s despite huge prefix line, got %d", tc.eventType, len(times))
+			}
+			if times[0].Unix() != tc.hugePrefixUnix {
+				t.Fatalf("expected the recent %s (%d), got %d", tc.eventType, tc.hugePrefixUnix, times[0].Unix())
+			}
+		})
 	}
 }
 
 func TestRecentRebuildTimesMissingLogsIsEmpty(t *testing.T) {
-	times := RecentRebuildTimes(t.TempDir(), 10)
-	if len(times) != 0 {
-		t.Fatalf("expected no markers for missing logs, got %d", len(times))
+	for _, tc := range recentEventTimesCases {
+		t.Run(tc.name, func(t *testing.T) {
+			times := tc.recentTimes(t.TempDir(), 10)
+			if len(times) != 0 {
+				t.Fatalf("expected no %s markers for missing logs, got %d", tc.eventType, len(times))
+			}
+		})
 	}
 }
 
