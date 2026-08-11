@@ -2,8 +2,8 @@
 name: dev-guide-gotchas
 description: >
   Nested lingtai-dev-guide reference for known implementation footguns: Bubble Tea v2 paste, textarea theming, dev-mode rebuilds, editable installs, migrations, localization, authorization gates, config conventions, and rebuild-gate test false-passes.
-version: 1.2.0
-last_changed_at: "2026-08-09T00:00:00Z"
+version: 1.2.1
+last_changed_at: "2026-08-10T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -39,46 +39,17 @@ ta.SetStyles(themedTextareaStyles())
 
 `themedTextareaStyles()` is in the `tui` package — always apply it. A bare `textarea.New()` ships dark default cursor/focus colors that render as a black smear against the warm LingTai theme.
 
-## Dev-mode rebuild gotcha
+## Dev-mode rebuild gotcha (retired)
 
-A stale TUI or portal binary against a freshly-migrated project fails with:
-
-```
-data version N is newer than this binary supports (M); upgrade lingtai-tui
-data version N is newer than this binary supports (M); upgrade lingtai-portal
-```
-
-**Root cause:** TUI and portal share `.lingtai/meta.json`. Any binary whose compiled migration `CurrentVersion` is below the project's `meta.json` version must refuse to open it, or it might misread or downgrade newer state. This happens even when the feature PR you wanted is already on `main` — another local branch or newer dev binary may have already written a higher data version to that project.
-
-**Preflight before replacing a local dev binary for an existing project:**
-
-```bash
-PROJECT=/path/to/project
-CHECKOUT=/path/to/lingtai-checkout
-
-printf 'project meta version: '
-python3 - <<PY
-import json, pathlib
-meta = pathlib.Path('$PROJECT/.lingtai/meta.json')
-print(json.loads(meta.read_text()).get('version') if meta.exists() else '<none>')
-PY
-
-printf 'tui CurrentVersion: '
-grep -R 'const CurrentVersion' "$CHECKOUT/tui/internal/migrate/migrate.go"
-printf 'portal CurrentVersion: '
-grep -R 'const CurrentVersion' "$CHECKOUT/portal/internal/migrate/migrate.go"
-```
-
-If the project's version exceeds the checkout's `CurrentVersion`, **do not install that binary over the user's active `lingtai-tui`**. Build from a checkout/branch that includes the matching migration, or stop and explain that the requested `main` rebuild cannot safely open that project yet. Never "fix" this by editing `meta.json` downward.
-
-**Fix after any migration bump:** rebuild both binaries from the same checkout:
-
-```bash
-cd ~/Documents/GitHub/lingtai/tui && make build
-cd ~/Documents/GitHub/lingtai/portal && make build
-```
-
-The brew-installed pair normally avoids this because released TUI and portal ship together at the same version. Local dev binaries and one-off test overlays are the dangerous case — always preflight before overwriting an active binary for a real project.
+Project migrations are retired: production TUI/Portal no longer read, write,
+advance, or gate on `.lingtai/meta.json`, so a stale dev binary against a newer
+project no longer trips a `data version N is newer than this binary supports`
+gate. No `meta.json` version preflight is needed before replacing a local dev
+binary, and you never "fix" a project by editing `meta.json` downward — the file
+is inert. Rebuilding a fresh binary after ordinary code changes is still the
+right way to make `main` behaviour live; the only live migration surface left is
+the TUI's per-machine `~/.lingtai-tui/` registry (`tui/internal/globalmigrate/`),
+which runs at TUI startup and needs no paired portal bump.
 
 ## Auto-upgrader clobbers editable install
 
@@ -158,36 +129,19 @@ pollution, so use an identity-verified clean relaunch of the agent process (with
 refresh. See `reference/runtime-self-check/SKILL.md` §1 for the full probe and
 relaunch recipe.
 
-## Migration cross-package contract
+## Migration cross-package contract (retired)
 
-TUI and portal share `meta.json` but have separate migration registries. **When adding a TUI migration, you MUST also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`.**
+TUI and portal historically shared `meta.json` and were required to bump
+`CurrentVersion` in lockstep across `tui/internal/migrate/` and
+`portal/internal/migrate/`. That contract is retired: both registries are
+retained as historical/test APIs (m001–m039), and no production binary consults
+`meta.json` or refuses a project on version grounds. Do not reintroduce paired
+project migrations, mirrored `CurrentVersion` bumps, or the `data version N is
+newer than this binary supports` recovery checklist — none of it runs today.
 
-- Migrations touching shared state → implement in both packages with identical logic.
-- TUI-only migrations → add a no-op stub in the portal registry.
-- Otherwise the portal refuses to open any project the TUI has already touched.
-
-### Migration-version / rebuild incident checklist
-
-Follow this whenever you hit `data version N is newer than this binary supports (M)` or suspect a version collision between open branches:
-
-1. **Check the project's stamped version:**
-   ```bash
-   python3 -c "import json,pathlib; print(json.loads(pathlib.Path('.lingtai/meta.json').read_text())['version'])"
-   ```
-
-2. **Check `CurrentVersion` in BOTH packages of the exact checkout being built:**
-   ```bash
-   grep 'const CurrentVersion' tui/internal/migrate/migrate.go portal/internal/migrate/migrate.go
-   ```
-   Both must match. A mismatch means an incomplete bump — the portal refuses any project the TUI has already touched.
-
-3. **After installing or switching dev binaries, launch and smoke-test the target project — not just `--version`.** A binary printing the right version string may still refuse to open a project with a higher `meta.json` version.
-
-4. **Do not install a feature-branch binary that bumps migrations into shared dev projects** unless that migration PR is the intended runtime path or you can roll `main` forward to include it. A single `make build` on the wrong branch contaminates every project it touches.
-
-5. **If two open branches claim the same migration number:** stop — do not build or launch either binary into a shared project. Identify which branch (if any) already migrated real projects to that version. Renumber and combine before any further binary migrates real projects: assign the earlier repair to the lower claimed version, add a combined catch-up at the next free slot, and have the catch-up call the earlier function idempotently. See `tui/internal/migrate/ANATOMY.md` → "Collision-recovery pattern".
-
-6. **Emergency rollback is NOT editing `meta.json` downward.** That corrupts data written by the higher-version migration. The only safe recovery is building and installing a binary whose `CurrentVersion` meets or exceeds the project's current version.
+The only live migration surface is the TUI's per-machine registry
+(`tui/internal/globalmigrate/` under `~/.lingtai-tui/meta.json`), run by the TUI
+alone at startup; Portal has no equivalent and needs no mirror.
 
 ## Three-locale rule
 

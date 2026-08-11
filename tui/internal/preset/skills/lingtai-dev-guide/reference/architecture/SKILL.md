@@ -2,8 +2,8 @@
 name: dev-guide-architecture
 description: >
   Nested lingtai-dev-guide reference for the project architecture: Go TUI/portal monorepo, Python kernel, MCP addon repos, filesystem IPC, and where per-project/per-machine state lives.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.0.1
+last_changed_at: "2026-08-10T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -31,8 +31,8 @@ Key packages in `tui/internal/`:
 |---|---|
 | `tui/` | Bubble Tea models for every screen (~22k LOC) |
 | `preset/` | Atomic `{llm, capabilities}` bundle layer |
-| `migrate/` | Versioned, append-only migration system for `.lingtai/` state |
-| `globalmigrate/` | Per-machine migrations under `~/.lingtai-tui/` |
+| `migrate/` | Retained historical/test migration registry (m001–m039); production startup no longer runs it or advances `.lingtai/meta.json` |
+| `globalmigrate/` | Live per-machine migrations under `~/.lingtai-tui/` (run by the TUI at startup) |
 | `fs/` | Filesystem read accessors into agent working directories |
 | `config/` | Global TUI config under `~/.lingtai-tui/` |
 | `process/` | Subprocess launcher for `python -m lingtai run <dir>` |
@@ -44,7 +44,7 @@ Key packages in `portal/internal/`:
 |---|---|
 | `api/` | HTTP server, handlers, replay endpoint |
 | `fs/` | Filesystem accessors (same shape as TUI's, portal-tailored) |
-| `migrate/` | Versioned migrations (shares `meta.json` version space with TUI) |
+| `migrate/` | Retained historical migration registry/tests (m001–m039); Portal production does not run it |
 | `web/` | React 19 + TypeScript + Vite frontend (embedded into Go binary) |
 
 ### `lingtai-kernel` — Python kernel
@@ -80,7 +80,7 @@ other side poll).
 
 **TUI → filesystem (read):** `.agent.json`, `.agent.heartbeat`, `mailbox/`, `logs/token_ledger.jsonl`, `history/chat_history.jsonl`, `system/*.md`, `.notification/*.json`.
 
-**TUI → filesystem (write):** Signal files only: `.sleep`, `.suspend`, `.interrupt`, `.clear`, `.prompt`, `.refresh`, `.inquiry`, `.forget`. Plus `init.json` via explicit user actions.
+**TUI → filesystem (write):** Signal files only: `.sleep`, `.suspend`, `.interrupt`, `.clear`, `.prompt`, `.refresh`, `.inquiry`. Plus `init.json` via explicit user actions.
 
 **TUI ↔ Homebrew tap:** Pushing a release tag runs the root release workflow, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`.
 
@@ -103,7 +103,7 @@ other side poll).
 
 ```
 .lingtai/
-├── meta.json                    # migration version stamp (shared TUI + portal)
+├── meta.json                    # legacy migration metadata (neither binary reads or advances it)
 ├── <agent>/
 │   ├── init.json                # agent's preset manifest
 │   ├── .agent.json              # written by agent, read by TUI/portal
@@ -132,7 +132,7 @@ other side poll).
 
 ```
 ~/.lingtai-tui/
-├── meta.json                    # global migration version stamp
+├── meta.json                    # live global migration version stamp (tui/internal/globalmigrate/)
 ├── tui_config.json              # global TUI preferences
 ├── runtime/venv/                # Python venv with `lingtai` installed
 ├── presets/
