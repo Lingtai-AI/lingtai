@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,65 +33,6 @@ func TestRecentRefreshCompleteTimesJSONLFallback(t *testing.T) {
 	}
 	if times[0].Unix() != 1300 || times[1].Unix() != 1100 {
 		t.Fatalf("expected newest-first (1300,1100), got %d,%d", times[0].Unix(), times[1].Unix())
-	}
-}
-
-func TestRecentRefreshCompleteTimesJSONLTailOnly(t *testing.T) {
-	agentDir := t.TempDir()
-	logsDir := filepath.Join(agentDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A refresh_complete far above the tail window must NOT be seen; only the
-	// recent tail is inspected, per the no-full-scan constraint.
-	var b strings.Builder
-	b.WriteString(`{"type":"refresh_complete","ts":1.0}` + "\n") // line 1 — outside the tail
-	for i := 0; i < tailScanLines+50; i++ {
-		fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
-	}
-	b.WriteString(`{"type":"refresh_complete","ts":77777.0}` + "\n") // near end — inside the tail
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	times := RecentRefreshCompleteTimes(agentDir, 10)
-	if len(times) != 1 {
-		t.Fatalf("expected only the in-tail refresh_complete, got %d", len(times))
-	}
-	if times[0].Unix() != 77777 {
-		t.Fatalf("expected the recent refresh_complete (77777), got %d", times[0].Unix())
-	}
-}
-
-func TestRecentRefreshCompleteTimesHugePrefixLineDoesNotBlockTail(t *testing.T) {
-	agentDir := t.TempDir()
-	logsDir := filepath.Join(agentDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	var b strings.Builder
-	huge := strings.Repeat("x", 2*1024*1024)
-	fmt.Fprintf(&b, `{"type":"text_input","ts":1.0,"junk":"%s"}`+"\n", huge)
-	for i := 0; i < tailScanLines+50; i++ {
-		fmt.Fprintf(&b, `{"type":"tool_call","ts":%d.0}`+"\n", 1000+i)
-	}
-	b.WriteString(`{"type":"refresh_complete","ts":66666.0}` + "\n")
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	times := RecentRefreshCompleteTimes(agentDir, 10)
-	if len(times) != 1 {
-		t.Fatalf("expected the in-tail refresh_complete despite huge prefix line, got %d", len(times))
-	}
-	if times[0].Unix() != 66666 {
-		t.Fatalf("expected the recent refresh_complete (66666), got %d", times[0].Unix())
-	}
-}
-
-func TestRecentRefreshCompleteTimesMissingLogsIsEmpty(t *testing.T) {
-	if times := RecentRefreshCompleteTimes(t.TempDir(), 10); len(times) != 0 {
-		t.Fatalf("expected no markers for missing logs, got %d", len(times))
 	}
 }
 

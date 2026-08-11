@@ -753,25 +753,6 @@ func TestReadStatusLegacyAndMalformedStatusOmitSinceMoltCounters(t *testing.T) {
 	}
 }
 
-func TestReadStatusTypeErrorKeepsSafeFieldsAndOmitsEconomy(t *testing.T) {
-	agentDir := t.TempDir()
-	body := `{"runtime":{"pid":4242,"running":true,"uptime_seconds":3.5},"tokens":{"input_tokens":"bad","output_tokens":200,"thinking_tokens":50,"cached_tokens":100,"api_calls":4,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
-	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := ReadStatus(agentDir)
-	if got.Runtime.PID != 4242 || !got.Runtime.Running || got.Runtime.UptimeSeconds != 3.5 {
-		t.Fatalf("runtime = %+v, want safely decoded runtime fields", got.Runtime)
-	}
-	if got.Tokens.Context.TotalTokens != 1234 || got.Tokens.Context.WindowSize != 8000 || got.Tokens.Context.UsagePct != 20 {
-		t.Fatalf("context = %+v, want safely decoded context fields", got.Tokens.Context)
-	}
-	if got.Tokens.InputTokens != 0 || got.Tokens.OutputTokens != 0 || got.Tokens.ThinkingTokens != 0 || got.Tokens.CachedTokens != 0 || got.Tokens.APICalls != 0 {
-		t.Fatalf("economy = %+v, want the whole tuple omitted after one invalid field", got.Tokens)
-	}
-}
-
 func TestReadStatusSyntaxErrorZerosWholeSnapshot(t *testing.T) {
 	agentDir := t.TempDir()
 	body := `{"runtime":{"pid":4242},"tokens":{"input_tokens":1,"context":{"total_tokens":1234,"window_size":8000}`

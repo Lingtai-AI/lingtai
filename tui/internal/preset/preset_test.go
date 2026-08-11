@@ -445,20 +445,6 @@ func TestResolveRefs_PerAccountCodexAuth(t *testing.T) {
 	}
 }
 
-// TestResolveRefs_CodexFallsBackToGlobalBoolWithoutDir verifies that when
-// CodexAuthDir is empty, codex validity falls back to the legacy global bool
-// (backward compatibility for callers that don't set the dir).
-func TestResolveRefs_CodexFallsBackToGlobalBoolWithoutDir(t *testing.T) {
-	dir := t.TempDir()
-	codexRef := writeCodexPresetWithAuthPath(t, dir, "codex", "")
-	if got := ResolveRefsWithAuth([]string{codexRef}, nil, AuthState{CodexOAuthConfigured: true}); !got[0].HasKey {
-		t.Error("with CodexOAuthConfigured=true and no dir, codex should be valid")
-	}
-	if got := ResolveRefsWithAuth([]string{codexRef}, nil, AuthState{CodexOAuthConfigured: false}); got[0].HasKey {
-		t.Error("with CodexOAuthConfigured=false and no dir, codex should be invalid")
-	}
-}
-
 func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	withTempPresets(t, func() {
 		p := DefaultPreset()

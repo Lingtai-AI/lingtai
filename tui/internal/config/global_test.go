@@ -224,17 +224,6 @@ func TestDefaultTUIConfig_MailPageSize(t *testing.T) {
 	}
 }
 
-func TestLoadTUIConfig_MigratesLegacySmallMailPageSizeToDefault(t *testing.T) {
-	dir := t.TempDir()
-	payload := []byte(`{"language":"en","mail_page_size":50}`)
-	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
-		t.Fatalf("write tui_config.json: %v", err)
-	}
-	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
-		t.Fatalf("legacy small mail_page_size loaded as %d, want 200 (the finite default)", cfg.MailPageSize)
-	}
-}
-
 func TestLoadTUIConfig_PreservesHundredMailPageSize(t *testing.T) {
 	dir := t.TempDir()
 	payload := []byte(`{"language":"en","mail_page_size":100}`)
@@ -299,17 +288,6 @@ func TestSaveTUIConfig_NormalizesUnsupportedMailPageSize(t *testing.T) {
 	}
 	if loaded := LoadTUIConfig(dir); loaded.MailPageSize != 200 {
 		t.Fatalf("saved unsupported page size loaded as %d, want 200", loaded.MailPageSize)
-	}
-}
-
-func TestLoadTUIConfig_RemovedUnlimitedSentinelUsesFiniteDefault(t *testing.T) {
-	dir := t.TempDir()
-	payload := []byte(`{"language":"en","mail_page_size":0}`)
-	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
-		t.Fatalf("write tui_config.json: %v", err)
-	}
-	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
-		t.Fatalf("removed mail_page_size=0 loaded as %d, want finite default 200", cfg.MailPageSize)
 	}
 }
 

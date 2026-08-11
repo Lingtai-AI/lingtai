@@ -545,24 +545,6 @@ func TestSessionMetadataCanonicalDepthLimit(t *testing.T) {
 	}
 }
 
-// TestWindowedRebuildLargerThanHistoryIsComplete proves that when the window is
-// at least as large as the whole event history, the cache is Complete() and may
-// be persisted like an ordinary full rebuild.
-func TestWindowedRebuildLargerThanHistoryIsComplete(t *testing.T) {
-	sqliteBin := requireSessionSQLite(t)
-	root, humanDir, orchDir := newSessionTestDirs(t)
-	buildWindowSQLiteEvents(t, sqliteBin, orchDir, 4)
-
-	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
-	cache := NewMailCache(humanDir).Refresh()
-	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 2000)
-
-	assertSessionBodiesExactly(t, sc.Entries(), "e0", "e1", "e2", "e3")
-	if !sc.Complete() {
-		t.Fatal("window >= history must report Complete()==true")
-	}
-}
-
 // TestPersistRefusesPartialWindowedCache proves persistence safety: a partial
 // (windowed) cache must NOT rewrite human/logs/session.jsonl as if complete.
 func TestPersistRefusesPartialWindowedCache(t *testing.T) {

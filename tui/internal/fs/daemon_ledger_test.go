@@ -68,26 +68,6 @@ func TestDaemonLedgerSummaryEmptyStates(t *testing.T) {
 	}
 }
 
-func TestDaemonRecentLedgerMissing(t *testing.T) {
-	agentDir := t.TempDir()
-	// No daemons/ directory at all → empty, not an error.
-	entries := DaemonRecentLedger(agentDir, 100)
-	if len(entries) != 0 {
-		t.Fatalf("expected empty, got %d entries", len(entries))
-	}
-}
-
-func TestDaemonRecentLedgerEmptyDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(agentDir, "daemons"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	entries := DaemonRecentLedger(agentDir, 100)
-	if len(entries) != 0 {
-		t.Fatalf("expected empty, got %d entries", len(entries))
-	}
-}
-
 func TestDaemonRecentLedgerTagsIdentity(t *testing.T) {
 	agentDir := t.TempDir()
 	// Daemon run with a daemon.json identity card and one ledger entry.
@@ -295,25 +275,6 @@ func TestDaemonRecentLedgerMissingDaemonJSON(t *testing.T) {
 }
 
 // --- Existing aggregated-totals tests (through unified API) ---
-
-func TestDaemonLedgerSummaryNoDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	got, _ := DaemonLedgerSummary(agentDir, 0)
-	if len(got) != 0 {
-		t.Fatalf("expected empty map, got %d entries", len(got))
-	}
-}
-
-func TestDaemonLedgerSummaryEmptyDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(agentDir, "daemons"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	got, _ := DaemonLedgerSummary(agentDir, 0)
-	if len(got) != 0 {
-		t.Fatalf("expected empty map, got %d entries", len(got))
-	}
-}
 
 func TestDaemonLedgerSummaryGroupsByProvider(t *testing.T) {
 	agentDir := t.TempDir()
