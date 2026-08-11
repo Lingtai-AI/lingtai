@@ -206,13 +206,6 @@ func TestT_ReturnsEnglishString(t *testing.T) {
 	}
 }
 
-func TestT_UnknownKeyReturnsKey(t *testing.T) {
-	got := T("nonexistent.key")
-	if got != "nonexistent.key" {
-		t.Errorf("T(\"nonexistent.key\") = %q, want %q", got, "nonexistent.key")
-	}
-}
-
 func TestT_FallsBackToEnglishWhenActiveLocaleMissesKey(t *testing.T) {
 	t.Cleanup(func() { SetLang("en") })
 

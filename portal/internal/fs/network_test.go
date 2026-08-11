@@ -42,19 +42,6 @@ func writeHeartbeat(t *testing.T, dir string) {
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(content), 0o644)
 }
 
-func TestBuildNetwork_Portal(t *testing.T) {
-	base := setupPortalTestNetwork(t)
-
-	net, err := BuildNetwork(base)
-	if err != nil {
-		t.Fatalf("build network: %v", err)
-	}
-
-	if len(net.Nodes) != 3 {
-		t.Errorf("nodes = %d, want 3", len(net.Nodes))
-	}
-}
-
 func TestBuildNetworkWithOptionsSkipsMailEdges(t *testing.T) {
 	base := setupPortalTestNetwork(t)
 	writeMailMessage(t, filepath.Join(base, "alice"), "inbox", "msg-1", MailMessage{

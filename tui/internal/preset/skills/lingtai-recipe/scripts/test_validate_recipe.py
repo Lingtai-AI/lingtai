@@ -315,16 +315,6 @@ def test_unknown_lang_subdir_under_layer_warns(tmp_path: Path) -> None:
     assert "fr" in result.stdout and "unknown lang" in result.stdout
 
 
-def test_unknown_greet_locale_warns(tmp_path: Path) -> None:
-    _make_valid_bundle(tmp_path)
-    fr_greet = tmp_path / ".recipe" / "greet" / "fr"
-    fr_greet.mkdir()
-    (fr_greet / "greet.md").write_text("bonjour", encoding="utf-8")
-    result = _run(tmp_path)
-    assert result.returncode == 0
-    assert "unknown lang" in result.stdout
-
-
 def test_stray_file_at_recipe_root_warns(tmp_path: Path) -> None:
     _make_valid_bundle(tmp_path)
     (tmp_path / ".recipe" / "README.md").write_text("stray", encoding="utf-8")

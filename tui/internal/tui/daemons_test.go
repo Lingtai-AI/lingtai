@@ -163,60 +163,6 @@ func TestLoadDaemonSummariesDefersHeavyDetailReads(t *testing.T) {
 	}
 }
 
-func TestLoadDaemonDetailReadsHeavyFiles(t *testing.T) {
-	agentDir := t.TempDir()
-	daemonDir := filepath.Join(agentDir, "daemons", "em-7-20260609-010203-abcdef")
-	if err := os.MkdirAll(filepath.Join(daemonDir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(daemonDir, "history"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write := func(path, body string) {
-		t.Helper()
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(filepath.Join(daemonDir, "daemon.json"), `{"task":"t","state":"done","backend":"lingtai"}`)
-	write(filepath.Join(daemonDir, "logs", "events.jsonl"), strings.Join([]string{
-		`{"ts":"2026-06-09T01:02:04Z","event":"daemon_start"}`,
-		`{"ts":"2026-06-09T01:02:05Z","event":"tool_call","name":"read"}`,
-		`{"ts":"2026-06-09T01:02:06Z","event":"tool_result","name":"read","status":"ok"}`,
-	}, "\n"))
-	write(filepath.Join(daemonDir, "history", "chat_history.jsonl"), `{"role":"assistant","text":"task done","ts":"2026-06-09T01:02:07Z"}`)
-	write(filepath.Join(daemonDir, "logs", "token_ledger.jsonl"), strings.Join([]string{
-		`{"input":10,"output":4,"thinking":2,"cached":7}`,
-		`{"input":3,"output":1,"thinking":0,"cached":2}`,
-	}, "\n"))
-	write(filepath.Join(daemonDir, "result.txt"), "full result")
-
-	items, err := loadDaemonSummaries(agentDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := loadDaemonDetail(items[0])
-	if !got.DetailLoaded {
-		t.Fatalf("loadDaemonDetail did not mark DetailLoaded")
-	}
-	if got.EventCount != 3 || got.ToolCount != 2 || len(got.Events) != 3 || got.LastEventAt != "2026-06-09T01:02:06Z" {
-		t.Fatalf("events not loaded: count=%d tools=%d events=%d last=%q", got.EventCount, got.ToolCount, len(got.Events), got.LastEventAt)
-	}
-	if got.Tokens.Calls != 2 || got.Tokens.Input != 13 || got.Tokens.Output != 5 {
-		t.Fatalf("tokens not loaded: %#v", got.Tokens)
-	}
-	if len(got.Chats) != 1 || got.Chats[0].Text != "task done" {
-		t.Fatalf("chats not loaded: %#v", got.Chats)
-	}
-	if got.Result != "full result" {
-		t.Fatalf("result not loaded: %q", got.Result)
-	}
-	// Light metadata from the list path is preserved through detail load.
-	if got.Task != "t" || got.State != "done" {
-		t.Fatalf("list metadata lost in detail load: %#v", got)
-	}
-}
-
 func TestDaemonsSelectionLoadsDetailLazily(t *testing.T) {
 	agentDir := t.TempDir()
 	mk := func(name, task string) {

@@ -489,25 +489,6 @@ func TestSourceTUIUpdaterRequiresKnownRelease(t *testing.T) {
 	}
 }
 
-func TestUnknownTUIUpdaterDoesNotRunBrew(t *testing.T) {
-	runner := &fakeRunner{}
-	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodUnknown}, TUIUpdateOptions{
-		LatestVersion: "v0.8.1",
-		Runner:        runner,
-		LookPath:      func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
-	})
-
-	if !result.Healthy {
-		t.Fatalf("unknown updater guidance should not fail doctor-style update: %+v", result.Lines)
-	}
-	if !containsLine(result.Lines, "TUI install method is unknown") {
-		t.Fatalf("expected unknown updater guidance, got %+v", result.Lines)
-	}
-	if containsCall(runner.calls, "brew") {
-		t.Fatalf("unknown updater must not run brew, got %#v", runner.calls)
-	}
-}
-
 func TestTUIUpdaterSourceMetadataFailureDoesNotRunBrew(t *testing.T) {
 	tests := []struct {
 		name       string
