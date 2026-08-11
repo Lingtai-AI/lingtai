@@ -63,7 +63,10 @@ func (s *Server) Start(portFile, host string, fixedPort int) error {
 	s.host = effectiveHost
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	if portFile != "" {
-		os.WriteFile(portFile, []byte(fmt.Sprintf("%d", s.port)), 0o644)
+		if err := os.WriteFile(portFile, []byte(fmt.Sprintf("%d", s.port)), 0o644); err != nil {
+			ln.Close()
+			return fmt.Errorf("publish discovery port: write %s: %w", portFile, err)
+		}
 	}
 	go s.httpServer.Serve(ln)
 	return nil
