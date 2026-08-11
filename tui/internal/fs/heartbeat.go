@@ -8,7 +8,13 @@ import (
 	"time"
 )
 
-const AgentAliveThresholdSec = 2.0
+// AgentAliveThresholdSec is the heartbeat-liveness window shared with the
+// kernel. The kernel fixes the heartbeat tick at one second and liveness at
+// five ticks (src/lingtai/kernel/config.py:132-133), and applies a strict
+// age < threshold comparison (src/lingtai/kernel/agent_presence/__init__.py).
+// Go consumers must use the same window and the same strict boundary so a
+// live agent is never reported dead or suspended (issue #845).
+const AgentAliveThresholdSec = 5.0
 
 type HeartbeatStatus struct {
 	Exists     bool    `json:"exists"`

@@ -26,7 +26,7 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 		if nodes[i].IsHuman {
 			nodes[i].Alive = true
 		} else {
-			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, 2.0)
+			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec)
 			// Heartbeat is ground truth — no heartbeat means SUSPENDED
 			if !nodes[i].Alive && nodes[i].State != "" {
 				nodes[i].State = "SUSPENDED"
