@@ -11,6 +11,7 @@ import (
 
 // agentManifest is the raw JSON shape of .agent.json.
 type agentManifest struct {
+	AgentID   string           `json:"agent_id"` // kernel-published stable identity; empty on older manifests
 	AgentName string           `json:"agent_name"`
 	Nickname  string           `json:"nickname"`
 	Address   string           `json:"address"`
@@ -41,6 +42,7 @@ func ReadAgent(dir string) (AgentNode, error) {
 	caps := ParseCapabilities(m.Capabilities)
 
 	return AgentNode{
+		AgentID:      m.AgentID,
 		Address:      m.Address,
 		AgentName:    m.AgentName,
 		Nickname:     m.Nickname,
@@ -198,6 +200,14 @@ func ReadAgentRaw(dir string) (map[string]interface{}, error) {
 }
 
 // DiscoverAgents scans baseDir for subdirectories with .agent.json manifests.
+//
+// Manifest presence is tri-state, mirroring the kernel: a directory whose
+// manifest is absent is not an agent and is excluded, while a directory whose
+// manifest is present but unreadable, unparseable, or not an object is
+// malformed but still identifies an agent by file presence. Malformed
+// manifests therefore stay discoverable as repair targets, surfaced with an
+// explicit MALFORMED state and the read/parse error, instead of being
+// silently omitted (issue #846).
 func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
@@ -210,13 +220,33 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 			continue
 		}
 		agentDir := filepath.Join(baseDir, entry.Name())
+		if _, err := os.Stat(filepath.Join(agentDir, ".agent.json")); err != nil {
+			if os.IsNotExist(err) {
+				continue // no manifest: not an agent
+			}
+			// Present but not stat-able: keep it discoverable for repair.
+			nodes = append(nodes, malformedAgentNode(agentDir, fmt.Errorf("stat manifest: %w", err)))
+			continue
+		}
 		node, err := ReadAgent(agentDir)
 		if err != nil {
-			continue // skip non-agent dirs
+			nodes = append(nodes, malformedAgentNode(agentDir, err))
+			continue
 		}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
+}
+
+// malformedAgentNode builds the node for a directory whose .agent.json is
+// present but cannot be read or parsed. The node keeps the agent visible in
+// the topology with an explicit error/repair state.
+func malformedAgentNode(dir string, err error) AgentNode {
+	return AgentNode{
+		State:      "MALFORMED",
+		Error:      err.Error(),
+		WorkingDir: dir,
+	}
 }
 
 // AgentStatus holds live runtime status from .status.json, the same snapshot

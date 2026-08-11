@@ -13,15 +13,21 @@ type Location struct {
 
 // AgentNode represents a discovered agent in the network.
 type AgentNode struct {
-	Address      string   `json:"address"`
-	AgentName    string   `json:"agent_name"`
-	Nickname     string   `json:"nickname"`
-	State        string   `json:"state"`
-	Alive        bool     `json:"alive"`
-	IsHuman      bool     `json:"is_human"`
-	Capabilities []string `json:"capabilities"`
+	AgentID      string    `json:"agent_id"` // kernel-published stable identity; empty on older manifests that omit it
+	Address      string    `json:"address"`
+	AgentName    string    `json:"agent_name"`
+	Nickname     string    `json:"nickname"`
+	State        string    `json:"state"`
+	Alive        bool      `json:"alive"`
+	IsHuman      bool      `json:"is_human"`
+	Capabilities []string  `json:"capabilities"`
 	Location     *Location `json:"location,omitempty"`
-	WorkingDir   string   `json:"-"` // not serialized to API
+	// Error is set when .agent.json is present but unreadable or malformed:
+	// the directory still identifies an agent and stays discoverable as a
+	// repair target (issue #846). Absent manifests are not agents and are
+	// excluded without an error.
+	Error      string `json:"error,omitempty"`
+	WorkingDir string `json:"-"` // not serialized to API
 }
 
 // AvatarEdge is a parent → child spawning relationship.
@@ -70,14 +76,14 @@ type Network struct {
 
 // MailMessage is the schema for messages written to mailbox/inbox/{uuid}/message.json.
 type MailMessage struct {
-	ID         string                 `json:"id"`
-	MailboxID  string                 `json:"_mailbox_id"`
-	From       string                 `json:"from"`
-	To         interface{}            `json:"to"` // string or []string
-	CC         []string               `json:"cc"`
-	BCC        []string               `json:"bcc"`
-	Subject    string                 `json:"subject"`
-	Message    string                 `json:"message"`
+	ID          string                 `json:"id"`
+	MailboxID   string                 `json:"_mailbox_id"`
+	From        string                 `json:"from"`
+	To          interface{}            `json:"to"` // string or []string
+	CC          []string               `json:"cc"`
+	BCC         []string               `json:"bcc"`
+	Subject     string                 `json:"subject"`
+	Message     string                 `json:"message"`
 	Type        string                 `json:"type"`
 	ReceivedAt  string                 `json:"received_at"`
 	SentAt      string                 `json:"sent_at,omitempty"`

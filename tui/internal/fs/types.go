@@ -22,7 +22,12 @@ type AgentNode struct {
 	IsHuman      bool      `json:"is_human"`
 	Capabilities []string  `json:"capabilities"`
 	Location     *Location `json:"location,omitempty"`
-	WorkingDir   string    `json:"-"` // not serialized to API
+	// Error is set when .agent.json is present but unreadable or malformed:
+	// the directory still identifies an agent and stays discoverable as a
+	// repair target (issue #846). Absent manifests are not agents and are
+	// excluded without an error.
+	Error      string `json:"error,omitempty"`
+	WorkingDir string `json:"-"` // not serialized to API
 }
 
 // AvatarEdge is a parent → child spawning relationship.
