@@ -40,6 +40,14 @@ after a successful update.
   below instead of brew.
 - Source/user-local: runs the versioned `install.sh --update --prefix ...
   --version <tag> --non-interactive` path and verifies the result.
+
+If a legacy `~/.lingtai-tui/runtime` exists before a native receipt, the
+installer's documented recovery path is a TUI-only install with
+`--skip-python` (or `--skip-venv`): it preserves that runtime unchanged and
+publishes the native binaries/receipt beside it. Use the standalone `fix.sh`
+with an explicitly named free runtime child only after reviewing its
+read-only diagnosis; it must create a parallel runtime and never overwrite the
+legacy one.
 - Unknown/other or non-comparable/dev versions: reports guidance and does not
   guess a package manager.
 

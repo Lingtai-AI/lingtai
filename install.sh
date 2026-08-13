@@ -187,7 +187,10 @@ Options:
   --skip-python         Do not create/update the Python runtime venv (explicit
                          opt-out; required when a pinned kernel bundle is
                          unavailable and you still want TUI-only binaries).
-                         --skip-venv is a back-compat alias.
+                         If a legacy ~/.lingtai-tui/runtime directory already
+                         exists without a native install receipt, it is
+                         preserved unchanged so TUI/portal binaries can be
+                         installed beside it. --skip-venv is a back-compat alias.
   --source <mode>       auto|github|gitee (default: auto, or $LINGTAI_SOURCE).
                          auto prefers Gitee for mainland-China public IPs via
                          a bounded, fail-open country lookup; an explicit
@@ -201,10 +204,16 @@ Binaries install to --bin-dir/--prefix if given, otherwise a writable
 built from source but npm is missing. The Python runtime venv lives at
 ~/.lingtai-tui/runtime/venv.
 
-For an exact-artifact update, bounded repair, read-only verification, an
-explicit editable development install, or full removal of an existing
-installation, use the standalone maintenance entrypoints instead of this
-script: update.sh, fix.sh, verify.sh, dev.sh, remove.sh (each has its own
+For a Homebrew-to-native migration with a legacy ~/.lingtai-tui/runtime but
+no native install receipt, preserve that runtime and install only the native
+TUI/portal targets with:
+  curl -fsSL https://lingtai.ai/install.sh | bash -s -- --version vX.Y.Z --non-interactive --skip-python
+This creates a native receipt without adopting or changing the legacy runtime.
+Provision or repair a separate runtime only after reviewing the exact
+postconditions. For an exact-artifact update, bounded repair, read-only
+verification, an explicit editable development install, or full removal of an
+existing installation, use the standalone maintenance entrypoints instead of
+this script: update.sh, fix.sh, verify.sh, dev.sh, remove.sh (each has its own
 --help). See ANATOMY.md for their exact preconditions, allowed writes, and
 postconditions.
 EOF
@@ -2179,7 +2188,10 @@ validate_install_target() {
 # install receipt or runtime root — checked before any target creation,
 # release resolution, download, or binary/runtime mutation, so a different
 # empty --bin-dir cannot turn ordinary install into silent adoption of
-# pre-existing state elsewhere under $HOME/.lingtai-tui.
+# pre-existing state elsewhere under $HOME/.lingtai-tui. A deliberate
+# --skip-python TUI-only install is the one safe exception for an existing,
+# real runtime directory: it does not inspect, adopt, repair, or overwrite that
+# legacy runtime, and records no runtime pointer until a later explicit setup.
 validate_fresh_install_state() {
   local state_root="$HOME/.lingtai-tui"
   local metadata="$state_root/install.json"
@@ -2190,8 +2202,12 @@ validate_fresh_install_state() {
     return 1
   fi
   if [[ -e "$runtime_root" || -L "$runtime_root" ]]; then
+    if [[ "$SKIP_VENV" == "1" && -d "$runtime_root" && ! -L "$runtime_root" ]]; then
+      note "Preserving existing runtime state at $runtime_root (--skip-python); no runtime will be adopted or changed."
+      return 0
+    fi
     echo "error: existing runtime state $runtime_root was found; ordinary install will not adopt or repair it." >&2
-    echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation." >&2
+    echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or pass --skip-python for a TUI/portal-only install that preserves the runtime." >&2
     return 1
   fi
 }

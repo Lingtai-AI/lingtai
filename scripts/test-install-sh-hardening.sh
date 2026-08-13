@@ -198,11 +198,54 @@ EOF
   fi
   rm -f "$fresh_home/.lingtai-tui/install.json"
 
-  # An existing runtime root (even without a receipt) must also be refused.
+  # An existing runtime root (even without a receipt) must also be refused
+  # for a normal install.
   mkdir -p "$fresh_home/.lingtai-tui/runtime"
   if validate_fresh_install_state >/dev/null 2>&1; then
     fail "validate_fresh_install_state must refuse an existing runtime root"
   fi
+
+  # Homebrew-to-native migration uses --skip-python to create the missing
+  # native TUI target without adopting, repairing, or overwriting a legacy
+  # runtime. The root must remain the same real directory and no receipt is
+  # created by this validation step.
+  SKIP_VENV=1
+  validate_fresh_install_state || fail "--skip-python must allow a real legacy runtime root to be preserved for a TUI-only install"
+  [[ -d "$fresh_home/.lingtai-tui/runtime" && ! -L "$fresh_home/.lingtai-tui/runtime" ]] ||
+    fail "--skip-python must preserve the legacy runtime root unchanged"
+  printf 'legacy-runtime-sentinel\n' > "$fresh_home/.lingtai-tui/runtime/legacy.txt"
+
+  # The TUI-only path can publish a native receipt without claiming ownership
+  # of the legacy runtime. This is the postcondition needed for a later
+  # explicit fix.sh repair into a parallel runtime.
+  global_dir="$fresh_home/.lingtai-tui"
+  SKIP_VENV=1
+  RUNTIME_VENV_DIR=""
+  KERNEL_SOURCE=""
+  INSTALL_KIND="release-asset"
+  UPDATE_MODE=0
+  LATEST_MAIN_MODE=0
+  REINSTALL_OK=0
+  write_install_metadata \
+    "$global_dir" "$fresh_home" "$BIN_DIR" "https://example.test/repo.git" \
+    "v1.2.3" "v1.2.3" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "v1.2.3" \
+    "$BIN_DIR/lingtai-tui" "" || fail "--skip-python TUI-only install should publish native receipt"
+  [[ -f "$global_dir/install.json" ]] || fail "--skip-python TUI-only install should create install.json"
+  [[ "$(cat "$fresh_home/.lingtai-tui/runtime/legacy.txt")" == "legacy-runtime-sentinel" ]] ||
+    fail "--skip-python TUI-only install must not modify legacy runtime contents"
+  if python3 - "$global_dir/install.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    data = json.load(stream)
+if "runtime_venv" in data:
+    raise SystemExit("runtime_venv pointer must be omitted when --skip-python preserves legacy state")
+PY
+  then
+    :
+  else
+    fail "--skip-python TUI-only receipt must not claim a runtime pointer"
+  fi
+  SKIP_VENV=0
 )
 
 # --- write_install_metadata: exclusive-create / no-clobber on fresh install -
