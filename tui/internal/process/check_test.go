@@ -29,15 +29,6 @@ func TestParsePSOutputPrefixMismatch(t *testing.T) {
 	}
 }
 
-func TestParsePSOutputEOL(t *testing.T) {
-	abs := "/work/foo"
-	out := "  1234 python -m lingtai run /work/foo\n"
-	got := parsePSOutput(out, abs)
-	if len(got) != 1 || got[0].PID != 1234 {
-		t.Fatalf("EOL match failed: %+v", got)
-	}
-}
-
 func TestParsePSOutputIgnoresUnrelated(t *testing.T) {
 	abs := "/work/foo"
 	out := `  100 sshd

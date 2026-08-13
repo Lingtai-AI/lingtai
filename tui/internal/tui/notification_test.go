@@ -103,11 +103,6 @@ func TestNotificationModelNoSnapshots(t *testing.T) {
 	}
 }
 
-// TestNotificationModelNoBlocks is a backward-compat alias for TestNotificationModelNoSnapshots.
-func TestNotificationModelNoBlocks(t *testing.T) {
-	TestNotificationModelNoSnapshots(t)
-}
-
 // TestNotificationModelWithSnapshots exercises snapshot loading and renders actual block content.
 func TestNotificationModelWithSnapshots(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -156,12 +151,6 @@ func TestNotificationModelWithSnapshots(t *testing.T) {
 			t.Fatalf("all blocks entry should contain %q: %s", want, content)
 		}
 	}
-}
-
-// TestNotificationModelWithBlocks delegates to TestNotificationModelWithSnapshots
-// for backward compatibility with test names.
-func TestNotificationModelWithBlocks(t *testing.T) {
-	TestNotificationModelWithSnapshots(t)
 }
 
 // TestNotificationModelNavigation checks left/right key navigation among snapshots.
@@ -512,42 +501,6 @@ func makeNotificationSnapshotDB(t *testing.T, bin string, fieldsJSONs []string) 
 	}
 	if out, err := exec.Command(bin, db, sql).CombinedOutput(); err != nil {
 		t.Fatalf("makeNotificationSnapshotDB: %v\n%s", err, out)
-	}
-	return agentDir
-}
-
-// makeNotificationDB is a legacy helper retained for existing tests that
-// insert notification_pair_injected rows to test the query layer directly.
-func makeNotificationDB(t *testing.T, bin string, fieldsJSONs []string) string {
-	t.Helper()
-	agentDir := t.TempDir()
-	logsDir := filepath.Join(agentDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	db := filepath.Join(logsDir, "log.sqlite")
-	sql := `CREATE TABLE events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		ts REAL NOT NULL,
-		type TEXT NOT NULL,
-		agent_address TEXT,
-		fields_json TEXT NOT NULL DEFAULT '{}',
-		source_file TEXT,
-		source_offset INTEGER,
-		source_line INTEGER,
-		source_kind TEXT,
-		scope TEXT,
-		run_id TEXT,
-		inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-	);`
-	for i, fj := range fieldsJSONs {
-		sql += fmt.Sprintf(
-			"\nINSERT INTO events(ts,type,fields_json) VALUES(%d.0,'notification_pair_injected','%s');",
-			1000+i, fj,
-		)
-	}
-	if out, err := exec.Command(bin, db, sql).CombinedOutput(); err != nil {
-		t.Fatalf("makeNotificationDB: %v\n%s", err, out)
 	}
 	return agentDir
 }

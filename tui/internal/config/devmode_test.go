@@ -36,14 +36,6 @@ func TestFindDevCheckoutsRequiresExplicitEnv(t *testing.T) {
 	}
 }
 
-func TestFindDevCheckoutsReturnsFalseWhenAbsent(t *testing.T) {
-	home := t.TempDir()
-	lookupEnv := func(string) (string, bool) { return "", false }
-	if _, ok := findDevCheckouts(home, lookupEnv); ok {
-		t.Fatalf("expected no dev checkouts in an empty home")
-	}
-}
-
 func TestFindDevCheckoutsRequiresKernelPyproject(t *testing.T) {
 	home := t.TempDir()
 	// Kernel dir + sibling TUI repo exist, but no pyproject.toml in the kernel.

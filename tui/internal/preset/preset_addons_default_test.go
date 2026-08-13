@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -290,15 +289,5 @@ func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
 	}
 	if names["imap;rm"] {
 		t.Errorf("invalid legacy key must not be preserved, got %v", addons)
-	}
-}
-
-// Cosmetic: confirm runtime.GOOS-aware venv python path resolution
-// produces a sensible string. Not a behavior test; just makes sure the
-// fragment matching in TestGenerateInitJSONWritesNewShapeWithLocalVenv
-// uses the right separator on Windows.
-func TestVenvPythonPathFragment(t *testing.T) {
-	if runtime.GOOS == "windows" && filepath.Separator != '\\' {
-		t.Errorf("unexpected separator on windows: %q", filepath.Separator)
 	}
 }

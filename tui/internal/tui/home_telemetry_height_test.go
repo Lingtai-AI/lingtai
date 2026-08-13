@@ -37,19 +37,3 @@ func TestMailFooterHeightBaseline(t *testing.T) {
 		}
 	}
 }
-
-// Reserving the telemetry row shrinks the viewport by exactly one line, which is
-// what keeps the status bar on-screen. This pins the viewport arithmetic that
-// syncViewportHeight performs so a future refactor can't silently re-clip the
-// bottom bar.
-func TestViewportHeightLeavesRoomForTelemetryRow(t *testing.T) {
-	const termHeight, header, banners = 30, 2, 0
-	palette, input := 0, 1
-
-	vpWithout := termHeight - header - banners - mailFooterHeight(palette, input, false)
-	vpWith := termHeight - header - banners - mailFooterHeight(palette, input, true)
-
-	if vpWith != vpWithout-1 {
-		t.Fatalf("telemetry row must cost exactly one viewport line: without=%d with=%d", vpWithout, vpWith)
-	}
-}

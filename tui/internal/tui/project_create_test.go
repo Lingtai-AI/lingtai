@@ -802,19 +802,6 @@ func TestRunProjectCreate_SuccessPublishesResolvableSavedRefAndCredentialsBefore
 	}
 }
 
-// TestRunProjectCreate_NilDraft proves a nil draft fails closed rather than
-// panicking or creating anything.
-func TestRunProjectCreate_NilDraft(t *testing.T) {
-	opts := testCreateOptions(t, t.TempDir())
-	res := RunProjectCreate(nil, opts)
-	if res.Committed {
-		t.Fatal("expected Committed=false for nil draft")
-	}
-	if res.Err == nil {
-		t.Fatal("expected an error for nil draft")
-	}
-}
-
 // --- Invariant 5: unfinished staging detection/discard ---------------------
 
 // TestDetectUnfinishedStaging_ReadOnlyAndMarkerGated proves
@@ -1085,9 +1072,8 @@ func TestRunProjectCreate_ProjectRootMustMatchApprovedDestination(t *testing.T) 
 	assertSnapshotsEqual(t, "approved root after destination mismatch", approvedBefore, dirSnapshot(t, approvedRoot))
 }
 
-// TestRunProjectCreate_NilDraftNeverWrites is the pre-existing nil-draft
-// guard (TestRunProjectCreate_NilDraft above), extended to additionally
-// prove no write occurs — nil is the most trivially "invalid" draft of all,
+// TestRunProjectCreate_NilDraftNeverWrites proves the nil-draft guard fails
+// closed without touching disk — nil is the most trivially "invalid" draft of all,
 // and it's worth confirming the same "byte-for-byte parent" standard the
 // other invalid-draft cases are held to.
 func TestRunProjectCreate_NilDraftNeverWrites(t *testing.T) {

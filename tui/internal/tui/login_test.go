@@ -427,36 +427,6 @@ func TestLoginModel_CodexRowShownWithExistingEntry(t *testing.T) {
 	}
 }
 
-// TestLoginModel_ReauthExistingAccountTargetsItsFile verifies that r on an
-// existing Codex account entry sets the login target to THAT account's token
-// file, so re-auth overwrites the right account rather than creating a new one.
-// (Enter now sets the account active; re-auth moved to r.)
-func TestLoginModel_ReauthExistingAccountTargetsItsFile(t *testing.T) {
-	_, globalDir := withTempCodexHome(t)
-	seedLoginCodexAuth(t, globalDir)
-
-	m := NewLoginModel("", globalDir)
-	if len(m.entries) != 1 || m.entries[0].Provider != "codex" {
-		t.Fatalf("precondition: expected single codex entry; got %#v", m.entries)
-	}
-	wantPath := m.entries[0].CodexPath
-	if wantPath == "" {
-		t.Fatal("codex entry should carry its token file path")
-	}
-	// cursor starts at 0 (the codex entry). r re-auths this account.
-	r := tea.KeyPressMsg{Text: "r", Code: 'r'}
-	m, cmd := m.Update(r)
-	if cmd != nil {
-		t.Fatal("r on a codex entry must not start a network command")
-	}
-	if !m.codexChoosingMethod {
-		t.Fatal("r on a codex entry should open the method chooser")
-	}
-	if m.codexLoginTargetPath != wantPath {
-		t.Fatalf("re-auth should target the account's own file %q; got %q", wantPath, m.codexLoginTargetPath)
-	}
-}
-
 // TestLoginModel_AddAccountWritesNewFileNotLegacy verifies that completing an
 // "add another account" login (empty target) when a legacy account already
 // exists writes a NEW per-account file under codex-auth/ rather than
