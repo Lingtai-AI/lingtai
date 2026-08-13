@@ -166,7 +166,8 @@ func LingtaiCmd(globalDir string) string {
 
 // NeedsVenv returns true if no working runtime venv exists
 // or if lingtai is not importable inside it. Existing legacy venvs without
-// an environment marker are accepted after the import probe succeeds.
+// an environment marker are accepted only after import and managed-interpreter
+// compatibility probes succeed.
 func NeedsVenv(globalDir string) bool {
 	venvPath := RuntimeVenvDir(globalDir)
 	python := VenvPython(venvPath)
@@ -177,11 +178,16 @@ func NeedsVenv(globalDir string) bool {
 	if markerState == runtimeEnvMarkerMismatch {
 		return true
 	}
-	// Venv exists — verify lingtai is importable. A working PyPI install may
+	// Venv exists — verify lingtai is importable and that the interpreter is
+	// compatible with the managed runtime policy. A working PyPI install may
 	// still need conversion to local dev/editable mode; that is handled by the
 	// separate, consent-gated CheckUpgrade/UpgradePythonRuntime path, not by
 	// recreating the whole venv here.
 	if err := exec.Command(python, "-c", "import lingtai").Run(); err != nil {
+		return true
+	}
+	probe, err := probeManagedPython(python, nil)
+	if err != nil || !managedPythonCompatible(probe, runtime.GOOS, runtime.GOARCH) {
 		return true
 	}
 	if markerState == runtimeEnvMarkerMissing {
@@ -211,23 +217,40 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return nil
 	}
 	venvPath := RuntimeVenvDir(globalDir)
+	uvCmd := findUV()
+
+	// Select the fallback interpreter before removing or creating anything.
+	// On macOS, Python 3.14 is not a managed-runtime option because the
+	// published kernel wheels currently stop at cp313.
+	var pythonCmd string
+	if uvCmd == "" {
+		var err error
+		pythonCmd, err = findCompatiblePython()
+		if err != nil {
+			return err
+		}
+	}
+
+	// A legacy managed venv may have been created by an older selector and
+	// have no marker for the kernel to revalidate. Remove it only after a
+	// compatible replacement interpreter has been selected above.
 	if err := removeRuntimeVenvIfEnvMismatch(venvPath, nil); err != nil {
 		return fmt.Errorf("failed to remove stale runtime venv: %w", err)
 	}
-	uvCmd := findUV()
+	if err := removeRuntimeVenvIfIncompatible(venvPath); err != nil {
+		return fmt.Errorf("failed to remove incompatible runtime venv: %w", err)
+	}
 
 	// Step 1: create venv
 	progress("welcome.step_venv")
-	os.MkdirAll(filepath.Dir(venvPath), 0o755)
+	if err := os.MkdirAll(filepath.Dir(venvPath), 0o755); err != nil {
+		return fmt.Errorf("failed to prepare runtime venv directory: %w", err)
+	}
 	var cmd *exec.Cmd
 	if uvCmd != "" {
 		// uv can download Python automatically — request 3.13 to avoid conda/system conflicts
 		cmd = exec.Command(uvCmd, "venv", "--python", "3.13", venvPath)
 	} else {
-		pythonCmd := findPython()
-		if pythonCmd == "" {
-			return fmt.Errorf("Python 3.11+ is required. Install it from python.org and try again")
-		}
 		cmd = exec.Command(pythonCmd, "-m", "venv", venvPath)
 	}
 	if !quiet {
@@ -238,13 +261,16 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
 
-	// Verify Python version is 3.11+
+	// Verify the created interpreter against the same managed policy used for
+	// PATH selection. This protects the uv path as well if its resolver changes.
 	venvPython := VenvPython(venvPath)
-	verOut, err := exec.Command(venvPython, "-c",
-		"import sys; print(sys.version_info >= (3, 11))").Output()
-	if err != nil || strings.TrimSpace(string(verOut)) != "True" {
+	info, err := probeManagedPython(venvPython, nil)
+	if err != nil || !managedPythonCompatible(info, runtime.GOOS, runtime.GOARCH) {
 		os.RemoveAll(venvPath)
-		return fmt.Errorf("Python 3.11+ is required. Found older version in venv. Install python@3.13 and try again")
+		if runtime.GOOS == "darwin" {
+			return fmt.Errorf("managed runtime requires Python 3.11-3.13 on macOS; install a compatible Python and try again")
+		}
+		return fmt.Errorf("managed runtime requires Python 3.11 or newer; install a compatible Python and try again")
 	}
 
 	// Step 2: install lingtai — from the local dev checkout when one is
@@ -348,13 +374,121 @@ func findUV() string {
 	return ""
 }
 
-func findPython() string {
-	for _, name := range []string{"python3", "python"} {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
-		}
+type managedPythonInfo struct {
+	Major    int    `json:"major"`
+	Minor    int    `json:"minor"`
+	Platform string `json:"platform"`
+	Machine  string `json:"machine"`
+}
+
+const managedPythonProbe = `import json, platform, sys; print(json.dumps({"major": sys.version_info[0], "minor": sys.version_info[1], "platform": sys.platform, "machine": platform.machine()}))`
+
+func probeManagedPython(python string, runner CommandRunner) (managedPythonInfo, error) {
+	if runner == nil {
+		runner = timeoutCommandRunner{timeout: 5 * time.Second}
 	}
-	return ""
+	result := runner.Run(python, "-c", managedPythonProbe)
+	if result.Err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(result.Stdout)
+		}
+		if detail == "" {
+			detail = result.Err.Error()
+		}
+		return managedPythonInfo{}, fmt.Errorf("Python interpreter probe failed: %s", lastNonEmptyLine(detail))
+	}
+	var info managedPythonInfo
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &info); err != nil {
+		return managedPythonInfo{}, fmt.Errorf("Python interpreter probe returned invalid JSON: %w", err)
+	}
+	return info, nil
+}
+
+func normalizePythonMachine(machine string) string {
+	switch strings.ToLower(strings.TrimSpace(machine)) {
+	case "aarch64":
+		return "arm64"
+	case "amd64":
+		return "x86_64"
+	default:
+		return strings.ToLower(strings.TrimSpace(machine))
+	}
+}
+
+func managedPythonCompatible(info managedPythonInfo, targetOS, targetArch string) bool {
+	version := info.Major > 3 || (info.Major == 3 && info.Minor >= 11)
+	if !version {
+		return false
+	}
+	if targetOS == "darwin" && (info.Major > 3 || (info.Major == 3 && info.Minor > 13)) {
+		return false
+	}
+	if targetOS == "darwin" {
+		return info.Platform == "darwin" && normalizePythonMachine(info.Machine) == normalizePythonMachine(targetArch)
+	}
+	if targetOS == "windows" {
+		return info.Platform == "win32"
+	}
+	if targetOS == "linux" {
+		return strings.HasPrefix(info.Platform, "linux")
+	}
+	return info.Platform == targetOS
+}
+
+func compatiblePythonNames(targetOS string) []string {
+	if targetOS == "darwin" {
+		return []string{"python3.13", "python3.12", "python3.11", "python3", "python"}
+	}
+	return []string{"python3", "python", "python3.14", "python3.13", "python3.12", "python3.11"}
+}
+
+func findCompatiblePython() (string, error) {
+	return findCompatiblePythonWith(exec.LookPath, nil, runtime.GOOS, runtime.GOARCH)
+}
+
+func findCompatiblePythonWith(lookPath func(string) (string, error), runner CommandRunner, targetOS, targetArch string) (string, error) {
+	if runner == nil {
+		runner = timeoutCommandRunner{timeout: 5 * time.Second}
+	}
+	seen := make(map[string]bool)
+	var rejected []string
+	for _, name := range compatiblePythonNames(targetOS) {
+		path, err := lookPath(name)
+		if err != nil || path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		info, err := probeManagedPython(path, runner)
+		if err != nil {
+			rejected = append(rejected, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
+		if managedPythonCompatible(info, targetOS, targetArch) {
+			return path, nil
+		}
+		rejected = append(rejected, fmt.Sprintf("%s: Python %d.%d on %s", name, info.Major, info.Minor, info.Platform))
+	}
+	if targetOS == "darwin" {
+		detail := ""
+		if len(rejected) > 0 {
+			detail = " Candidates found but rejected: " + strings.Join(rejected, "; ") + "."
+		}
+		return "", fmt.Errorf("managed runtime requires Python 3.11-3.13 on macOS (%s); install a compatible Python and put it on PATH, then retry.%s", targetArch, detail)
+	}
+	return "", fmt.Errorf("managed runtime requires Python 3.11 or newer; install Python and put it on PATH, then retry")
+}
+
+func removeRuntimeVenvIfIncompatible(venvPath string) error {
+	python := VenvPython(venvPath)
+	if _, err := os.Stat(python); err != nil {
+		return nil
+	}
+	info, err := probeManagedPython(python, nil)
+	if err != nil || managedPythonCompatible(info, runtime.GOOS, runtime.GOARCH) {
+		return nil
+	}
+	return os.RemoveAll(venvPath)
 }
 
 // CheckTUIUpgrade compares the running TUI version against the latest GitHub release.

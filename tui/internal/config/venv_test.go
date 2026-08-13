@@ -41,6 +41,55 @@ func mkdirTestVenv(t *testing.T, venvPath string) {
 	}
 }
 
+func TestManagedPythonCompatibilityRejectsPython314OnDarwin(t *testing.T) {
+	if managedPythonCompatible(managedPythonInfo{Major: 3, Minor: 14, Platform: "darwin", Machine: "arm64"}, "darwin", "arm64") {
+		t.Fatal("Python 3.14 must not be accepted for the managed macOS runtime")
+	}
+	if !managedPythonCompatible(managedPythonInfo{Major: 3, Minor: 13, Platform: "darwin", Machine: "arm64"}, "darwin", "arm64") {
+		t.Fatal("Python 3.13 should be accepted for the managed macOS runtime")
+	}
+}
+
+func TestFindCompatiblePythonSkipsPython314OnDarwin(t *testing.T) {
+	paths := map[string]string{
+		"python3.13": "/opt/homebrew/bin/python3.13",
+		"python3.12": "/opt/homebrew/bin/python3.12",
+		"python3":    "/opt/homebrew/bin/python3",
+		"python":     "/opt/homebrew/bin/python",
+	}
+	lookPath := func(name string) (string, error) {
+		path, ok := paths[name]
+		if !ok {
+			return "", errors.New("not found")
+		}
+		return path, nil
+	}
+	runner := commandRunnerFunc(func(name string, _ ...string) CommandResult {
+		if strings.HasSuffix(name, "python3.12") {
+			return CommandResult{Stdout: `{"major":3,"minor":13,"platform":"darwin","machine":"arm64"}`}
+		}
+		return CommandResult{Stdout: `{"major":3,"minor":14,"platform":"darwin","machine":"arm64"}`}
+	})
+	path, err := findCompatiblePythonWith(lookPath, runner, "darwin", "arm64")
+	if err != nil {
+		t.Fatalf("findCompatiblePythonWith: %v", err)
+	}
+	if path != paths["python3.12"] {
+		t.Fatalf("path = %q, want compatible fallback %q after rejecting 3.14", path, paths["python3.12"])
+	}
+}
+
+func TestFindCompatiblePythonReportsDarwinPolicyError(t *testing.T) {
+	lookPath := func(string) (string, error) { return "/usr/local/bin/python3", nil }
+	runner := commandRunnerFunc(func(string, ...string) CommandResult {
+		return CommandResult{Stdout: `{"major":3,"minor":14,"platform":"darwin","machine":"arm64"}`}
+	})
+	_, err := findCompatiblePythonWith(lookPath, runner, "darwin", "arm64")
+	if err == nil || !strings.Contains(err.Error(), "Python 3.11-3.13") {
+		t.Fatalf("error = %v, want actionable managed macOS range", err)
+	}
+}
+
 func TestRuntimeEnvMarkerMissingIsLegacy(t *testing.T) {
 	venvPath := filepath.Join(t.TempDir(), "venv")
 	runner := commandRunnerFunc(func(string, ...string) CommandResult {
