@@ -286,6 +286,8 @@ func writePresetFile(t *testing.T, dir, name, provider, apiKeyEnv string) string
 func TestResolveRefs_ValidityGuard(t *testing.T) {
 	dir := t.TempDir()
 	codexRef := writePresetFile(t, dir, "codex", "codex", "")
+	legacyCodexDir := t.TempDir()
+	legacyCodexRef := writeCodexPresetWithAuthPath(t, legacyCodexDir, "codex", "")
 	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "")
 	claudeUnderscoreRef := writePresetFile(t, dir, "claude_agent_sdk", "claude_agent_sdk", "")
 	customRef := writePresetFile(t, dir, "custom", "custom", "")
@@ -303,8 +305,14 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 		wantExists bool
 		wantHasKey bool
 	}{
+		// When CodexAuthDir is empty, codex validity falls back to the legacy
+		// global bool for backward compatibility with callers that do not set the dir.
 		{"codex no OAuth", codexRef, keysEmpty, AuthState{}, true, false},
 		{"codex with OAuth", codexRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, true},
+		// Keep the original no-dir fixture and nil key-map inputs in both bool
+		// directions as explicit legacy-compat rows.
+		{"codex legacy global bool false without dir", legacyCodexRef, nil, AuthState{CodexOAuthConfigured: false}, true, false},
+		{"codex legacy global bool true without dir", legacyCodexRef, nil, AuthState{CodexOAuthConfigured: true}, true, true},
 		{"claude-code no CLI auth", claudeRef, keysEmpty, AuthState{}, true, false},
 		{"claude-code with CLI auth", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
 		{"claude_agent_sdk alias with CLI auth", claudeUnderscoreRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
@@ -434,20 +442,6 @@ func TestResolveRefs_PerAccountCodexAuth(t *testing.T) {
 	got := ResolveRefsWithAuth([]string{workBound}, nil, auth)
 	if got[0].CodexAuthRef != "codex-auth/work.json" {
 		t.Errorf("CodexAuthRef = %q, want the preset's codex_auth_path", got[0].CodexAuthRef)
-	}
-}
-
-// TestResolveRefs_CodexFallsBackToGlobalBoolWithoutDir verifies that when
-// CodexAuthDir is empty, codex validity falls back to the legacy global bool
-// (backward compatibility for callers that don't set the dir).
-func TestResolveRefs_CodexFallsBackToGlobalBoolWithoutDir(t *testing.T) {
-	dir := t.TempDir()
-	codexRef := writeCodexPresetWithAuthPath(t, dir, "codex", "")
-	if got := ResolveRefsWithAuth([]string{codexRef}, nil, AuthState{CodexOAuthConfigured: true}); !got[0].HasKey {
-		t.Error("with CodexOAuthConfigured=true and no dir, codex should be valid")
-	}
-	if got := ResolveRefsWithAuth([]string{codexRef}, nil, AuthState{CodexOAuthConfigured: false}); got[0].HasKey {
-		t.Error("with CodexOAuthConfigured=false and no dir, codex should be invalid")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -26,23 +27,44 @@ func writeDaemonLedger(t *testing.T, agentDir, runID string, lines []string) {
 
 // --- Backward-compat tests (wrappers still work) ---
 
-func TestDaemonRecentLedgerMissing(t *testing.T) {
-	agentDir := t.TempDir()
-	// No daemons/ directory at all → empty, not an error.
-	entries := DaemonRecentLedger(agentDir, 100)
-	if len(entries) != 0 {
-		t.Fatalf("expected empty, got %d entries", len(entries))
-	}
-}
+func TestDaemonLedgerSummaryEmptyStates(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		createDaemonsDir bool
+	}{
+		// No daemons/ directory at all must be empty, not an error.
+		{name: "missing_daemons_directory"},
+		{name: "empty_daemons_directory", createDaemonsDir: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agentDir := t.TempDir()
+			if tc.createDaemonsDir {
+				if err := os.MkdirAll(filepath.Join(agentDir, "daemons"), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+			}
 
-func TestDaemonRecentLedgerEmptyDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(agentDir, "daemons"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	entries := DaemonRecentLedger(agentDir, 100)
-	if len(entries) != 0 {
-		t.Fatalf("expected empty, got %d entries", len(entries))
+			// Preserve the summary callers' recentN=0 input and assert both return values.
+			totalsZero, recentZero := DaemonLedgerSummary(agentDir, 0)
+			if len(totalsZero) != 0 {
+				t.Fatalf("recentN=0: expected empty totals, got %d entries", len(totalsZero))
+			}
+			if len(recentZero) != 0 {
+				t.Fatalf("recentN=0: expected empty recent rows, got %d entries", len(recentZero))
+			}
+
+			// Preserve the wrapper callers' recentN=100 input while asserting both halves.
+			totals, recent := DaemonLedgerSummary(agentDir, 100)
+			if len(totals) != 0 {
+				t.Fatalf("recentN=100: expected empty totals, got %d entries", len(totals))
+			}
+			if len(recent) != 0 {
+				t.Fatalf("recentN=100: expected empty recent rows, got %d entries", len(recent))
+			}
+			if wrapped := DaemonRecentLedger(agentDir, 100); !reflect.DeepEqual(wrapped, recent) {
+				t.Fatalf("DaemonRecentLedger = %+v, want summary recent rows %+v", wrapped, recent)
+			}
+		})
 	}
 }
 
@@ -253,25 +275,6 @@ func TestDaemonRecentLedgerMissingDaemonJSON(t *testing.T) {
 }
 
 // --- Existing aggregated-totals tests (through unified API) ---
-
-func TestDaemonLedgerSummaryNoDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	got, _ := DaemonLedgerSummary(agentDir, 0)
-	if len(got) != 0 {
-		t.Fatalf("expected empty map, got %d entries", len(got))
-	}
-}
-
-func TestDaemonLedgerSummaryEmptyDaemonsDir(t *testing.T) {
-	agentDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(agentDir, "daemons"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	got, _ := DaemonLedgerSummary(agentDir, 0)
-	if len(got) != 0 {
-		t.Fatalf("expected empty map, got %d entries", len(got))
-	}
-}
 
 func TestDaemonLedgerSummaryGroupsByProvider(t *testing.T) {
 	agentDir := t.TempDir()

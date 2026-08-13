@@ -753,25 +753,6 @@ func TestReadStatusLegacyAndMalformedStatusOmitSinceMoltCounters(t *testing.T) {
 	}
 }
 
-func TestReadStatusTypeErrorKeepsSafeFieldsAndOmitsEconomy(t *testing.T) {
-	agentDir := t.TempDir()
-	body := `{"runtime":{"pid":4242,"running":true,"uptime_seconds":3.5},"tokens":{"input_tokens":"bad","output_tokens":200,"thinking_tokens":50,"cached_tokens":100,"api_calls":4,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
-	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := ReadStatus(agentDir)
-	if got.Runtime.PID != 4242 || !got.Runtime.Running || got.Runtime.UptimeSeconds != 3.5 {
-		t.Fatalf("runtime = %+v, want safely decoded runtime fields", got.Runtime)
-	}
-	if got.Tokens.Context.TotalTokens != 1234 || got.Tokens.Context.WindowSize != 8000 || got.Tokens.Context.UsagePct != 20 {
-		t.Fatalf("context = %+v, want safely decoded context fields", got.Tokens.Context)
-	}
-	if got.Tokens.InputTokens != 0 || got.Tokens.OutputTokens != 0 || got.Tokens.ThinkingTokens != 0 || got.Tokens.CachedTokens != 0 || got.Tokens.APICalls != 0 {
-		t.Fatalf("economy = %+v, want the whole tuple omitted after one invalid field", got.Tokens)
-	}
-}
-
 func TestReadStatusSyntaxErrorZerosWholeSnapshot(t *testing.T) {
 	agentDir := t.TempDir()
 	body := `{"runtime":{"pid":4242},"tokens":{"input_tokens":1,"context":{"total_tokens":1234,"window_size":8000}`
@@ -784,12 +765,13 @@ func TestReadStatusSyntaxErrorZerosWholeSnapshot(t *testing.T) {
 }
 
 func TestReadStatusInvalidEconomyValuesOmitWholeTuple(t *testing.T) {
-	base := `{"runtime":{"pid":4242,"running":true},"tokens":{"input_tokens":11,"output_tokens":22,"thinking_tokens":33,"cached_tokens":44,"api_calls":55,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
+	base := `{"runtime":{"pid":4242,"running":true,"uptime_seconds":3.5},"tokens":{"input_tokens":11,"output_tokens":22,"thinking_tokens":33,"cached_tokens":44,"api_calls":55,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
 	for _, tc := range []struct {
 		name  string
 		field string
 		valid int64
 		value string
+		body  string
 	}{
 		{name: "negative", field: "input_tokens", valid: 11, value: "-1"},
 		{name: "fractional", field: "output_tokens", valid: 22, value: "1.5"},
@@ -797,12 +779,16 @@ func TestReadStatusInvalidEconomyValuesOmitWholeTuple(t *testing.T) {
 		{name: "signed-int64 overflow", field: "cached_tokens", valid: 44, value: "9223372036854775808"},
 		{name: "quoted numeric string", field: "api_calls", valid: 55, value: `"55"`},
 		{name: "ordinary bad string", field: "input_tokens", valid: 11, value: `"not-a-number"`},
+		{name: "bad string with distinct safe fields", body: `{"runtime":{"pid":4242,"running":true,"uptime_seconds":3.5},"tokens":{"input_tokens":"bad","output_tokens":200,"thinking_tokens":50,"cached_tokens":100,"api_calls":4,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			needle := fmt.Sprintf(`"%s":%d`, tc.field, tc.valid)
-			body := strings.Replace(base, needle, fmt.Sprintf(`"%s":%s`, tc.field, tc.value), 1)
-			if body == base {
-				t.Fatalf("failed to replace valid %s counter", tc.field)
+			body := tc.body
+			if body == "" {
+				needle := fmt.Sprintf(`"%s":%d`, tc.field, tc.valid)
+				body = strings.Replace(base, needle, fmt.Sprintf(`"%s":%s`, tc.field, tc.value), 1)
+				if body == base {
+					t.Fatalf("failed to replace valid %s counter", tc.field)
+				}
 			}
 			agentDir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
@@ -812,8 +798,11 @@ func TestReadStatusInvalidEconomyValuesOmitWholeTuple(t *testing.T) {
 			if got.Tokens.InputTokens != 0 || got.Tokens.OutputTokens != 0 || got.Tokens.ThinkingTokens != 0 || got.Tokens.CachedTokens != 0 || got.Tokens.APICalls != 0 {
 				t.Fatalf("economy = %+v, want whole tuple omitted for %s", got.Tokens, tc.name)
 			}
-			if got.Tokens.Context.TotalTokens != 1234 || got.Runtime.PID != 4242 || !got.Runtime.Running {
-				t.Fatalf("safe fields = context=%+v runtime=%+v, want preserved", got.Tokens.Context, got.Runtime)
+			if got.Runtime.PID != 4242 || !got.Runtime.Running || got.Runtime.UptimeSeconds != 3.5 {
+				t.Fatalf("runtime = %+v, want safely decoded runtime fields", got.Runtime)
+			}
+			if got.Tokens.Context.TotalTokens != 1234 || got.Tokens.Context.WindowSize != 8000 || got.Tokens.Context.UsagePct != 20 {
+				t.Fatalf("context = %+v, want safely decoded context fields", got.Tokens.Context)
 			}
 		})
 	}
