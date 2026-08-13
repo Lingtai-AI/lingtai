@@ -94,6 +94,10 @@ def main() -> int:
           "windows-release must read the repo-owned kernel-release.json pin")
     check("kernel_tag" in windows_text and 'gh release view "$kernel_tag"' in windows_text,
           "windows-release must fail closed unless the pinned kernel release exists")
+    check('python3 - "$kernel_tag" << \'PY\'' in windows_text and
+          'kernel_version_expected = kernel_tag.lstrip("v")' in windows_text and
+          'python3 - "$kernel_tag" "${TAG#v}"' not in windows_text,
+          "kernel manifest validation must use the independently pinned kernel tag, not the TUI tag")
     check("win_amd64" in windows_text,
           "windows-release must require a win_amd64 kernel wheel before building")
     check("GOOS=windows GOARCH=amd64" in windows_text,
