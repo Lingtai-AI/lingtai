@@ -18,7 +18,8 @@ import (
 // ChatGPT accounts, additional accounts live as separate token files under
 // ~/.lingtai-tui/codex-auth/<slug>.json. A Codex preset binds to a specific
 // account through its non-secret manifest.llm.codex_auth_path field; a preset
-// with no such field falls back to the legacy file.
+// with no such field accepts any usable stored account (legacy file or any
+// per-account file).
 //
 // Everything here treats the token JSON as a secret: contents are parsed only
 // to read non-secret display metadata (label/email) and to confirm a non-empty

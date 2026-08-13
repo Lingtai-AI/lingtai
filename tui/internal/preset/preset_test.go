@@ -386,6 +386,29 @@ func writeCodexPresetWithAuthPath(t *testing.T, dir, name, authRef string) strin
 	return path
 }
 
+// writeCodexPresetWithRawAuthPath writes a codex preset whose llm.codex_auth_path
+// is set to an arbitrary JSON value (number/object/null/whitespace string),
+// returning its absolute path.
+func writeCodexPresetWithRawAuthPath(t *testing.T, dir, name string, raw interface{}) string {
+	t.Helper()
+	llm := map[string]interface{}{
+		"provider":    "codex",
+		"model":       "gpt-5.6-sol",
+		"api_key_env": "",
+	}
+	llm["codex_auth_path"] = raw
+	doc := map[string]interface{}{
+		"description": map[string]interface{}{"summary": "codex preset"},
+		"manifest":    map[string]interface{}{"llm": llm},
+	}
+	data, _ := json.MarshalIndent(doc, "", "  ")
+	path := filepath.Join(dir, name+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write preset: %v", err)
+	}
+	return path
+}
+
 func writeStubTokenFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -393,6 +416,19 @@ func writeStubTokenFile(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte(`{"refresh_token":"stub-refresh"}`), 0o600); err != nil {
 		t.Fatalf("write token: %v", err)
+	}
+}
+
+// writeMalformedTokenFile writes a token file whose refresh_token is
+// whitespace-only, which the canonical account store rejects and the unbound
+// preset fallback must therefore ignore.
+func writeMalformedTokenFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"refresh_token":"   "}`), 0o600); err != nil {
+		t.Fatalf("write malformed token: %v", err)
 	}
 }
 
@@ -443,6 +479,146 @@ func TestResolveRefs_PerAccountCodexAuth(t *testing.T) {
 	if got[0].CodexAuthRef != "codex-auth/work.json" {
 		t.Errorf("CodexAuthRef = %q, want the preset's codex_auth_path", got[0].CodexAuthRef)
 	}
+}
+
+func TestResolveRefs_CodexDefaultAuthAcceptsAnyStoredAccount(t *testing.T) {
+	presetDir := t.TempDir()
+
+	t.Run("legacy file valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-legacy-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with legacy auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("per-account file valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-per-account-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with per-account auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("no credentials", func(t *testing.T) {
+		authDir := t.TempDir()
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-no-auth-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("default codex preset with no auth = %#v, want HasKey=false", got)
+		}
+	})
+
+	t.Run("whitespace-only per-account token ignored with valid one present", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		writeMalformedTokenFile(t, filepath.Join(authDir, "codex-auth", "bad.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-bad-plus-good-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with bad+valid per-account auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("whitespace-only per-account token alone is not valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeMalformedTokenFile(t, filepath.Join(authDir, "codex-auth", "bad.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-bad-only-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("default codex preset with only whitespace token = %#v, want HasKey=false", got)
+		}
+	})
+
+	t.Run("explicit auth path remains exact", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-explicit-missing", "codex-auth/missing.json")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("explicit codex preset with different account auth = %#v, want HasKey=false", got)
+		}
+		if got[0].CodexAuthRef != "codex-auth/missing.json" {
+			t.Fatalf("CodexAuthRef = %q, want explicit ref", got[0].CodexAuthRef)
+		}
+	})
+}
+
+// TestResolveRefs_CodexMalformedExplicitAuthFailsClosed verifies that a present
+// but malformed manifest.llm.codex_auth_path (wrong JSON type or whitespace-only
+// string) never fails open to the unbound fallback: the preset must resolve
+// HasKey=false even when a valid stored account exists.
+func TestResolveRefs_CodexMalformedExplicitAuthFailsClosed(t *testing.T) {
+	presetDir := t.TempDir()
+	authDir := t.TempDir()
+	writeStubTokenFile(t, filepath.Join(authDir, "codex-auth.json"))
+	auth := AuthState{CodexAuthDir: authDir}
+
+	cases := []struct {
+		name string
+		raw  interface{}
+	}{
+		{"number", 42},
+		{"object", map[string]interface{}{"k": "v"}},
+		{"null", nil},
+		{"whitespace-only", "   "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := writeCodexPresetWithRawAuthPath(t, presetDir, "codex-malformed-"+tc.name, tc.raw)
+			got := ResolveRefsWithAuth([]string{ref}, nil, auth)
+			if len(got) != 1 || got[0].HasKey {
+				t.Fatalf("malformed explicit codex_auth_path %#v = %#v, want HasKey=false", tc.raw, got)
+			}
+		})
+	}
+}
+
+// TestResolveRefs_CodexExplicitAuthNeverUsesAggregateBool verifies that a preset
+// with an explicit non-empty codex_auth_path is never validated by the aggregate
+// CodexOAuthConfigured bool, even when CodexAuthDir is empty. Absolute and
+// ~/-prefixed refs remain exactly checkable without a dir; relative refs fail
+// closed because they cannot be resolved.
+func TestResolveRefs_CodexExplicitAuthNeverUsesAggregateBool(t *testing.T) {
+	presetDir := t.TempDir()
+
+	t.Run("relative missing ref fails closed with aggregate true", func(t *testing.T) {
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-rel-missing", "codex-auth/missing.json")
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexOAuthConfigured: true})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("explicit relative missing ref + aggregate true = %#v, want HasKey=false", got)
+		}
+	})
+
+	t.Run("absolute valid ref resolves without dir", func(t *testing.T) {
+		authDir := t.TempDir()
+		absPath := filepath.Join(authDir, "codex-auth", "abs.json")
+		writeStubTokenFile(t, absPath)
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-abs-valid", absPath)
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexOAuthConfigured: true})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("explicit absolute valid ref without dir = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("absolute missing ref fails closed without dir", func(t *testing.T) {
+		absPath := filepath.Join(t.TempDir(), "codex-auth", "missing.json")
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-abs-missing", absPath)
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexOAuthConfigured: true})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("explicit absolute missing ref without dir = %#v, want HasKey=false", got)
+		}
+	})
 }
 
 func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {

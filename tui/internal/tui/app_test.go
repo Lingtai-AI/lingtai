@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -151,5 +152,36 @@ func TestSetupCommandOpensFirstRunSetupMode(t *testing.T) {
 	}
 	if got.firstRun.setupOrchName != "manager" {
 		t.Fatalf("/setup orch name = %q, want manager", got.firstRun.setupOrchName)
+	}
+}
+
+func TestSetupCredentialsReturnRebuildsSetupWithCodexAuth(t *testing.T) {
+	projectDir := t.TempDir()
+	globalDir := t.TempDir()
+	orchDir := t.TempDir()
+	writeStubCodexToken(t, filepath.Join(globalDir, codexAuthSubdir, "work.json"), "work@example.com")
+	a := App{
+		currentView: appViewLogin,
+		globalDir:   globalDir,
+		projectDir:  projectDir,
+		orchDir:     orchDir,
+		orchName:    "manager",
+		login:       NewSetupCredentialsModel(orchDir, globalDir),
+	}
+
+	model, _ := a.Update(ViewChangeMsg{View: "setup"})
+	got := model.(App)
+
+	if got.currentView != appViewFirstRun {
+		t.Fatalf("return from credentials currentView = %v, want appViewFirstRun", got.currentView)
+	}
+	if !got.firstRun.setupMode {
+		t.Fatal("return from credentials should rebuild setup-mode first-run model")
+	}
+	if !got.firstRun.codexAuth.valid {
+		t.Fatal("return from credentials should refresh Codex auth from per-account files")
+	}
+	if got.firstRun.codexAuth.email != "work@example.com" {
+		t.Fatalf("refreshed Codex email = %q, want work@example.com", got.firstRun.codexAuth.email)
 	}
 }
