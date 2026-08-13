@@ -852,10 +852,12 @@ type ResolvedRef struct {
 	// is true.
 	HasKey bool
 	// CodexAuthRef is the codex preset's manifest.llm.codex_auth_path value
-	// (verbatim, possibly ""). Empty means the preset accepts any usable
-	// stored Codex account (legacy file or any per-account file). Only set
-	// for codex presets; "" for all others. Lets a UI surface which account
-	// a codex preset is bound to without re-reading the preset file.
+	// (verbatim, possibly ""). Empty with the field omitted or literal "" means
+	// the preset accepts any usable stored Codex account (legacy file or any
+	// per-account file); empty from a present wrong-type/whitespace value means
+	// the preset fails closed (see ResolvePresetWithAuth). Only set for codex
+	// presets; "" for all others. Lets a UI surface which account a codex
+	// preset is bound to without re-reading the preset file.
 	CodexAuthRef string
 }
 
@@ -1007,18 +1009,41 @@ func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthSt
 	r.Family = ClassifyCredentialFamily(r.Provider)
 	model, _ := llm["model"].(string)
 	apiKeyEnv, _ := llm["api_key_env"].(string)
-	r.CodexAuthRef, _ = llm["codex_auth_path"].(string)
+	codexAuthRaw, codexAuthPresent := llm["codex_auth_path"]
+	r.CodexAuthRef, _ = codexAuthRaw.(string) // "" for absent or wrong-type values
 	setAuth := func(ok bool) { r.HasKey = ok }
 	switch r.Family {
 	case CredentialFamilyCodexSingle:
-		if auth.CodexAuthDir != "" {
-			if strings.TrimSpace(r.CodexAuthRef) == "" {
+		codexAuthStr, codexAuthIsString := codexAuthRaw.(string)
+		switch {
+		case codexAuthPresent && !codexAuthIsString:
+			// Present but wrong-type explicit binding: fail closed.
+			setAuth(false)
+		case codexAuthPresent && codexAuthIsString && strings.TrimSpace(codexAuthStr) == "" && codexAuthStr != "":
+			// Whitespace-only explicit value: fail closed (canonical empty is
+			// an omitted field or literal "").
+			setAuth(false)
+		case codexAuthPresent && codexAuthIsString && strings.TrimSpace(codexAuthStr) != "":
+			// Explicit nonempty binding: never the aggregate bool. With a known
+			// dir, resolve exactly; without one, only absolute/"~" refs are
+			// checkable, and any other relative ref fails closed.
+			ref := strings.TrimSpace(codexAuthStr)
+			if auth.CodexAuthDir != "" {
+				setAuth(codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, ref)))
+			} else if filepath.IsAbs(ref) || strings.HasPrefix(ref, "~/") || ref == "~" {
+				setAuth(codexTokenFileValid(resolveCodexAuthRef("", ref)))
+			} else {
+				setAuth(false)
+			}
+		default:
+			// Unbound (field omitted or canonical empty): accept any usable
+			// stored account when a dir is known, else the caller-provided
+			// aggregate signal.
+			if auth.CodexAuthDir != "" {
 				setAuth(anyCodexTokenFileValid(auth.CodexAuthDir))
 			} else {
-				setAuth(codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, r.CodexAuthRef)))
+				setAuth(auth.CodexOAuthConfigured)
 			}
-		} else {
-			setAuth(auth.CodexOAuthConfigured)
 		}
 	case CredentialFamilyCodexPool:
 		if auth.CodexPoolEligibleModels != nil {
