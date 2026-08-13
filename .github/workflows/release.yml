@@ -248,9 +248,12 @@ jobs:
             exit 1
           fi
           curl -fsSL "$manifest_url" -o /tmp/kernel-release-manifest.json
-          python3 - "$kernel_tag" "${TAG#v}" << 'PY'
+          # The kernel release is independently versioned from the TUI release;
+          # validate the manifest against the pinned kernel tag, not TAG.
+          python3 - "$kernel_tag" << 'PY'
           import json, re, sys
-          kernel_tag, kernel_version_expected = sys.argv[1], sys.argv[1].lstrip("v")
+          kernel_tag = sys.argv[1]
+          kernel_version_expected = kernel_tag.lstrip("v")
           data = json.load(open("/tmp/kernel-release-manifest.json"))
           if data.get("schema") != "lingtai.kernel.release/v1":
               sys.exit(f"kernel manifest has unexpected schema {data.get('schema')!r}")
