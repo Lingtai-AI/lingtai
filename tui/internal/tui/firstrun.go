@@ -1352,9 +1352,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			//   pickCodexAuthIdx = visibleCount       — Codex 凭据 row
 			//   Back = visibleCount + 1
 			//   Next = visibleCount + 2
-			// Codex template is hidden from the preset list (its row is
-			// replaced by the Codex 凭据 section row); saved codex
-			// presets render normally in 已存预设.
+			// All templates, including Codex, render in 新建预设; the Codex
+			// 凭据 row below is only the OAuth/account management surface.
 			visibleCount := m.visiblePresetCount()
 			pickCodexAuthIdx := visibleCount
 			pickBackIdx := visibleCount + 1

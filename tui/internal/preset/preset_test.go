@@ -445,6 +445,56 @@ func TestResolveRefs_PerAccountCodexAuth(t *testing.T) {
 	}
 }
 
+func TestResolveRefs_CodexDefaultAuthAcceptsAnyStoredAccount(t *testing.T) {
+	presetDir := t.TempDir()
+
+	t.Run("legacy file valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-legacy-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with legacy auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("per-account file valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-per-account-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with per-account auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("no credentials", func(t *testing.T) {
+		authDir := t.TempDir()
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-no-auth-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("default codex preset with no auth = %#v, want HasKey=false", got)
+		}
+	})
+
+	t.Run("explicit auth path remains exact", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-explicit-missing", "codex-auth/missing.json")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("explicit codex preset with different account auth = %#v, want HasKey=false", got)
+		}
+		if got[0].CodexAuthRef != "codex-auth/missing.json" {
+			t.Fatalf("CodexAuthRef = %q, want explicit ref", got[0].CodexAuthRef)
+		}
+	})
+}
+
 func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	withTempPresets(t, func() {
 		p := DefaultPreset()

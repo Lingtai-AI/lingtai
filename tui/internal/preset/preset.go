@@ -863,20 +863,19 @@ type ResolvedRef struct {
 // cannot derive from a preset file alone. Ordinary Codex OAuth, pool
 // membership, and fallback readiness remain separate facts.
 type AuthState struct {
-	// CodexOAuthConfigured is true when the legacy single-account token
-	// file ~/.lingtai-tui/codex-auth.json parses and carries a non-empty
-	// refresh_token. It is the fallback signal for a codex preset that
-	// declares no manifest.llm.codex_auth_path. The preset package must not
-	// import the tui package (import cycle), so this is computed by the
-	// caller and passed in.
+	// CodexOAuthConfigured is the caller-provided fallback signal for a codex
+	// preset that declares no manifest.llm.codex_auth_path when CodexAuthDir is
+	// empty. Callers that know the token store directory should set CodexAuthDir
+	// so the preset package can inspect legacy and per-account token files.
 	CodexOAuthConfigured bool
 
 	// CodexAuthDir is the directory (typically ~/.lingtai-tui) that
 	// per-account codex_auth_path values resolve against when they are
-	// relative or "~/"-prefixed. When set, resolveOneRef validates a codex
-	// preset's OWN bound token file at manifest.llm.codex_auth_path instead
-	// of the global CodexOAuthConfigured bool, so multiple Codex accounts
-	// are judged independently. Empty falls back to CodexOAuthConfigured.
+	// relative or "~/"-prefixed. When set, explicit manifest.llm.codex_auth_path
+	// values validate exactly that bound token file, so multiple Codex accounts
+	// are judged independently. An empty codex_auth_path means "default Codex
+	// credentials" and is valid when either the legacy token or any per-account
+	// token under codex-auth/ is usable. Empty falls back to CodexOAuthConfigured.
 	CodexAuthDir string
 
 	// CodexPoolEligible says that a flat pool has a usable positively weighted
@@ -913,6 +912,25 @@ func codexTokenFileValid(path string) bool {
 		RefreshToken string `json:"refresh_token"`
 	}
 	return json.Unmarshal(data, &tok) == nil && tok.RefreshToken != ""
+}
+
+func anyCodexTokenFileValid(authDir string) bool {
+	if codexTokenFileValid(filepath.Join(authDir, "codex-auth.json")) {
+		return true
+	}
+	entries, err := os.ReadDir(filepath.Join(authDir, "codex-auth"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		if codexTokenFileValid(filepath.Join(authDir, "codex-auth", e.Name())) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveCodexAuthRef expands a preset's manifest.llm.codex_auth_path against
@@ -994,7 +1012,11 @@ func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthSt
 	switch r.Family {
 	case CredentialFamilyCodexSingle:
 		if auth.CodexAuthDir != "" {
-			setAuth(codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, r.CodexAuthRef)))
+			if strings.TrimSpace(r.CodexAuthRef) == "" {
+				setAuth(anyCodexTokenFileValid(auth.CodexAuthDir))
+			} else {
+				setAuth(codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, r.CodexAuthRef)))
+			}
 		} else {
 			setAuth(auth.CodexOAuthConfigured)
 		}
