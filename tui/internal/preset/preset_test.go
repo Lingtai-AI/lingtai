@@ -396,6 +396,19 @@ func writeStubTokenFile(t *testing.T, path string) {
 	}
 }
 
+// writeMalformedTokenFile writes a token file whose refresh_token is
+// whitespace-only, which the canonical account store rejects and the unbound
+// preset fallback must therefore ignore.
+func writeMalformedTokenFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"refresh_token":"   "}`), 0o600); err != nil {
+		t.Fatalf("write malformed token: %v", err)
+	}
+}
+
 // TestResolveRefs_PerAccountCodexAuth verifies that, when AuthState.CodexAuthDir
 // is set, each codex preset's validity is judged by ITS OWN bound token file
 // (manifest.llm.codex_auth_path), with an empty path falling back to the legacy
@@ -477,6 +490,29 @@ func TestResolveRefs_CodexDefaultAuthAcceptsAnyStoredAccount(t *testing.T) {
 		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
 		if len(got) != 1 || got[0].HasKey {
 			t.Fatalf("default codex preset with no auth = %#v, want HasKey=false", got)
+		}
+	})
+
+	t.Run("whitespace-only per-account token ignored with valid one present", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeStubTokenFile(t, filepath.Join(authDir, "codex-auth", "work.json"))
+		writeMalformedTokenFile(t, filepath.Join(authDir, "codex-auth", "bad.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-bad-plus-good-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || !got[0].HasKey {
+			t.Fatalf("default codex preset with bad+valid per-account auth = %#v, want HasKey=true", got)
+		}
+	})
+
+	t.Run("whitespace-only per-account token alone is not valid", func(t *testing.T) {
+		authDir := t.TempDir()
+		writeMalformedTokenFile(t, filepath.Join(authDir, "codex-auth", "bad.json"))
+		ref := writeCodexPresetWithAuthPath(t, presetDir, "codex-bad-only-default", "")
+
+		got := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexAuthDir: authDir})
+		if len(got) != 1 || got[0].HasKey {
+			t.Fatalf("default codex preset with only whitespace token = %#v, want HasKey=false", got)
 		}
 	})
 

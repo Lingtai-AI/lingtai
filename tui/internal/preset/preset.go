@@ -852,10 +852,10 @@ type ResolvedRef struct {
 	// is true.
 	HasKey bool
 	// CodexAuthRef is the codex preset's manifest.llm.codex_auth_path value
-	// (verbatim, possibly ""). Empty means the preset uses the legacy
-	// single-account fallback file. Only set for codex presets; "" for all
-	// others. Lets a UI surface which account a codex preset is bound to
-	// without re-reading the preset file.
+	// (verbatim, possibly ""). Empty means the preset accepts any usable
+	// stored Codex account (legacy file or any per-account file). Only set
+	// for codex presets; "" for all others. Lets a UI surface which account
+	// a codex preset is bound to without re-reading the preset file.
 	CodexAuthRef string
 }
 
@@ -911,7 +911,7 @@ func codexTokenFileValid(path string) bool {
 	var tok struct {
 		RefreshToken string `json:"refresh_token"`
 	}
-	return json.Unmarshal(data, &tok) == nil && tok.RefreshToken != ""
+	return json.Unmarshal(data, &tok) == nil && strings.TrimSpace(tok.RefreshToken) != ""
 }
 
 func anyCodexTokenFileValid(authDir string) bool {
