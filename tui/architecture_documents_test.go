@@ -51,17 +51,22 @@ func TestRuntimeControlSurfaceAnatomyRoute(t *testing.T) {
 		}},
 		{"tui/ANATOMY.md", []string{
 			"Runtime/control-surface boundary",
-			"tui/internal/tui/app.go:640-670",
-			"tui/internal/process/launcher.go:87-135",
-			"tui/main.go:1640-1650",
-			"tui/internal/tui/app.go:763-903",
-			"tui/internal/fs/signal.go:9-55",
-			"tui/main.go:737-767",
-			"tui/internal/tui/app.go:1831-1880",
+			"tui/internal/tui/app.go",
+			"App.Update",
+			"tui/internal/process/launcher.go",
+			"LaunchAgent",
+			"tui/main.go",
+			"prepareApp",
+			"handlePaletteCommand",
+			"tui/internal/fs/signal.go",
+			"printWelcomeInfo",
+			"portalURL",
+			"lingtai-kernel-anatomy",
 		}},
 		{"portal/ANATOMY.md", []string{
 			"Runtime/control-surface boundary",
-			"portal/main.go:66-72",
+			"portal/main.go",
+			"main()",
 			"tui/ANATOMY.md",
 			"lingtai-kernel-anatomy",
 		}},
@@ -69,7 +74,7 @@ func TestRuntimeControlSurfaceAnatomyRoute(t *testing.T) {
 		text := readArchitectureFile(t, root, tc.path)
 		for _, want := range tc.wants {
 			if !strings.Contains(text, want) {
-				t.Errorf("%s missing runtime-boundary route/anchor %q", tc.path, want)
+				t.Errorf("%s missing runtime-boundary route/navigation %q", tc.path, want)
 			}
 		}
 	}

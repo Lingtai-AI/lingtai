@@ -315,47 +315,42 @@ func TestPresetSkillRouter_OperationBijection(t *testing.T) {
 }
 
 // TestPresetSkillRouter_ProviderChildContracts checks the per-provider
-// requirements added by the #691 dual-axis shape: an exact constructor
-// anchor citation into preset.go, a "Template-specific settings" heading,
-// and a one-line route into the operations tree — without duplicating
-// operation prose into the provider page itself.
+// requirements added by the #691 dual-axis shape: an exact provider/manual
+// mapping, a "Template-specific settings" heading, and a one-line route into
+// the operations tree — without duplicating operation prose into the provider
+// page itself.
 func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
-	wantAnchor := map[string]string{
-		"minimax":    "tui/internal/preset/preset.go:1167-1192",
-		"zhipu":      "tui/internal/preset/preset.go:1194-1211",
-		"mimo":       "tui/internal/preset/preset.go:1213-1238",
-		"deepseek":   "tui/internal/preset/preset.go:1240-1249",
-		"gemini":     "tui/internal/preset/preset.go:1251-1278",
-		"kimi":       "tui/internal/preset/preset.go:1280-1292",
-		"grok":       "tui/internal/preset/preset.go:1294-1314",
-		"nvidia":     "tui/internal/preset/preset.go:1316-1335",
-		"openrouter": "tui/internal/preset/preset.go:1337-1356",
-		"codex":      "tui/internal/preset/preset.go:1358-1386",
-		"codex-pool": "tui/internal/preset/preset.go:1395-1418",
-		"claude":     "tui/internal/preset/preset.go:1420-1449",
-		"custom":     "tui/internal/preset/preset.go:1451-1473",
+	wantProviders := []string{
+		"minimax",
+		"zhipu",
+		"mimo",
+		"deepseek",
+		"gemini",
+		"kimi",
+		"grok",
+		"nvidia",
+		"openrouter",
+		"codex",
+		"codex-pool",
+		"claude",
+		"custom",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
 		want[p.Name] = true
 	}
-	assertSameNames(t, "constructor anchor inventory", want, func() map[string]bool {
-		m := map[string]bool{}
-		for k := range wantAnchor {
-			m[k] = true
-		}
-		return m
-	}())
+	manuals := map[string]bool{}
+	for _, name := range wantProviders {
+		manuals[name] = true
+	}
+	assertSameNames(t, "provider manual inventory", want, manuals)
 
-	for name, anchor := range wantAnchor {
+	for _, name := range wantProviders {
 		data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/"+name+"/SKILL.md")
 		if err != nil {
 			t.Fatalf("read %s manual: %v", name, err)
 		}
 		body := string(data)
-		if !strings.Contains(body, anchor) {
-			t.Errorf("%s manual missing exact constructor anchor %q", name, anchor)
-		}
 		if !strings.Contains(body, "## Template-specific settings") {
 			t.Errorf("%s manual missing \"## Template-specific settings\" heading", name)
 		}

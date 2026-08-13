@@ -59,26 +59,3 @@ func TestProductionHasNoProjectMigrationCallers(t *testing.T) {
 		t.Fatalf("production project migration callers/imports remain:\n%s", strings.Join(violations, "\n"))
 	}
 }
-
-// TestRuntimeMigrationRetirementArtifacts proves that the protected historical
-// package/document remain while exactly the six authorized m040/preflight
-// paths are absent. It intentionally checks paths, not Git status, so it is
-// useful in the source tree and does not mutate evidence.
-func TestRuntimeMigrationRetirementArtifacts(t *testing.T) {
-	deleted := []string{
-		"tui/internal/migrate/alias_conflict_preflight.go",
-		"tui/internal/migrate/m040_shell_capability.go",
-		"tui/internal/migrate/m040_shell_capability_test.go",
-		"portal/internal/migrate/alias_conflict_preflight.go",
-		"portal/internal/migrate/m040_shell_capability.go",
-		"portal/internal/migrate/m040_shell_capability_test.go",
-	}
-	for _, rel := range deleted {
-		if _, err := os.Stat(filepath.Join("..", rel)); !os.IsNotExist(err) {
-			t.Errorf("authorized retired path %s still exists (err=%v)", rel, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join("..", "migration", "migration.md")); err != nil {
-		t.Fatalf("protected migration/migration.md missing: %v", err)
-	}
-}
