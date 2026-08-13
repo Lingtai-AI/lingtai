@@ -232,7 +232,11 @@ install source. `--ref`/source-ref builds have no bundle to pin against and
 fail loud the same way. `--skip-python` (alias `--skip-venv`) is the explicit,
 honest opt-out for a TUI/portal-only install — you then provision the Python
 runtime yourself (for example an editable install against a local
-`lingtai-kernel` checkout).
+`lingtai-kernel` checkout). When a Homebrew-to-native migration finds a legacy
+`~/.lingtai-tui/runtime` but no native receipt, this mode deliberately preserves
+that real runtime root and lets the native TUI/portal binaries and receipt be
+installed beside it; a later explicit `fix.sh` repair can provision a parallel
+runtime without adopting or overwriting the legacy one.
 
 `install.json`'s `kernel_source` field is written only on a verified bundle
 install (`kernel_source: "bundle"`, plus `kernel_bundle_id`/`kernel_version`/
