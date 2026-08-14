@@ -1111,24 +1111,29 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			m.message = fmt.Sprintf("Failed to encode tokens: %v", err)
 			return m, nil
 		}
+		authPath := legacyCodexAuthPath(m.globalDir)
+		if err := os.MkdirAll(filepath.Dir(authPath), 0o755); err != nil {
+			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
+			return m, nil
+		}
+		if err := os.WriteFile(authPath, data, 0o600); err != nil {
+			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
+			return m, nil
+		}
 		if m.draftMode {
-			// Draft only: hold the completed OAuth bundle in memory as
-			// secretBytes. The real codex-auth.json write happens during
-			// the finalizer's pre-publish dependency phase (project_create.go),
-			// never here. m.codexAuth is still updated in-memory (below, via
-			// refreshCodexAuth) purely so the wizard's UI reflects "logged
-			// in" without touching disk.
+			// Draft mode: persist the completed OAuth bundle to disk NOW
+			// (legacy codex-auth.json) so a successful codex login survives
+			// even when the user abandons the wizard — the preset-first flow
+			// (create preset, then project) may never reach the finalizer's
+			// pre-publish dependency phase. Keep the draft copy as well so
+			// project_create.go's finalizer verify step still passes; it
+			// rewrites the identical bundle idempotently.
 			if m.draft != nil {
 				m.draft.DraftCodexTokens = secretBytes(data)
 			}
 			m.codexAuth.valid = true
 			m.codexAuth.email = msg.Tokens.Email
 			m.codexAuth.label = codexAccountName(codexAccount{Email: msg.Tokens.Email, Legacy: true})
-			return m, nil
-		}
-		authPath := legacyCodexAuthPath(m.globalDir)
-		if err := os.WriteFile(authPath, data, 0o600); err != nil {
-			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
 			return m, nil
 		}
 		m.refreshCodexAuth()
@@ -1563,13 +1568,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 							// draft session) — the arm above already
 							// blocked the pre-existing-disk-auth case
 							// before m.codexLogoutArmed could ever become
-							// true. Clearing the in-memory bundle here is
-							// accurate: nothing was ever written to
-							// codex-auth.json, so there is nothing to
-							// remove from disk.
+							// true. Since CodexOAuthDoneMsg's draftMode
+							// branch now persists the bundle to disk
+							// immediately (the same legacy
+							// codex-auth.json the non-draft path writes),
+							// logging out here must remove that file too,
+							// then clear the in-memory draft.
 							if m.draft != nil {
 								m.draft.DraftCodexTokens = nil
 							}
+							_ = os.Remove(legacyCodexAuthPath(m.globalDir))
 							m.codexAuth.valid = false
 							m.codexAuth.email = ""
 							m.codexAuth.label = ""

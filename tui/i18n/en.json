@@ -284,6 +284,8 @@
   "codex.oauth_login_hint": "[c] login",
   "codex.oauth_logout_hint": "[r] logout",
   "codex.oauth_logout_confirm": "Log out of Codex? [y/N]",
+  "codex.import_cli_hint": "import from Codex CLI (press i)",
+  "codex.import_cli_done": "Imported Codex CLI credential (%s)",
   "firstrun.preset_pick.codex_locked": "(login required)",
   "firstrun.preset_pick.codex_locked_hint": "Press [c] above to log in to Codex first.",
   "firstrun.preset_pick.codex_needs_oauth": "(press Enter to login)",

@@ -756,15 +756,19 @@ func TestDraftFirstRun_CodexDeleteBlockedForPreExistingAuth(t *testing.T) {
 // of blocker 5's fix: when the Codex login happened DURING this draft
 // session (draft.DraftCodexTokens non-empty, exactly what
 // CodexOAuthDoneMsg's draftMode branch sets — see firstrun.go), clearing it
-// via Delete remains fully functional and honest, since nothing was ever
-// written to disk in the first place. This proves the blocking guard in
-// blocker 5's fix is scoped correctly — it must not also break the
-// legitimate, already-tested "undo a same-session login" path.
+// via Delete remains fully functional and honest. Since the draftMode login
+// now persists immediately to the legacy codex-auth.json (so a preset-first
+// flow keeps the credential even if the wizard is abandoned), the same-session
+// logout must remove that persisted file as well as the in-memory draft. This
+// proves the blocking guard in blocker 5's fix is scoped correctly — it must
+// not also break the legitimate, already-tested "undo a same-session login"
+// path.
 func TestDraftFirstRun_CodexDeleteAllowedForSessionLogin(t *testing.T) {
 	m, home, _ := buildDraftModel(t)
 	m.step = stepPickPreset
 	m.presets = nil
 	m.cursor = 0
+	globalDir := filepath.Join(home, ".lingtai-tui")
 
 	// Simulate a completed same-session OAuth login via the real message
 	// path (CodexOAuthDoneMsg), not a synthetic direct field assignment.
@@ -778,6 +782,15 @@ func TestDraftFirstRun_CodexDeleteAllowedForSessionLogin(t *testing.T) {
 		t.Fatal("expected codexAuth.valid=true after the same-session login")
 	}
 
+	// The draftMode login persists immediately: the legacy codex-auth.json
+	// must exist on disk after the OAuth completion.
+	authPath := legacyCodexAuthPath(globalDir)
+	if raw, err := os.ReadFile(authPath); err != nil {
+		t.Fatalf("expected codex-auth.json persisted by draftMode login: %v", err)
+	} else if !strings.Contains(string(raw), "session-token") {
+		t.Fatalf("expected persisted codex-auth.json to contain the session token, got %q", raw)
+	}
+
 	before := dirSnapshot(t, home)
 
 	// Two-press Del: arm, then confirm.
@@ -787,7 +800,16 @@ func TestDraftFirstRun_CodexDeleteAllowedForSessionLogin(t *testing.T) {
 	}
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 
-	assertSnapshotsEqual(t, "draft Codex delete for same-session login", before, dirSnapshot(t, home))
+	// The only expected filesystem change from this logout is the
+	// persisted codex-auth.json being removed; everything else must be
+	// untouched.
+	after := dirSnapshot(t, home)
+	if len(after) != len(before)-1 {
+		t.Fatalf("expected exactly one file removed by same-session logout: before=%v after=%v", before, after)
+	}
+	if _, ok := after[filepath.Join(".lingtai-tui", "codex-auth.json")]; ok {
+		t.Fatalf("expected codex-auth.json absent after logout, got %v", after)
+	}
 
 	if !m.draft.DraftCodexTokens.Empty() {
 		t.Fatal("expected DraftCodexTokens cleared after confirming the in-memory logout")
@@ -797,6 +819,10 @@ func TestDraftFirstRun_CodexDeleteAllowedForSessionLogin(t *testing.T) {
 	}
 	if m.message != i18n.T("firstrun.preset_pick.codex_logged_out") {
 		t.Fatalf("expected the normal logged-out message for a same-session login, got %q", m.message)
+	}
+	// The persisted file must be removed too.
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Fatalf("expected codex-auth.json removed after same-session logout, stat err=%v", err)
 	}
 }
 

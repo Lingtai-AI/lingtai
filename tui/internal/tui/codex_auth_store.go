@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -312,6 +313,151 @@ func hasAnyCodexAccount(globalDir string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Codex CLI credential import.
+//
+// The Codex CLI (`codex login`) writes its own credential to
+// ~/.codex/auth.json (or $CODEX_HOME/auth.json) in a NESTED format the TUI
+// never reads: {"auth_mode": "chatgpt", "tokens": {"id_token": ...,
+// "access_token": ..., "refresh_token": ..., "account_id": ...}, ...}. The
+// one-click import below converts that file into the TUI's own per-account
+// store (~/.lingtai-tui/codex-auth/<slug>.json) so a `codex login` user can
+// bind a codex preset without re-authenticating. The CLI file is read-only
+// input: it is never modified, and no token material is ever logged.
+// ---------------------------------------------------------------------------
+
+// codexCLIAuthPath returns the path of the Codex CLI's own credential file:
+// $CODEX_HOME/auth.json when CODEX_HOME is set non-empty, otherwise
+// ~/.codex/auth.json.
+func codexCLIAuthPath() string {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return filepath.Join(home, "auth.json")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".codex", "auth.json")
+	}
+	return filepath.Join(".codex", "auth.json") // best effort
+}
+
+// readCodexCLIAuthFile parses a Codex CLI credential file and converts it to
+// the TUI's flat CodexTokens. ok=false unless the file parses, auth_mode is
+// "chatgpt", and a non-empty refresh_token is present. Email is recovered
+// from the id_token (falling back to the access_token) JWT claims; the CLI
+// file carries no expiry, so ExpiresAt stays 0. Token material is never
+// printed.
+func readCodexCLIAuthFile(path string) (CodexTokens, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return CodexTokens{}, false
+	}
+	var raw struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   *struct {
+			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		} `json:"tokens"`
+	}
+	if json.Unmarshal(data, &raw) != nil {
+		return CodexTokens{}, false
+	}
+	if raw.AuthMode != "chatgpt" || raw.Tokens == nil {
+		return CodexTokens{}, false
+	}
+	if strings.TrimSpace(raw.Tokens.RefreshToken) == "" {
+		return CodexTokens{}, false
+	}
+	email := extractEmailFromJWT(raw.Tokens.IDToken)
+	if email == "" {
+		email = extractEmailFromJWT(raw.Tokens.AccessToken)
+	}
+	return CodexTokens{
+		AccessToken:  raw.Tokens.AccessToken,
+		RefreshToken: raw.Tokens.RefreshToken,
+		Email:        email,
+	}, true
+}
+
+// codexCLISlug derives the per-account filename slug for an imported Codex
+// CLI credential: the first 8 characters of the account_id embedded in the
+// access token, or the email's local part when no account_id is present.
+// Sanitized through codexAccountSlug like every other account filename.
+func codexCLISlug(accountID, email string) string {
+	if s := strings.TrimSpace(accountID); s != "" {
+		if len(s) > 8 {
+			s = s[:8]
+		}
+		return codexAccountSlug(s, "codex-cli")
+	}
+	return codexAccountSlug(email, "codex-cli")
+}
+
+// importCodexCLIAuth copies the Codex CLI's own credential into the TUI's
+// per-account store and returns the ref to bind a preset to it plus a
+// non-secret display label (email, or the slug when the CLI file carries no
+// email). It never writes to the CLI's file and never overwrites an existing
+// TUI token file. Fails with an "already imported" error when the TUI already
+// holds the same account: a valid legacy file, or a per-account file whose
+// access-token account_id matches the CLI's. The returned ref is the
+// codexAuthSubdir-relative "codex-auth/<slug>.json" form so
+// resolveCodexAuthPath round-trips it onto the written file.
+func importCodexCLIAuth(globalDir string) (ref string, label string, err error) {
+	cliPath := codexCLIAuthPath()
+	cliTokens, ok := readCodexCLIAuthFile(cliPath)
+	if !ok {
+		return "", "", fmt.Errorf("no valid Codex CLI credential at %s (run `codex login` first)", cliPath)
+	}
+	cliAccountID := extractAccountIDFromJWT(cliTokens.AccessToken)
+
+	// Already imported? A valid legacy file means the TUI already has a
+	// working credential; a per-account file whose access-token account_id
+	// matches the CLI's is the same account imported earlier.
+	if codexAuthPathValid(legacyCodexAuthPath(globalDir)) {
+		return "", "", errors.New("codex CLI credential already imported (a legacy account exists)")
+	}
+	if cliAccountID != "" {
+		for _, a := range listCodexAccounts(globalDir) {
+			if a.Legacy || !a.Valid {
+				continue
+			}
+			tok, ok := readCodexTokenFile(a.Path)
+			if !ok {
+				continue
+			}
+			if extractAccountIDFromJWT(tok.AccessToken) == cliAccountID {
+				return "", "", errors.New("codex CLI credential already imported (same account)")
+			}
+		}
+	}
+
+	slug := codexCLISlug(cliAccountID, cliTokens.Email)
+	dir := codexAuthDir(globalDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", err
+	}
+	target := filepath.Join(dir, slug+".json")
+	if _, err := os.Stat(target); err == nil {
+		return "", "", fmt.Errorf("codex-auth/%s.json already exists — refusing to overwrite", slug)
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+
+	// Token material is secret: written 0600, never logged.
+	data, err := json.MarshalIndent(cliTokens, "", "  ")
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		return "", "", err
+	}
+
+	label = cliTokens.Email
+	if label == "" {
+		label = slug
+	}
+	return filepath.ToSlash(filepath.Join(codexAuthSubdir, slug+".json")), label, nil
 }
 
 // ---------------------------------------------------------------------------
