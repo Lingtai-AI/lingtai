@@ -1881,6 +1881,11 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 					b.WriteString(renderApiCallGroupSeparator(m.width) + "\n")
 				}
 				evStyle = thinkingStyle
+				// Ctrl+O level 1 shows only the first 150 chars of thinking
+				// blocks as a compact preview; level 2 shows the full body.
+				if msg.Type == "thinking" && m.verbose == verboseThinking {
+					body = truncateToolBody(body, thinkingPreviewLimit)
+				}
 			default:
 				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
 					b.WriteString(renderApiCallGroupSeparator(m.width) + "\n")
