@@ -79,7 +79,7 @@ type mailRefreshMsg struct {
 	acceptedSnapshot     acceptedMailSnapshot
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
-	directStates         map[string]string // stable direct-thread key -> target lifecycle state
+	directStates         map[string]string    // stable direct-thread key -> target lifecycle state
 	lastProgressAt       time.Time            // orchestrator .status.json runtime.last_progress_at (zero when absent)
 	directLastProgress   map[string]time.Time // stable direct-thread key -> target last_progress_at
 	alive                bool
@@ -213,7 +213,7 @@ type MailModel struct {
 	lastInputLines       int
 	lastPaletteLines     int
 	lastBannerLines      int
-	lastTelemetryRow     bool                   // whether the home telemetry row was reserved last sync
+	lastTelemetryRows    int                    // how many additive home rows were reserved last sync
 	pendingMessage       string                 // full text from editor, sent on Enter
 	globalDir            string                 // ~/.lingtai-tui/
 	wasActive            bool                   // true if previous refresh was ACTIVE
@@ -281,6 +281,13 @@ type MailModel struct {
 	homeTelemetryLoaded    bool          // true once a background fetch has completed at least once
 	homeTelemetryInFlight  bool          // true while a fetchHomeTelemetry command is running (debounce)
 	homeTelemetryLastFetch time.Time     // completion time of the last fetch, for the TTL floor
+
+	// Home async-work stats resolve exactly like home telemetry: a background
+	// fs.CountDaemons() read, cached snapshot, in-flight debounce, TTL floor.
+	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders no row
+	homeAsyncStatsLoaded    bool           // true once a background fetch has completed at least once
+	homeAsyncStatsInFlight  bool           // true while a fetchHomeAsyncStats command is running (debounce)
+	homeAsyncStatsLastFetch time.Time      // completion time of the last fetch, for the TTL floor
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
@@ -456,33 +463,38 @@ func (m *MailModel) syncViewportHeight() bool {
 	// viewport must reclaim exactly those rows while leaving Main state intact.
 	_, direct := m.currentDirectTarget()
 	bannerLines := 0
-	telemetryRow := false
+	telemetryRows := 0
 	if !direct {
 		bannerLines = m.bannerLineCount()
-		telemetryRow = m.hasHomeTelemetry()
+		if m.hasHomeTelemetry() {
+			telemetryRows++
+		}
+		if m.hasHomeAsyncStats() {
+			telemetryRows++
+		}
 	}
 	// Size the palette before consuming LineCount. Mail owns the child rectangle
 	// and reserves its fixed chrome plus one mandatory transcript row; Palette
 	// owns which cursor-following command rows fit in the remaining allowance.
-	paletteMaxHeight := m.height - 2 - bannerLines - 1 - mailFooterHeight(0, inputLines, telemetryRow)
+	paletteMaxHeight := m.height - 2 - bannerLines - 1 - mailFooterHeight(0, inputLines, telemetryRows)
 	m.palette.SetSize(m.width, paletteMaxHeight)
 	paletteLines := 0
 	if m.input.IsPaletteActive() {
 		paletteLines = m.palette.LineCount()
 	}
-	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines && bannerLines == m.lastBannerLines && telemetryRow == m.lastTelemetryRow {
+	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines && bannerLines == m.lastBannerLines && telemetryRows == m.lastTelemetryRows {
 		return false
 	}
 	m.lastInputLines = inputLines
 	m.lastPaletteLines = paletteLines
 	m.lastBannerLines = bannerLines
-	m.lastTelemetryRow = telemetryRow
+	m.lastTelemetryRows = telemetryRows
 	// Layout: header(2) + topBanner(0-1) + viewport + bottomBanner(0-1) + footer.
 	// The footer block (sep + palette + input + optional telemetry + status) is
 	// sized by mailFooterHeight so View() and this height budget stay in lockstep
 	// — the telemetry row added by PR #441 must be reserved here or it pushes the
 	// bottom status bar (the "ctrl+o to expand" hint) off-screen.
-	footerHeight := mailFooterHeight(paletteLines, inputLines, telemetryRow)
+	footerHeight := mailFooterHeight(paletteLines, inputLines, telemetryRows)
 	vpHeight := m.height - 2 - bannerLines - footerHeight
 	if vpHeight < 1 {
 		vpHeight = 1
@@ -1397,6 +1409,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		if cmd := m.maybeScheduleHomeAsyncStats(time.Now()); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		return m, tea.Batch(cmds...)
 
 	case homeTelemetryMsg:
@@ -1420,6 +1435,25 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case homeAsyncStatsMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		// A background async-stats fetch completed. Land the snapshot; re-sync the
+		// viewport height only when the row visibility flipped, mirroring telemetry.
+		if m.applyHomeAsyncStats(msg.t, time.Now()) && m.ready {
+			if _, direct := m.currentDirectTarget(); direct {
+				m.directChat.mainViewportDirty = true
+			} else {
+				atBottom := m.viewport.AtBottom()
+				m.syncViewportHeight()
+				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+				if atBottom {
+					m.viewport.GotoBottom()
+				}
+			}
+			cmds = append(cmds, m.maybeScheduleHomeAsyncStats(time.Now()))
+		}
 	case SendMsg:
 		var text string
 		fromPending := false
@@ -2544,6 +2578,11 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	if !direct && m.hasHomeTelemetry() {
 		if telemetry := formatHomeTelemetry(m.homeTelemetry, m.width); telemetry != "" {
 			footer += telemetry + "\n"
+		}
+	}
+	if !direct && m.hasHomeAsyncStats() {
+		if async := formatHomeAsyncStats(m.homeAsyncStats, m.width); async != "" {
+			footer += async + "\n"
 		}
 	}
 	footer += statusBar

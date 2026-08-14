@@ -110,6 +110,15 @@ func TestCountDaemons(t *testing.T) {
 	writeDaemonState(t, agentDir, "terminal", map[string]interface{}{
 		"state": "done",
 	})
+	writeDaemonState(t, agentDir, "queued", map[string]interface{}{
+		"state": "queued",
+	})
+	writeDaemonState(t, agentDir, "failed", map[string]interface{}{
+		"state": "failed",
+	})
+	writeDaemonState(t, agentDir, "timedout", map[string]interface{}{
+		"state": "timeout",
+	})
 	writeDaemonState(t, agentDir, "finished", map[string]interface{}{
 		"state":       "running",
 		"finished_at": "2026-05-24T12:00:00Z",
@@ -120,8 +129,17 @@ func TestCountDaemons(t *testing.T) {
 	if counts.Running != 2 {
 		t.Fatalf("running daemons = %d, want 2", counts.Running)
 	}
-	if counts.Total != 4 {
-		t.Fatalf("total daemons = %d, want 4", counts.Total)
+	if counts.Queued != 1 {
+		t.Fatalf("queued daemons = %d, want 1", counts.Queued)
+	}
+	if counts.Done != 1 {
+		t.Fatalf("done daemons = %d, want 1", counts.Done)
+	}
+	if counts.Failed != 2 {
+		t.Fatalf("failed daemons = %d, want 2 (failed+timeout)", counts.Failed)
+	}
+	if counts.Total != 7 {
+		t.Fatalf("total daemons = %d, want 7", counts.Total)
 	}
 }
 

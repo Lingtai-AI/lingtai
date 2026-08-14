@@ -94,6 +94,11 @@ type homeTelemetryMsg struct {
 	t          homeTelemetry
 }
 
+type homeAsyncStatsMsg struct {
+	generation uint64
+	t          homeAsyncStats
+}
+
 // fetchHomeTelemetry is the background worker: it performs status/context-fallback
 // I/O off the UI thread and returns a homeTelemetryMsg.
 // It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
@@ -262,12 +267,9 @@ func (m MailModel) hasHomeTelemetry() bool {
 // footer height shared by syncViewportHeight (the viewport budget) and View()
 // (the actual render), so the additive telemetry row is reserved consistently
 // and never overflows the frame.
-func mailFooterHeight(paletteLines, inputLines int, telemetryVisible bool) int {
+func mailFooterHeight(paletteLines, inputLines, telemetryRows int) int {
 	h := 1 + paletteLines + inputLines + 1 + 1 // sep + palette + input + border + status
-	if telemetryVisible {
-		h++
-	}
-	return h
+	return h + telemetryRows
 }
 
 // formatHomeTelemetry renders the telemetry row for the given terminal width, or

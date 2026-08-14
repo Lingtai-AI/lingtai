@@ -13,11 +13,15 @@ import "testing"
 func TestMailFooterHeightAccountsForTelemetryRow(t *testing.T) {
 	const palette, input = 0, 1
 
-	without := mailFooterHeight(palette, input, false)
-	with := mailFooterHeight(palette, input, true)
+	without := mailFooterHeight(palette, input, 0)
+	with := mailFooterHeight(palette, input, 1)
+	both := mailFooterHeight(palette, input, 2)
 
 	if with != without+1 {
 		t.Fatalf("telemetry row must add exactly one footer line: without=%d with=%d", without, with)
+	}
+	if both != without+2 {
+		t.Fatalf("telemetry + async rows must add exactly two footer lines: without=%d both=%d", without, both)
 	}
 }
 
@@ -32,8 +36,8 @@ func TestMailFooterHeightBaseline(t *testing.T) {
 		{2, 1, 6}, // palette open
 	}
 	for _, c := range cases {
-		if got := mailFooterHeight(c.palette, c.input, false); got != c.want {
-			t.Errorf("mailFooterHeight(%d,%d,false)=%d, want %d", c.palette, c.input, got, c.want)
+		if got := mailFooterHeight(c.palette, c.input, 0); got != c.want {
+			t.Errorf("mailFooterHeight(%d,%d,0)=%d, want %d", c.palette, c.input, got, c.want)
 		}
 	}
 }
