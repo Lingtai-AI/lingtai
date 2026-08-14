@@ -239,6 +239,40 @@ func TestInspectKernelUpToDateNeedsNoUpdate(t *testing.T) {
 	}
 }
 
+func TestInspectKernelSemanticVersionMatchNeedsNoUpdate(t *testing.T) {
+	runner := &fakeRunner{versions: []string{"v1.0.1"}}
+	home, env := noDevHome(t)
+	status := inspectKernel(t.TempDir(), inspectKernelOptions{
+		HTTPClient: testVersionClient(t, "1.0.1", "v1.0.0"),
+		Runner:     runner,
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	if status.NeedsUpdate || !containsLine(status.Lines, "runtime is up to date") {
+		t.Fatalf("semantically equal release versions must be up to date: %+v", status)
+	}
+}
+
+func TestInspectKernelNewerThanLatestDoesNotPromptDowngrade(t *testing.T) {
+	runner := &fakeRunner{versions: []string{"1.0.1"}}
+	home, env := noDevHome(t)
+	status := inspectKernel(t.TempDir(), inspectKernelOptions{
+		HTTPClient: testVersionClient(t, "0.19.3", "v1.0.0"),
+		Runner:     runner,
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	assertNoMutatingCalls(t, runner.calls)
+	if status.NeedsUpdate {
+		t.Fatalf("installed newer than latest must not prompt a downgrade: %+v", status)
+	}
+	if !containsLine(status.Lines, "skipping downgrade") {
+		t.Fatalf("expected an explicit newer-than-latest diagnostic: %+v", status.Lines)
+	}
+}
+
 func TestInspectKernelEditableNeedsNoUpdate(t *testing.T) {
 	runner := &fakeRunner{
 		versions:       []string{"0.9.6"},
@@ -322,6 +356,46 @@ func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	}
 	if upgrades != 1 {
 		t.Fatalf("expected exactly one kernel upgrade command, got %d (%#v)", upgrades, runner.calls)
+	}
+}
+
+func TestUpgradePythonRuntimeNewerThanLatestNeverDowngrades(t *testing.T) {
+	globalDir := t.TempDir()
+	mkdirTestVenv(t, RuntimeVenvDir(globalDir))
+	runner := &fakeRunner{versions: []string{"1.0.1"}}
+	home, env := noDevHome(t)
+	result := UpgradePythonRuntime(globalDir, true, &UpgradeRuntimeOptions{
+		HTTPClient: testVersionClient(t, "0.19.3", "v1.0.0"),
+		Runner:     runner,
+		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	if !result.Healthy || result.Updated {
+		t.Fatalf("newer runtime must remain unchanged: %+v", result)
+	}
+	assertNoMutatingCalls(t, runner.calls)
+	if !containsLine(result.Lines, "skipping downgrade") {
+		t.Fatalf("expected an explicit newer-than-latest diagnostic: %+v", result.Lines)
+	}
+}
+
+func TestUpgradePythonRuntimeForceAllowsSemanticVersionMatch(t *testing.T) {
+	globalDir := t.TempDir()
+	mkdirTestVenv(t, RuntimeVenvDir(globalDir))
+	runner := &fakeRunner{versions: []string{"v1.0.1", "1.0.1"}}
+	home, env := noDevHome(t)
+	result := UpgradePythonRuntime(globalDir, true, &UpgradeRuntimeOptions{
+		HTTPClient: testVersionClient(t, "1.0.1", "v1.0.0"),
+		Runner:     runner,
+		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	if !result.Healthy || !result.Updated {
+		t.Fatalf("force repair must proceed for semantically equal releases: %+v", result)
 	}
 }
 
