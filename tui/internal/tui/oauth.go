@@ -653,6 +653,46 @@ func extractEmailFromJWT(jwt string) string {
 	return profile.Email
 }
 
+// extractAccountIDFromJWT extracts the OpenAI account id from an access
+// token's "https://api.openai.com/auth" claim. Returns empty string on any
+// error. Used to detect whether a stored TUI credential already matches a
+// Codex CLI credential before importing it.
+func extractAccountIDFromJWT(jwt string) string {
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+
+	// Base64url decode the payload (index 1). Add padding if needed.
+	payload := parts[1]
+	if m := len(payload) % 4; m != 0 {
+		payload += strings.Repeat("=", 4-m)
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return ""
+	}
+
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return ""
+	}
+
+	authRaw, ok := claims["https://api.openai.com/auth"]
+	if !ok {
+		return ""
+	}
+
+	var auth struct {
+		AccountID string `json:"account_id"`
+	}
+	if err := json.Unmarshal(authRaw, &auth); err != nil {
+		return ""
+	}
+	return auth.AccountID
+}
+
 // oauthBrowserOpener is the indirection startOAuthFlow uses to launch the
 // system browser at the authorize URL. It defaults to openBrowser (defined in
 // app.go) in production; tests override it so that running `go test ./...`

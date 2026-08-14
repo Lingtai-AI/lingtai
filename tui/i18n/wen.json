@@ -280,6 +280,8 @@
   "codex.oauth_login_hint": "[c] 登",
   "codex.oauth_logout_hint": "[r] 注销",
   "codex.oauth_logout_confirm": "注销 Codex 否？[y/N]",
+  "codex.import_cli_hint": "由 Codex CLI 引入（按 i）",
+  "codex.import_cli_done": "已引入 Codex CLI 凭（%s）",
   "firstrun.preset_pick.codex_locked": "（须先登）",
   "firstrun.preset_pick.codex_locked_hint": "请按 [c] 先登入 Codex。",
   "firstrun.preset_pick.codex_needs_oauth": "（按回车登）",

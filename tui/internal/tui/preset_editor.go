@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -333,6 +334,11 @@ type PresetEditorModel struct {
 
 	// Status
 	saveErr string
+
+	// statusMsg is a transient, non-error footer message (e.g. "Imported
+	// Codex CLI credential"). It replaces the browse hint until the next
+	// keypress; renderFooter prefers it over saveErr-free hints.
+	statusMsg string
 }
 
 // NewPresetEditorModel builds an editor against a working copy of `p`.
@@ -467,6 +473,9 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 // ───────────────────────────────────────────────────────────────────────────
 
 func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
+	// Transient footer message: visible for the frame that set it, cleared by
+	// the next keypress (the import handler below re-sets it after this line).
+	m.statusMsg = ""
 	switch msg.String() {
 	case "esc":
 		// Clean editor (no edits made) → close immediately. Confirming
@@ -531,6 +540,27 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 		// who want to see the on-disk shape; hidden by default to keep
 		// the form uncluttered.
 		m.showJSON = !m.showJSON
+		return m, nil
+	case "i":
+		// One-click import of the Codex CLI's own credential (`codex
+		// login` writes ~/.codex/auth.json) into the TUI store, bound to
+		// this preset's API-key row. Only meaningful on the codex
+		// API-key row while the bound account is invalid (the footer
+		// hint codex.import_cli_hint advertises it only when a valid CLI
+		// file exists). Errors — no CLI credential, already imported,
+		// target exists — surface in the footer via saveErr.
+		f := editorFieldOrder[m.cursor]
+		if f == feAPIKey && preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"])) == preset.CredentialFamilyCodexSingle && m.globalDir != "" {
+			if _, valid := m.codexBoundAccountLabel(); !valid {
+				ref, label, err := importCodexCLIAuth(m.globalDir)
+				if err != nil {
+					m.saveErr = err.Error()
+				} else {
+					m.setCodexAuthRef(ref)
+					m.statusMsg = fmt.Sprintf(i18n.T("codex.import_cli_done"), label)
+				}
+			}
+		}
 		return m, nil
 	}
 	return m, nil
@@ -860,6 +890,25 @@ func (m PresetEditorModel) codexBoundAccountLabel() (string, bool) {
 	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), valid
 }
 
+// codexCLIImportAvailable reports whether the codex API-key row can offer the
+// one-click CLI import: the preset uses a codex single credential, globalDir
+// is set, the currently-bound account is invalid, and a valid Codex CLI
+// credential file (~/.codex/auth.json or $CODEX_HOME/auth.json) exists to
+// import. Drives the footer hint; the 'i' handler additionally requires the
+// row to be focused.
+func (m PresetEditorModel) codexCLIImportAvailable() bool {
+	if m.globalDir == "" {
+		return false
+	}
+	if preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"])) != preset.CredentialFamilyCodexSingle {
+		return false
+	}
+	if _, valid := m.codexBoundAccountLabel(); valid {
+		return false
+	}
+	_, ok := readCodexCLIAuthFile(codexCLIAuthPath())
+	return ok
+}
 func (m PresetEditorModel) codexServiceTier() string {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	if asString(llm["service_tier"]) == "fast" {
@@ -2104,7 +2153,18 @@ func (m PresetEditorModel) renderFooter() string {
 	case emExitPrompt:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_exit"))
 	}
-	return hintStyle.Render("  " + i18n.T("preset_editor.hint_browse"))
+	hint := i18n.T("preset_editor.hint_browse")
+	if m.statusMsg != "" {
+		// Transient feedback (e.g. a completed CLI credential import)
+		// replaces the generic browse hint until the next keypress.
+		hint = m.statusMsg
+	} else if m.codexCLIImportAvailable() {
+		// A `codex login` credential exists while this preset's bound
+		// account is invalid: advertise the one-click import on the
+		// codex API-key row.
+		hint += "  " + i18n.T("codex.import_cli_hint")
+	}
+	return hintStyle.Render("  " + hint)
 }
 
 func (m PresetEditorModel) renderCloneOverlay(_ string) string {
