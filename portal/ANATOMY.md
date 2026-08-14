@@ -43,6 +43,7 @@ related_files:
   - portal/web/tsconfig.json
   - portal/web/tsconfig.node.json
   - portal/web/vite.config.ts
+  - portal/main_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;

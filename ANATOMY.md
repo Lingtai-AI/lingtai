@@ -93,8 +93,12 @@ maintenance: |
   when their boundary changes. Code is the structural source of truth: repair
   stale navigation in the same change that moves files, symbols, connections,
   composition, or state. Preserve the child template and its maintenance rule;
-  validate the distributed graph before merge. See dev-guide-skill/SKILL.md for
-  the workflow.
+  validate the distributed graph before merge. Capability mentions in any
+  document require explicit navigation mapping to the implementing code: a
+  related_files entry in the owning ANATOMY.md (or a markdown link to that node
+  when the document lives in the anatomy graph itself), bidirectional between
+  document and owner. A capability with no mapping is drift; fix the mapping in
+  the same change. See dev-guide-skill/SKILL.md for the workflow.
 ---
 
 # lingtai
@@ -348,6 +352,13 @@ Maintenance is part of reading:
   `TestArchitectureDocumentsCoverEveryTrackedFile` fails with the exact paths to
   add. Deleting a file means deleting its entry; a new package directory means a
   new `ANATOMY.md` linked from its parent.
+- **Capability mentions require explicit bidirectional mapping to implementing
+  code.** Any document (README, docs, skill, issue/PR body, proposal) that names
+  a user-visible or agent-visible capability must resolve to the code that
+  implements it: either the owning ANATOMY.md lists that document in its
+  `related_files` and the implementing files, or the document links to the
+  owning anatomy node. A capability with no mapping is navigation drift and
+  must be repaired in the same change, not deferred.
 - Keep parent/child and Anatomy/Contract pair links reciprocal, and keep the
   two-binary facts compatible across `tui/ANATOMY.md` and `portal/ANATOMY.md`.
   When this system's convention itself changes, update this root, its smoke test

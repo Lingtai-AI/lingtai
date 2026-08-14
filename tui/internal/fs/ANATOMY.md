@@ -53,6 +53,7 @@ related_files:
   - tui/internal/fs/refresh_marker_test.go
   - tui/internal/fs/session_race_test.go
   - tui/internal/fs/tool_call_render_test.go
+  - tui/internal/fs/discovery_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;

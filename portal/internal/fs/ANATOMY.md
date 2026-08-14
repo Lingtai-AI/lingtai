@@ -19,6 +19,8 @@ related_files:
   - portal/internal/fs/resolve.go
   - portal/internal/fs/resolve_test.go
   - portal/internal/fs/signal.go
+  - portal/internal/fs/discovery_test.go
+  - portal/internal/fs/heartbeat_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
