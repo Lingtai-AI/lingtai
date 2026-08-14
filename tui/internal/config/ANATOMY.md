@@ -24,6 +24,8 @@ related_files:
   - tui/internal/config/global_atomic_test.go
   - tui/internal/config/tui_updater.go
   - tui/internal/config/tui_updater_test.go
+  - tui/internal/config/addon_key.go
+  - tui/internal/config/addon_key_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;

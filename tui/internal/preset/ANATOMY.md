@@ -198,6 +198,7 @@ related_files:
   - tui/internal/preset/templates/wechat.jsonc
   - tui/internal/preset/tui_help_mcp_guidance_test.go
   - tui/internal/preset/tui_help_populate_test.go
+  - tui/internal/preset/preset_name_containment_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;

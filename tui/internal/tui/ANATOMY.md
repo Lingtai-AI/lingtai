@@ -182,6 +182,8 @@ related_files:
   - tui/internal/tui/update_tui_test.go
   - tui/internal/tui/visible_rail_v2_test.go
   - tui/internal/tui/wizard_footer.go
+  - tui/internal/tui/codex_cli_import_test.go
+  - tui/internal/tui/thinking_preview_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
