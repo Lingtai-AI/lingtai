@@ -63,6 +63,11 @@ const toolCallSummaryPreviewLimit = 400
 // summary. Counted in runes, never split mid-codepoint.
 const aprioriSummaryPreviewLimit = 200
 
+// thinkingPreviewLimit caps the thinking block text shown in the FIRST Ctrl+O
+// layer (verboseThinking). Full thinking blocks are too noisy for the compact
+// layer; the deeper Ctrl+O level still renders the full thinking body.
+const thinkingPreviewLimit = 150
+
 // previewSummaryText returns the first aprioriSummaryPreviewLimit runes of the
 // generated summary text with a trailing ellipsis when (and only when) the text
 // is longer than the limit. A text at or under the limit is returned verbatim,
