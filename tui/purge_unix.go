@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,25 @@ import (
 
 	"github.com/anthropics/lingtai-tui/internal/processscan"
 )
+
+const (
+	purgeTermGrace      = 2 * time.Second
+	purgeVerifyDeadline = 2 * time.Second
+	purgeVerifyInterval = 100 * time.Millisecond
+)
+
+var unixSignalProcess = func(pid int, sig syscall.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(sig)
+}
+
+type purgeResult struct {
+	purged int
+	failed int
+}
 
 func purgeMain() {
 	// Optional dir filter from os.Args[2]
@@ -57,24 +77,57 @@ func purgeMain() {
 		return
 	}
 
-	// SIGTERM first
+	result := purgeUnixProcesses(procs, purgeTermGrace)
+	if result.failed > 0 {
+		fmt.Printf("Purged %d process(es). Failed %d process(es).\n", result.purged, result.failed)
+		return
+	}
+	fmt.Printf("Purged %d process(es).\n", result.purged)
+}
+
+func purgeUnixProcesses(procs []purgeProc, termGrace time.Duration) purgeResult {
 	for _, p := range procs {
-		if proc, err := os.FindProcess(p.pid); err == nil {
-			proc.Signal(syscall.SIGTERM)
+		_ = unixSignalProcess(p.pid, syscall.SIGTERM)
+	}
+	time.Sleep(termGrace)
+
+	var result purgeResult
+	for _, p := range procs {
+		if unixProcessGone(p.pid) {
+			result.purged++
+			continue
+		}
+		if err := unixSignalProcess(p.pid, syscall.SIGKILL); err != nil {
+			result.failed++
+			continue
+		}
+		if waitForUnixProcessExit(p.pid, purgeVerifyDeadline, purgeVerifyInterval) {
+			result.purged++
+		} else {
+			result.failed++
 		}
 	}
-	time.Sleep(2 * time.Second)
+	return result
+}
 
-	// SIGKILL survivors
-	killed := 0
-	for _, p := range procs {
-		if proc, err := os.FindProcess(p.pid); err == nil {
-			if proc.Signal(syscall.Signal(0)) == nil {
-				proc.Signal(syscall.SIGKILL)
-			}
+// unixProcessGone reports whether a signal-0 probe proves pid no longer exists.
+// Only ESRCH (which os.Process.Signal surfaces as os.ErrProcessDone) is proof of
+// absence; EPERM or any other probe error means the process may still be
+// running and must not be counted as purged.
+func unixProcessGone(pid int) bool {
+	err := unixSignalProcess(pid, syscall.Signal(0))
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
+
+func waitForUnixProcessExit(pid int, deadline, interval time.Duration) bool {
+	end := time.Now().Add(deadline)
+	for {
+		if unixProcessGone(pid) {
+			return true
 		}
-		killed++
+		if !time.Now().Before(end) {
+			return false
+		}
+		time.Sleep(interval)
 	}
-
-	fmt.Printf("Purged %d process(es).\n", killed)
 }
