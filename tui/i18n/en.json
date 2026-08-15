@@ -380,6 +380,7 @@
   "props.detail_mcp": "MCP servers",
   "props.detail_daemons": "Daemons",
   "props.detail_daemons_running": "running",
+  "props.detail_daemons_terminal": "terminal",
   "props.detail_daemons_total": "total",
   "props.model": "Model",
   "props.provider": "Provider",

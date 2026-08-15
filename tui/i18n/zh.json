@@ -376,6 +376,7 @@
   "props.detail_mcp": "MCP 服务器",
   "props.detail_daemons": "神识",
   "props.detail_daemons_running": "运行中",
+  "props.detail_daemons_terminal": "已终止",
   "props.detail_daemons_total": "总数",
   "props.model": "模型",
   "props.provider": "提供商",

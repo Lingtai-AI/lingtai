@@ -34,6 +34,28 @@ func TestPropsCtrlRTriggersReload(t *testing.T) {
 	}
 }
 
+func TestPropsDetailCtrlRRefreshesSnapshot(t *testing.T) {
+	agentDir := t.TempDir()
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"), []byte(
+		`{"ts":"2026-08-15T00:00:00Z","input":7,"output":2,"model":"test"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewPropsModel(t.TempDir(), agentDir, t.TempDir())
+	m.detailOpen = true
+	updated, cmd := m.Update(ctrlR())
+	if cmd == nil {
+		t.Fatal("PropsModel detail ctrl+r returned nil outer reload command")
+	}
+	if len(updated.detailRecent) != 1 || updated.detailRecent[0].Input != 7 {
+		t.Fatalf("detail ctrl+r did not refresh the snapshot: %+v", updated.detailRecent)
+	}
+}
+
 func TestMailCtrlRTriggersRefresh(t *testing.T) {
 	dir := t.TempDir()
 	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)

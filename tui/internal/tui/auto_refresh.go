@@ -47,16 +47,9 @@ func autoRefreshCtrlRMsg() tea.KeyPressMsg {
 func (a App) autoRefreshActiveView() (App, tea.Cmd) {
 	switch a.currentView {
 	case appViewProps:
-		// Keep the dashboard live, but do not interrupt the agent picker. The
-		// Ctrl+D detail layer is also live: refresh its derived breakdowns in
-		// place before scheduling the same outer dashboard reload Ctrl+R uses.
-		if a.props.pickerOpen {
-			return a, nil
-		}
-		if a.props.detailOpen {
-			a.props.loadDetail()
-			a.props.syncViewportContent()
-		}
+		// Keep the cheap outer dashboard snapshot live. AutoReloadCmd owns the
+		// picker/detail gates; in particular, the O(number of daemon runs)
+		// detail snapshot is refreshed only on open or explicit Ctrl+R.
 		return a, a.props.AutoReloadCmd()
 	}
 	return a, nil

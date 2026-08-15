@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
@@ -19,21 +21,30 @@ const tailReadChunk = 64 * 1024
 // long-lived agents, so the fallback only tails the most recent lines.
 const tailScanLines = 1000
 
+type recentMarkerCacheEntry struct {
+	size    int64
+	modTime time.Time
+	times   []time.Time
+}
+
+var recentMarkerCache = struct {
+	sync.Mutex
+	byKey map[string]recentMarkerCacheEntry
+}{byKey: map[string]recentMarkerCacheEntry{}}
+
 // RecentRebuildTimes returns the timestamps of recent molt (psyche_molt)
-// events for an agent, newest first, capped at limit. It is best-effort and
-// never errors: the primary source is the agent's logs/log.sqlite sidecar via
-// a targeted LIMIT query (no full scan); if that is missing or fails, it falls
-// back to tailing the last tailScanLines lines of logs/events.jsonl. Missing
-// or malformed logs simply yield no markers, so callers can render no
-// separator.
+// events for an agent, newest first, capped at limit. The bounded query result
+// is memoized against authoritative events-store size+mtime.
 func RecentRebuildTimes(agentDir string, limit int) []time.Time {
 	if limit <= 0 {
 		limit = 10
 	}
-	if times, err := sqlitelog.QueryRecentMoltTimes(agentDir, limit); err == nil {
-		return times
-	}
-	return tailEventTimes(filepath.Join(agentDir, "logs", "events.jsonl"), "psyche_molt", tailScanLines, limit)
+	return cachedRecentMarkerTimes(agentDir, "psyche_molt", limit, func() []time.Time {
+		if times, err := sqlitelog.QueryRecentMoltTimes(agentDir, limit); err == nil {
+			return times
+		}
+		return tailEventTimes(filepath.Join(agentDir, "logs", "events.jsonl"), "psyche_molt", tailScanLines, limit)
+	})
 }
 
 // RecentRefreshCompleteTimes returns the timestamps of recent /refresh
@@ -45,10 +56,36 @@ func RecentRefreshCompleteTimes(agentDir string, limit int) []time.Time {
 	if limit <= 0 {
 		limit = 10
 	}
-	if times, err := sqlitelog.QueryRecentRefreshCompleteTimes(agentDir, limit); err == nil {
+	return cachedRecentMarkerTimes(agentDir, "refresh_complete", limit, func() []time.Time {
+		if times, err := sqlitelog.QueryRecentRefreshCompleteTimes(agentDir, limit); err == nil {
+			return times
+		}
+		return tailEventTimes(filepath.Join(agentDir, "logs", "events.jsonl"), "refresh_complete", tailScanLines, limit)
+	})
+}
+
+func cachedRecentMarkerTimes(agentDir, eventType string, limit int, load func() []time.Time) []time.Time {
+	freshPath, info := eventsStoreFreshness(agentDir)
+	if info == nil {
+		return load()
+	}
+	key := filepath.Clean(freshPath) + "|" + eventType + "|" + strconv.Itoa(limit)
+	recentMarkerCache.Lock()
+	entry, ok := recentMarkerCache.byKey[key]
+	if ok && entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+		times := append([]time.Time(nil), entry.times...)
+		recentMarkerCache.Unlock()
 		return times
 	}
-	return tailEventTimes(filepath.Join(agentDir, "logs", "events.jsonl"), "refresh_complete", tailScanLines, limit)
+	recentMarkerCache.Unlock()
+
+	times := load()
+	recentMarkerCache.Lock()
+	recentMarkerCache.byKey[key] = recentMarkerCacheEntry{
+		size: info.Size(), modTime: info.ModTime(), times: append([]time.Time(nil), times...),
+	}
+	recentMarkerCache.Unlock()
+	return times
 }
 
 // tailEventTimes inspects only the last maxLines lines of an events.jsonl file

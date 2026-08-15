@@ -376,6 +376,7 @@
   "props.detail_mcp": "MCP 之器",
   "props.detail_daemons": "神识",
   "props.detail_daemons_running": "运行",
+  "props.detail_daemons_terminal": "已终",
   "props.detail_daemons_total": "总",
   "props.model": "型",
   "props.provider": "供",

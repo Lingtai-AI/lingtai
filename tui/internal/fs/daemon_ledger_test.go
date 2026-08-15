@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // writeDaemonLedger writes a daemon's per-call token_ledger.jsonl under
@@ -574,5 +575,122 @@ func TestDaemonLedgerSummaryZeroCLITokensFallsBackToLegacyTokens(t *testing.T) {
 	}
 	if legacy.APICalls != 0 {
 		t.Errorf("legacy fallback should have 0 api_calls, got %d", legacy.APICalls)
+	}
+}
+
+func TestDaemonDetailSnapshotBoundsRunContentsButCountsAllDirectories(t *testing.T) {
+	agentDir := t.TempDir()
+	base := time.Unix(1_700_000_000, 0)
+	for i := 1; i <= 5; i++ {
+		runID := fmt.Sprintf("em-%d", i)
+		state := "done"
+		if i == 5 {
+			state = "running"
+		}
+		writeDaemonState(t, agentDir, runID, map[string]interface{}{
+			"handle": fmt.Sprintf("em-%d", i),
+			"state":  state,
+		})
+		writeDaemonLedger(t, agentDir, runID, []string{
+			fmt.Sprintf(`{"ts":"2026-01-01T00:00:0%dZ","input":%d}`, i, i),
+		})
+		runDir := filepath.Join(agentDir, "daemons", runID)
+		stamp := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snapshot := ReadDaemonDetailSnapshot(agentDir, 2, 100)
+	if snapshot.TotalRuns != 5 || snapshot.Counts.Total != 5 || snapshot.ScannedRuns != 2 {
+		t.Fatalf("window/counts = scanned:%d total:%d counts:%+v", snapshot.ScannedRuns, snapshot.TotalRuns, snapshot.Counts)
+	}
+	if snapshot.Counts.Running != 1 || snapshot.TerminalRuns != 4 {
+		t.Fatalf("running/terminal = %d/%d, want 1/4", snapshot.Counts.Running, snapshot.TerminalRuns)
+	}
+	if got := snapshot.ByProvider["unknown"].Input; got != 9 {
+		t.Fatalf("recent-window input = %d, want 9 (runs 5+4)", got)
+	}
+	if len(snapshot.Recent) != 2 || snapshot.Recent[0].Input != 5 || snapshot.Recent[1].Input != 4 {
+		t.Fatalf("recent rows = %+v", snapshot.Recent)
+	}
+}
+
+func TestDaemonDetailSnapshotInvalidatesLiveRunOnNewLedgerRow(t *testing.T) {
+	agentDir := t.TempDir()
+	runID := "em-live"
+	writeDaemonState(t, agentDir, runID, map[string]interface{}{
+		"handle": "em-live",
+		"state":  "running",
+	})
+	writeDaemonLedger(t, agentDir, runID, []string{
+		`{"ts":"2026-01-01T00:00:01Z","input":1}`,
+	})
+	heartbeat := filepath.Join(agentDir, "daemons", runID, ".heartbeat")
+	if err := os.WriteFile(heartbeat, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first := ReadDaemonDetailSnapshot(agentDir, 128, 100)
+	if len(first.Recent) != 1 {
+		t.Fatalf("first rows = %d, want 1", len(first.Recent))
+	}
+	ledger := filepath.Join(agentDir, "daemons", runID, "logs", "token_ledger.jsonl")
+	f, err := os.OpenFile(ledger, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"ts":"2026-01-01T00:00:02Z","input":2}` + "\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(heartbeat, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	second := ReadDaemonDetailSnapshot(agentDir, 128, 100)
+	if len(second.Recent) != 2 || second.Recent[0].Input != 2 {
+		t.Fatalf("live append hidden by cache: %+v", second.Recent)
+	}
+	if got := second.ByProvider["unknown"].Input; got != 3 {
+		t.Fatalf("live total input = %d, want 3", got)
+	}
+}
+
+func BenchmarkDaemonDetailSnapshot1500Runs(b *testing.B) {
+	agentDir := b.TempDir()
+	base := time.Unix(1_700_000_000, 0)
+	for i := 0; i < 1500; i++ {
+		runID := fmt.Sprintf("em-%04d", i)
+		runDir := filepath.Join(agentDir, "daemons", runID)
+		logsDir := filepath.Join(runDir, "logs")
+		if err := os.MkdirAll(logsDir, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		card := fmt.Sprintf(`{"handle":%q,"state":"done"}`, runID)
+		if err := os.WriteFile(filepath.Join(runDir, "daemon.json"), []byte(card), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		ledger := fmt.Sprintf(`{"ts":"2026-01-01T00:00:00.%06dZ","input":1}`+"\n", i)
+		if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"), []byte(ledger), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshot := ReadDaemonDetailSnapshot(agentDir, 128, 100)
+		if snapshot.TotalRuns != 1500 || snapshot.ScannedRuns != 128 || len(snapshot.Recent) != 100 {
+			b.Fatalf("bad snapshot: total=%d scanned=%d rows=%d", snapshot.TotalRuns, snapshot.ScannedRuns, len(snapshot.Recent))
+		}
 	}
 }

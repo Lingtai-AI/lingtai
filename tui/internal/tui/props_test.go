@@ -721,6 +721,52 @@ func TestPropsRenderDetailCombinedMath(t *testing.T) {
 	}
 }
 
+func BenchmarkPropsLoadDetail1500DaemonRuns(b *testing.B) {
+	agentDir := b.TempDir()
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	mainLedger := filepath.Join(logsDir, "token_ledger.jsonl")
+	if err := os.WriteFile(mainLedger, []byte(`{"ts":"2026-01-01T00:00:00Z","input":1}`+"\n"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+
+	base := time.Unix(1_700_000_000, 0)
+	for i := 0; i < 1500; i++ {
+		runID := fmt.Sprintf("em-%04d", i)
+		runDir := filepath.Join(agentDir, "daemons", runID)
+		runLogs := filepath.Join(runDir, "logs")
+		if err := os.MkdirAll(runLogs, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		card := fmt.Sprintf(`{"handle":%q,"state":"done"}`, runID)
+		if err := os.WriteFile(filepath.Join(runDir, "daemon.json"), []byte(card), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		ledger := fmt.Sprintf(`{"ts":"2026-01-01T00:00:00.%06dZ","input":1}`+"\n", i)
+		if err := os.WriteFile(filepath.Join(runLogs, "token_ledger.jsonl"), []byte(ledger), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// loadData normally primes this exact main-ledger snapshot before Ctrl+D.
+	_ = fs.SumTokenLedger(mainLedger)
+	m := PropsModel{selectedDir: agentDir}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.loadDetail()
+		if m.detailDaemonRunsTotal != 1500 || len(m.detailDaemonRecent) != detailRecentCalls {
+			b.Fatalf("bad detail snapshot: total=%d rows=%d", m.detailDaemonRunsTotal, len(m.detailDaemonRecent))
+		}
+	}
+}
+
 func TestPropsRenderDetailNoProviderData(t *testing.T) {
 	m := PropsModel{
 		detailByProvider:       map[string]fs.TokenTotals{},
