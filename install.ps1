@@ -42,7 +42,9 @@
     is installed -- LingTai is never installed from a package index by name and
     the kernel tag is never resolved as "latest" or changed from the pin.
     -SkipVenv is the explicit binary-only mode that skips all of this and creates
-    no venv; it still requires and installs both the TUI and portal. -DryRun
+    no venv; it still requires and installs both the TUI and portal unless
+    -SkipPortal is also given. -SkipPortal is the TUI-only opt-out (mirrors
+    install.sh --skip-portal): portal is neither required nor installed. -DryRun
     performs the same resolution/validation reads but writes nothing.
 
 .PARAMETER Version
@@ -74,6 +76,15 @@
 
 .PARAMETER SkipVenv
     Skip Python runtime venv provisioning. No venv is created.
+
+.PARAMETER SkipPortal
+    Install only the lingtai-tui binary, not lingtai-portal. Mirrors install.sh's
+    --skip-portal. In release/local-artifact modes the archive is still validated
+    and the staged TUI version still confirmed, but lingtai-portal.exe is neither
+    required nor copied. In -Latest mode the portal web frontend and portal Go
+    build are skipped entirely; the completed install is TUI-only and the
+    metadata records only the TUI binary. This is the Windows counterpart of the
+    POSIX TUI-only recovery path (install.sh --skip-portal / --skip-python).
 
 .PARAMETER NoModifyPath
     Do not persist PATH changes. Persistent user PATH is left untouched.
@@ -116,6 +127,7 @@ param(
     [string]$ChecksumPath,
     [switch]$Latest,
     [switch]$SkipVenv,
+    [switch]$SkipPortal,
     [switch]$NoModifyPath,
     [switch]$DryRun
 )
@@ -922,7 +934,8 @@ LingTai's Windows runtime venv is created from an already-available supported
 Python installation at this stage; the release/local-artifact path does not
 bootstrap an unpinned Python/uv toolchain. Install Python 3.11+ (for example from
 python.org or the Microsoft Store) and re-run, or pass -SkipVenv to install
-the TUI/portal binaries only (both binaries are still required).
+the TUI/portal binaries only (both binaries are still required unless
+-SkipPortal is also given).
 "@
 }
 
@@ -1756,7 +1769,11 @@ function Build-LatestMain {
     Write-Info "Resolved TUI main commit: $tuiSha"
     Write-Info "Resolved kernel main commit: $kernelSha"
     if ($DryRun) {
-        Write-Step "[dry-run] would shallow-checkout both pinned main commits and build lingtai-tui.exe plus required lingtai-portal.exe"
+        if ($SkipPortal) {
+            Write-Step "[dry-run] would shallow-checkout both pinned main commits and build lingtai-tui.exe only (portal skipped by -SkipPortal)"
+        } else {
+            Write-Step "[dry-run] would shallow-checkout both pinned main commits and build lingtai-tui.exe plus required lingtai-portal.exe"
+        }
         return @{ TuiSha = $tuiSha; KernelSha = $kernelSha; DryRun = $true }
     }
 
@@ -1788,13 +1805,15 @@ function Build-LatestMain {
     $tuiOut = Join-Path $stage 'lingtai-tui.exe'
     $portalOut = Join-Path $stage 'lingtai-portal.exe'
 
-    $phase = Start-Phase 'Building the portal web frontend (npm ci + npm run build; the longest step) ...'
-    Push-Location (Join-Path $tuiSource 'portal/web')
-    try {
-        Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed' -LogPath $buildLog
-        Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed' -LogPath $buildLog
-    } finally { Pop-Location }
-    Complete-Phase -Clock $phase -Message 'portal web assets built'
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Building the portal web frontend (npm ci + npm run build; the longest step) ...'
+        Push-Location (Join-Path $tuiSource 'portal/web')
+        try {
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed' -LogPath $buildLog
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed' -LogPath $buildLog
+        } finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'portal web assets built'
+    }
 
     $phase = Start-Phase 'Compiling lingtai-tui.exe ...'
     Push-Location (Join-Path $tuiSource 'tui')
@@ -1802,13 +1821,19 @@ function Build-LatestMain {
     finally { Pop-Location }
     Complete-Phase -Clock $phase -Message 'lingtai-tui.exe compiled'
 
-    $phase = Start-Phase 'Compiling lingtai-portal.exe ...'
-    Push-Location (Join-Path $tuiSource 'portal')
-    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' -LogPath $buildLog }
-    finally { Pop-Location }
-    Complete-Phase -Clock $phase -Message 'lingtai-portal.exe compiled'
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Compiling lingtai-portal.exe ...'
+        Push-Location (Join-Path $tuiSource 'portal')
+        try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' -LogPath $buildLog }
+        finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'lingtai-portal.exe compiled'
+    }
 
     Confirm-StagedVersion -StagedTui $tuiOut -Requested $version
+    if ($SkipPortal) {
+        Write-Step "-SkipPortal: portal build skipped; install will be TUI-only"
+        return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = $kernelSource; TuiSha = $tuiSha; KernelSha = $kernelSha; Version = $version; Tui = $tuiOut; Portal = $null; DryRun = $false }
+    }
     $portalProbe = & $portalOut 'version' 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0 -or $portalProbe.Trim() -ne "lingtai-portal $version") {
         Fail "Built lingtai-portal.exe failed provenance verification (expected 'lingtai-portal $version', got '$($portalProbe.Trim())'). Staging kept at $stage."
@@ -1864,9 +1889,15 @@ function Install-MainVenv {
 function Install-FromBuiltMain {
     param([hashtable]$Build, [string]$BinDir)
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'; $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
+    $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Remove-ParkedManagedBinaries -BinDir $BinDir
     Copy-ManagedBinary -Source $Build.Tui -Destination $tuiDest
+    if ($SkipPortal) {
+        Write-Step "-SkipPortal: not installing lingtai-portal.exe"
+        Write-Ok "Installed pinned main TUI binary into $BinDir (TUI-only)"
+        return @($tuiDest)
+    }
+    $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
     Copy-ManagedBinary -Source $Build.Portal -Destination $portalDest
     Write-Ok "Installed pinned main binaries into $BinDir"
     return @($tuiDest,$portalDest)
@@ -1901,7 +1932,11 @@ function Install-FromLocalArtifact {
         Write-Warn "DRY RUN: checksum verified; no staging, extraction, or install will occur."
         Write-Step "[dry-run] would expand the archive into an installer-owned staging dir under TEMP"
         Write-Step "[dry-run] would require lingtai-tui.exe and verify it reports version '$Requested'"
-        Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
+        if ($SkipPortal) {
+            Write-Step "[dry-run] would install lingtai-tui.exe only into $BinDir (portal skipped by -SkipPortal)"
+        } else {
+            Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
+        }
         return @()
     }
 
@@ -1926,16 +1961,17 @@ function Install-FromLocalArtifact {
     # 4. Verify the STAGED tui reports the requested version BEFORE any BinDir write.
     Confirm-StagedVersion -StagedTui $tui.FullName -Requested $Requested
 
-    # Require the portal before any destination write. A verified archive that
-    # omits it is not a complete Windows bundle, including under -SkipVenv.
+    # Require the portal before any destination write, unless -SkipPortal. A
+    # verified archive that omits it is not a complete Windows bundle, including
+    # under -SkipVenv; -SkipPortal is the explicit TUI-only opt-out.
     $portal = Get-ChildItem -LiteralPath $extract -Recurse -Filter 'lingtai-portal.exe' -ErrorAction SilentlyContinue |
         Select-Object -First 1
-    if (-not $portal) {
+    if (-not $portal -and -not $SkipPortal) {
         Fail "Archive does not contain required lingtai-portal.exe. Staging kept for inspection: $stage"
     }
 
-    # 5. Install idempotently into BinDir (only reached once both binaries and
-    # the staged TUI version have been validated).
+    # 5. Install idempotently into BinDir (only reached once the required
+    # binaries and the staged TUI version have been validated).
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     Remove-ParkedManagedBinaries -BinDir $BinDir
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
@@ -1944,10 +1980,14 @@ function Install-FromLocalArtifact {
 
     $managed = New-Object System.Collections.Generic.List[string]
     $managed.Add($tuiDest)
-    $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
-    Copy-ManagedBinary -Source $portal.FullName -Destination $portalDest
-    Write-Ok "Installed lingtai-portal.exe -> $BinDir"
-    $managed.Add($portalDest)
+    if (-not $SkipPortal) {
+        $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
+        Copy-ManagedBinary -Source $portal.FullName -Destination $portalDest
+        Write-Ok "Installed lingtai-portal.exe -> $BinDir"
+        $managed.Add($portalDest)
+    } else {
+        Write-Step "-SkipPortal: not installing lingtai-portal.exe"
+    }
 
     return $managed.ToArray()
 }
@@ -1990,7 +2030,11 @@ function Install-FromPublicRelease {
     if ($DryRun) {
         Write-Step "[dry-run] would download $($bundle.ArchiveFilename) and its .sha256 sidecar from $RepoUrl release $tag"
         Write-Step "[dry-run] would verify the archive against the bundle manifest digest, stage, and verify the staged version"
-        Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
+        if ($SkipPortal) {
+            Write-Step "[dry-run] would install lingtai-tui.exe only into $BinDir (portal skipped by -SkipPortal)"
+        } else {
+            Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
+        }
         return @{ Managed = @(); Bundle = $bundle; Tag = $tag }
     }
 
@@ -2062,13 +2106,14 @@ function Invoke-Main {
         if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
         if ($SkipVenv) { $conflicts.Add('-SkipVenv') }
         if ($conflicts.Count -gt 0) {
-            Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries and provisions the checked-out kernel runtime."
+            Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries (unless -SkipPortal) and provisions the checked-out kernel runtime."
         }
         Write-Info 'Mode: current main development install (-Latest)'
         Write-Step "Binaries -> $BinDir"
         Write-Step "State    -> $GlobalDir"
         # 7 phases: prerequisites, 2 checkouts, portal web, 2 Go builds, runtime venv.
-        Set-PhaseTotal 7
+        # With -SkipPortal: 5 phases (no portal web, no portal Go build).
+        if ($SkipPortal) { Set-PhaseTotal 5 } else { Set-PhaseTotal 7 }
         $pythonIndexUrl = if ($DryRun) { $null } else { Initialize-BuildMirrors }
         $mainBuild = Build-LatestMain
         if ($DryRun) {

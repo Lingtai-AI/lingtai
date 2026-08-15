@@ -5,6 +5,14 @@ related_files:
   - ANATOMY.md
   - README.md
   - dev-guide-skill/SKILL.md
+  - install.sh
+  - install.ps1
+  - scripts/update.sh
+  - scripts/fix.sh
+  - scripts/verify.sh
+  - scripts/dev.sh
+  - scripts/remove.sh
+  - scripts/remove.ps1
   - tui/architecture_documents_test.go
   - tui/CONTRACT.md
 maintenance: |
@@ -327,6 +335,62 @@ update the Port, affected Adapters, shared contract tests, and paired Anatomy
 when structure or composition also changes. A change to the shared `.lingtai/`
 schema is breaking whenever it makes a previously conforming reader (either
 binary, on any supported OS) no longer conform.
+
+### Installer family parity contract
+
+`install.sh` is the canonical installer feature surface; `install.ps1` is its
+native-Windows counterpart and MUST mirror every functional capability of
+`install.sh` unless a platform difference is explicitly documented and
+authorized (e.g. Homebrew migration is POSIX-only, Windows PATH handling is
+Windows-only). The same rule covers the maintenance children: the six lifecycle
+assets (`update.sh`, `fix.sh`, `verify.sh`, `dev.sh`, `remove.sh`) are the
+canonical surface, and Windows counterparts (`remove.ps1` today; `update.ps1`,
+`fix.ps1`, `verify.ps1`, `dev.ps1` to be added) MUST be created and kept in
+parity as those POSIX capabilities evolve.
+
+Concretely:
+
+- Any PR that changes a POSIX installer capability (a new flag, a changed
+  behavior, a new lifecycle asset, a new receipt field, a new failure mode)
+  MUST change the matching Windows asset in the same PR, or explicitly state in
+  the PR body that the feature is platform-specific and justify why the Windows
+  side is unaffected. A PR that only touches `install.sh` or a `scripts/*.sh`
+  lifecycle asset is treated as incomplete installer work and requires the
+  Windows counterpart (or an explicit platform-N/A note) before merge.
+- The parity table below is the review checklist. A capability row with a
+  Windows status of `missing` is an open drift item: the PR that fixes it is
+  the remedy; the table is updated in that same PR.
+- Windows-only capabilities (local-artifact mode `-ArchivePath`/`-ChecksumPath`,
+  `-DryRun`, `-NoModifyPath`, `-GlobalDir`) are legitimate platform surface;
+  they are tracked in the table so the POSIX side knows what it does not need to
+  mirror, not as drift.
+
+| install.sh capability | install.ps1 counterpart | Windows status |
+|---|---|---|
+| `--version <tag>` | `-Version` | synced |
+| `--latest` (main dev mode) | `-Latest` | synced |
+| `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
+| `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
+| `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
+| `--source auto\|github\|gitee` | — | **missing**: PS1 always uses GitHub for release binaries; only `-Latest` build mirrors are CN-aware |
+| `--ref <ref>` / `--from-source` | — | **missing**: PS1 has no arbitrary-ref or force-source build (only `-Latest`) |
+| `--update` (in-place) | — | **missing**: PS1 has no in-place update; re-run `install.ps1` |
+| `--non-interactive` | `-DryRun` (partial) | **partial**: PS1 has plan-only `-DryRun` but no equivalent no-prompt install switch |
+| `-ArchivePath` / `-ChecksumPath` (local artifact) | — | POSIX-N/A (Windows-only) |
+| `-DryRun` (plan-only) | — | POSIX-N/A (Windows-only) |
+| `-NoModifyPath` | — | POSIX-N/A (Windows-only) |
+| `-GlobalDir` | — | POSIX-N/A (Windows-only) |
+| `update.sh` | `update.ps1` | **missing**: to be added |
+| `fix.sh` | `fix.ps1` | **missing**: to be added |
+| `verify.sh` | `verify.ps1` | **missing**: to be added |
+| `dev.sh` | `dev.ps1` | **missing**: to be added |
+| `remove.sh` | `remove.ps1` | synced |
+
+This contract was established by Jason 2026-08-15 (`install.sh` canonical;
+every update must also update Windows). It does not expand implementation,
+Git/GitHub, release, runtime/config/auth, external-contact, purchase, deletion,
+or publication authority; it only governs installer capability parity inside
+this repository.
 
 ## Validation
 
