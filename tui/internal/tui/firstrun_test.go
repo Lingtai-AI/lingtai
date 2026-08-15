@@ -826,6 +826,26 @@ func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 	}
 }
 
+func TestEnterAgentNameDirDeduplicatesRepeatedPromptPathLines(t *testing.T) {
+	repeated := "/Users/example/.lingtai-tui/covenant/en/covenant.md\n" +
+		"/Users/example/.lingtai-tui/covenant/en/covenant.md\n" +
+		"/Users/example/.lingtai-tui/covenant/en/covenant.md"
+	m := NewFirstRunModel(t.TempDir(), t.TempDir(), true)
+	m.setupMode = true
+	m.setupKeepInitJSON = map[string]interface{}{
+		"covenant_file": repeated,
+	}
+
+	m.enterAgentNameDir(preset.Preset{Name: "dedupe-test", Manifest: map[string]interface{}{}})
+
+	if got, want := m.covenantInput.Value(), "/Users/example/.lingtai-tui/covenant/en/covenant.md"; got != want {
+		t.Fatalf("covenantInput = %q, want deduplicated single path %q", got, want)
+	}
+	if strings.Count(m.View(), "covenant/en/covenant.md") != 1 {
+		t.Fatalf("view should render the repeated covenant path once:\n%s", m.View())
+	}
+}
+
 func TestPickPreset_CodexEnterShowsMethodChooser(t *testing.T) {
 	dir := t.TempDir()
 	m := FirstRunModel{
