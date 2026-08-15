@@ -345,6 +345,41 @@ func TestMailCache_InboxAndSentDeliveredTrue(t *testing.T) {
 	}
 }
 
+func TestMailCacheSortsRFC3339NanoTimestampsByInstant(t *testing.T) {
+	humanDir := t.TempDir()
+	cases := []MailMessage{
+		{ID: "later-fraction", MailboxID: "later-fraction", From: "alice", To: []string{"human"}, Message: "later fraction", ReceivedAt: "2026-08-14T10:00:00.5Z"},
+		{ID: "earlier-whole", MailboxID: "earlier-whole", From: "alice", To: []string{"human"}, Message: "earlier whole", ReceivedAt: "2026-08-14T10:00:00Z"},
+		{ID: "later-prefix", MailboxID: "later-prefix", From: "alice", To: []string{"human"}, Message: "later prefix", ReceivedAt: "2026-08-14T10:00:01.11Z"},
+		{ID: "earlier-prefix", MailboxID: "earlier-prefix", From: "alice", To: []string{"human"}, Message: "earlier prefix", ReceivedAt: "2026-08-14T10:00:01.1Z"},
+		{ID: "normal-four", MailboxID: "normal-four", From: "alice", To: []string{"human"}, Message: "normal four", ReceivedAt: "2026-08-14T10:00:02.4Z"},
+		{ID: "normal-five", MailboxID: "normal-five", From: "alice", To: []string{"human"}, Message: "normal five", ReceivedAt: "2026-08-14T10:00:02.5Z"},
+	}
+	for _, msg := range cases {
+		msgDir := filepath.Join(humanDir, "mailbox", "inbox", msg.MailboxID)
+		if err := os.MkdirAll(msgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(msgDir, "message.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cache := NewMailCache(humanDir).Refresh()
+	got := make([]string, 0, len(cache.Messages))
+	for _, msg := range cache.Messages {
+		got = append(got, msg.Message)
+	}
+	want := []string{"earlier whole", "later fraction", "earlier prefix", "later prefix", "normal four", "normal five"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("message order = %#v, want %#v", got, want)
+	}
+}
+
 func TestMailCacheCloneDetachesMutableGraphAndPreservesShapes(t *testing.T) {
 	original := MailCache{
 		seen:      map[string]int{"one": 0, "two": 1},

@@ -840,7 +840,7 @@ func (m *MailModel) buildMessages() {
 		m.auxiliaryMessages++
 	}
 	sort.SliceStable(chatMsgs, func(i, j int) bool {
-		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp
+		return chatMessageBefore(chatMsgs[i], chatMsgs[j])
 	})
 
 	// Restore dismissed state for insights.
@@ -850,6 +850,28 @@ func (m *MailModel) buildMessages() {
 		}
 	}
 	m.messages = chatMsgs
+}
+
+func chatMessageBefore(a, b ChatMessage) bool {
+	at, aErr := time.Parse(time.RFC3339Nano, a.Timestamp)
+	bt, bErr := time.Parse(time.RFC3339Nano, b.Timestamp)
+	if aErr == nil && bErr == nil {
+		if !at.Equal(bt) {
+			return at.Before(bt)
+		}
+	} else if a.Timestamp != b.Timestamp {
+		return a.Timestamp < b.Timestamp
+	}
+	if a.Type != b.Type {
+		return a.Type < b.Type
+	}
+	if a.From != b.From {
+		return a.From < b.From
+	}
+	if a.Body != b.Body {
+		return a.Body < b.Body
+	}
+	return a.Subject < b.Subject
 }
 
 // shouldShow returns whether a session entry should be displayed given the

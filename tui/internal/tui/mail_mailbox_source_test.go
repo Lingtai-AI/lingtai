@@ -158,3 +158,31 @@ func TestMailModelOnlyUsesAcceptedMailboxSnapshotForRenderAndOlderPage(t *testin
 		t.Errorf("older-page reconstruction used live producer state: bodies=%v", olderBodies)
 	}
 }
+
+func TestMailModelBuildMessagesSortsRFC3339NanoTimestampsByInstant(t *testing.T) {
+	humanDir := t.TempDir()
+	orchDir := t.TempDir()
+	cache := fs.MailCache{Messages: []fs.MailMessage{
+		{ID: "later-fraction", MailboxID: "later-fraction", From: orchDir, To: "human", Message: "later fraction", ReceivedAt: "2026-08-14T10:00:00.5Z"},
+		{ID: "earlier-whole", MailboxID: "earlier-whole", From: orchDir, To: "human", Message: "earlier whole", ReceivedAt: "2026-08-14T10:00:00Z"},
+		{ID: "later-prefix", MailboxID: "later-prefix", From: orchDir, To: "human", Message: "later prefix", ReceivedAt: "2026-08-14T10:00:01.11Z"},
+		{ID: "earlier-prefix", MailboxID: "earlier-prefix", From: orchDir, To: "human", Message: "earlier prefix", ReceivedAt: "2026-08-14T10:00:01.1Z"},
+		{ID: "normal-four", MailboxID: "normal-four", From: orchDir, To: "human", Message: "normal four", ReceivedAt: "2026-08-14T10:00:02.4Z"},
+		{ID: "normal-five", MailboxID: "normal-five", From: orchDir, To: "human", Message: "normal five", ReceivedAt: "2026-08-14T10:00:02.5Z"},
+	}}
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+	m.acceptedSnapshot = newAcceptedMailSnapshot(cache)
+
+	m.buildMessages()
+
+	got := make([]string, 0, len(m.messages))
+	for _, msg := range m.messages {
+		if msg.Type == "mail" {
+			got = append(got, msg.Body)
+		}
+	}
+	want := []string{"earlier whole", "later fraction", "earlier prefix", "later prefix", "normal four", "normal five"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("mail order = %#v, want %#v", got, want)
+	}
+}
