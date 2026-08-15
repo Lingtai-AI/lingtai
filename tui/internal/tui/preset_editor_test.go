@@ -45,6 +45,29 @@ func testPresetEditorPreset() preset.Preset {
 	}
 }
 
+func TestPresetEditorValidationErrorUsesCurrentLocale(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("zh"); err != nil {
+		t.Fatalf("SetLang zh: %v", err)
+	}
+
+	p := testPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["model"] = ""
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "zh", nil, "", false)
+	updated, cmd := m.commit()
+	if cmd != nil {
+		t.Fatal("invalid preset commit must not emit a command")
+	}
+	if got, want := updated.saveErr, "模型不能为空。"; got != want {
+		t.Fatalf("saveErr = %q, want %q", got, want)
+	}
+	if strings.Contains(updated.saveErr, "manifest.llm.model") {
+		t.Fatalf("localized saveErr leaked schema text: %q", updated.saveErr)
+	}
+}
+
 func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
 	return testCodexPresetEditorPresetWithThinking(serviceTier, nil)
 }
