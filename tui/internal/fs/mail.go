@@ -220,9 +220,10 @@ func (c MailCache) Refresh() MailCache {
 	out.scanFolder(out.inboxDir, true)
 	out.scanFolder(out.sentDir, true)
 
-	// Sort by ReceivedAt (RFC3339 strings sort lexicographically).
+	// Sort by the parsed instant; RFC3339Nano's variable-width fractional
+	// seconds do not sort chronologically as strings.
 	sort.Slice(out.Messages, func(i, j int) bool {
-		return out.Messages[i].ReceivedAt < out.Messages[j].ReceivedAt
+		return mailMessageBefore(out.Messages[i], out.Messages[j])
 	})
 	// Rebuild the mailbox-id→index map after the sort. Keyed by MailboxID, which is
 	// the mailbox directory basename (what scanFolder looks up) — not msg.ID,
@@ -233,6 +234,22 @@ func (c MailCache) Refresh() MailCache {
 		out.seen[m.MailboxID] = i
 	}
 	return out
+}
+
+func mailMessageBefore(a, b MailMessage) bool {
+	at, aErr := time.Parse(time.RFC3339Nano, a.ReceivedAt)
+	bt, bErr := time.Parse(time.RFC3339Nano, b.ReceivedAt)
+	if aErr == nil && bErr == nil {
+		if !at.Equal(bt) {
+			return at.Before(bt)
+		}
+	} else if a.ReceivedAt != b.ReceivedAt {
+		return a.ReceivedAt < b.ReceivedAt
+	}
+	if a.MailboxID != b.MailboxID {
+		return a.MailboxID < b.MailboxID
+	}
+	return a.ID < b.ID
 }
 
 // scanFolder reads mailbox-id directories in folder. For mailbox ids not yet in seen,
