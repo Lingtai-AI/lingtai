@@ -2735,13 +2735,14 @@ func (m FirstRunModel) View() string {
 				if r == m.presetCfgCursor {
 					cursor = "> "
 				}
-				// State indicator: [*] default (also allowed), [x] allowed, [ ] not.
+				// State indicator: default and runtime-switchable are rendered as
+				// words, not symbols, so the two roles are visually distinct.
 				var marker string
 				switch {
 				case r == m.presetDefaultIdx:
-					marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[*]")
+					marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[" + i18n.T("firstrun.preset_cfg.default_marker") + "]")
 				case m.presetAllowed[r]:
-					marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[x]")
+					marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[" + i18n.T("firstrun.preset_cfg.allowed_marker") + "]")
 				default:
 					marker = StyleFaint.Render("[ ]")
 				}

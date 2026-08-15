@@ -999,6 +999,32 @@ func TestFirstRunAgentPresetsNext_AdvancesWithoutLiveCodexProbe(t *testing.T) {
 	}
 }
 
+func TestFirstRunAgentPresetsViewUsesRoleLabels(t *testing.T) {
+	m := FirstRunModel{
+		step: stepAgentPresets,
+		presets: []preset.Preset{
+			{Name: "default-one", Description: preset.PresetDescription{Summary: "default summary"}},
+			{Name: "switchable-one", Description: preset.PresetDescription{Summary: "switchable summary"}},
+			{Name: "blocked-one", Description: preset.PresetDescription{Summary: "blocked summary"}},
+		},
+		savedPresetIdx:   []int{0, 1, 2},
+		presetAllowed:    []bool{true, true, false},
+		presetDefaultIdx: 0,
+		presetCfgCursor:  0,
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "[default]") {
+		t.Fatalf("preset role labels should name the default row:\n%s", view)
+	}
+	if !strings.Contains(view, "[switchable]") {
+		t.Fatalf("preset role labels should name runtime-switchable rows:\n%s", view)
+	}
+	if strings.Contains(view, "[*]") || strings.Contains(view, "[x]") {
+		t.Fatalf("preset role labels must not render ambiguous symbol markers:\n%s", view)
+	}
+}
+
 // TestPresetKeyNext_SaveConfigErrorSurfacesAndDoesNotAdvance covers the
 // stepPresetKey "Next" path (issue #509): when persisting the pasted API key
 // fails, the wizard must surface the error and stay on stepPresetKey rather
