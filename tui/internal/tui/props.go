@@ -74,14 +74,23 @@ type PropsModel struct {
 	detailLastSessionToolCalls    int64
 	detailContextStats            fs.ContextStats
 	detailDaemonCounts            fs.DaemonCounts
+	detailDaemonRunsScanned       int // newest run dirs included in daemon token/call data
+	detailDaemonRunsTotal         int // all run dirs counted without opening every daemon.json
+	detailDaemonRunsTerminal      int // total minus bounded/observed-live nonterminal runs
 	detailMCPNames                []string
 	detailRebuilds                []time.Time // psyche_molt times, newest first; rendered as molt separators
 	detailRefreshes               []time.Time // refresh_complete times, newest first; rendered as context-rebuilt separators
 }
 
-// detailRecentCalls is the number of recent token-ledger calls shown in each
-// Ctrl+D recent-call lane (main agent on the left, daemons on the right).
-const detailRecentCalls = 100
+const (
+	// detailRecentCalls is the number of recent token-ledger calls shown in each
+	// Ctrl+D recent-call lane (main agent on the left, daemons on the right).
+	detailRecentCalls = 100
+	// detailRecentDaemonRuns caps daemon cards/ledgers opened by one detail scan.
+	// The complete directory is metadata-scanned for ordering and an exact run-dir
+	// total, but historical run contents outside this window are never opened.
+	detailRecentDaemonRuns = 128
+)
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 	return PropsModel{
@@ -150,12 +159,11 @@ func (m PropsModel) Init() tea.Cmd { return m.loadData }
 // updates fields in place and re-renders without resetting scroll, cursor, or
 // folder state.
 //
-// Returns nil — skipping this tick — while the agent picker is open (selectedDir
-// is mid-change). The Ctrl+D detail pane remains live: App.autoRefreshActiveView
-// refreshes the detail caches in place before this command reloads the outer
-// dashboard data.
+// Returns nil while the agent picker or Ctrl+D detail pane is open. Detail is
+// intentionally a point-in-time diagnostic: opening it, changing agent, or
+// explicit Ctrl+R refreshes its O(number of runs) data, never the 1s tick.
 func (m PropsModel) AutoReloadCmd() tea.Cmd {
-	if m.pickerOpen {
+	if m.pickerOpen || m.detailOpen {
 		return nil
 	}
 	return m.loadData
@@ -220,7 +228,13 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "ctrl+r":
-			// Reload the dashboard data (network, tokens, agent status) from disk.
+			// Reload the cheap dashboard data. Detail is a point-in-time
+			// diagnostic, so only an explicit refresh (or reopening it) pays for
+			// its bounded, freshness-keyed filesystem snapshot.
+			if m.detailOpen {
+				m.loadDetail()
+				m.syncViewportContent()
+			}
 			return m, m.loadData
 		case "ctrl+t":
 			m.pickerOpen = true
@@ -268,12 +282,18 @@ func (m *PropsModel) loadDetail() {
 	toolCounts := fs.SumMoltSessionToolCalls(m.selectedDir)
 	m.detailCurrentSessionToolCalls = toolCounts.Current
 	m.detailLastSessionToolCalls = toolCounts.Last
-	// Single daemon traversal returns both provider/backend totals and
-	// recent tagged rows from daemons/<run_id>/logs/token_ledger.jsonl.
-	// Per-run ledgers are authoritative; CLI/legacy snapshots from
-	// daemon.json fill in when a run has no per-call ledger and are
-	// attributed by preset_provider → backend → model derivation.
-	m.detailDaemonByProvider, m.detailDaemonRecent = fs.DaemonLedgerSummary(m.selectedDir, detailRecentCalls)
+	// The daemon snapshot opens only the newest run window. It memoizes
+	// unchanged cards/ledgers, forces a live run refresh when its heartbeat
+	// changes, and returns the all-directory total from the same cached listing.
+	// Per-run ledgers remain authoritative; CLI/legacy card snapshots fill in
+	// when a selected run has no per-call ledger.
+	daemonDetail := fs.ReadDaemonDetailSnapshot(m.selectedDir, detailRecentDaemonRuns, detailRecentCalls)
+	m.detailDaemonByProvider = daemonDetail.ByProvider
+	m.detailDaemonRecent = daemonDetail.Recent
+	m.detailDaemonCounts = daemonDetail.Counts
+	m.detailDaemonRunsScanned = daemonDetail.ScannedRuns
+	m.detailDaemonRunsTotal = daemonDetail.TotalRuns
+	m.detailDaemonRunsTerminal = daemonDetail.TerminalRuns
 	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
 	// Boundary timestamps to mark in the main-agent ledger lane. Best-effort:
 	// empty when no markers are available. Molt and /refresh reconstructions
@@ -292,8 +312,6 @@ func (m *PropsModel) loadDetail() {
 		}
 	}
 
-	// Daemon run counts from daemons/<run_id>/daemon.json.
-	m.detailDaemonCounts = fs.CountDaemons(m.selectedDir)
 }
 
 // syncViewportContent re-renders left+right panels into the viewport.
@@ -331,6 +349,9 @@ func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
 			m.selectedDir = m.agentNodes[m.pickerIdx].WorkingDir
 			m.selectedTokens = fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
 			m.selectedStatus = fs.ReadStatus(m.selectedDir)
+			if m.detailOpen {
+				m.loadDetail()
+			}
 		}
 		m.pickerOpen = false
 		m.syncViewportContent()
@@ -912,7 +933,11 @@ func (m PropsModel) renderDetail() string {
 	lines = appendProviderRows(lines, m.detailByProvider, labelStyle, valueStyle, subtleStyle)
 
 	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemon_tokens_by_provider")))
+	daemonTokenTitle := i18n.T("props.detail_daemon_tokens_by_provider")
+	if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
+		daemonTokenTitle += fmt.Sprintf(" (latest %d/%d runs)", m.detailDaemonRunsScanned, m.detailDaemonRunsTotal)
+	}
+	lines = append(lines, "  "+sectionStyle.Render(daemonTokenTitle))
 	lines = append(lines, "")
 	lines = appendProviderRows(lines, m.detailDaemonByProvider, labelStyle, valueStyle, subtleStyle)
 
@@ -932,7 +957,11 @@ func (m PropsModel) renderDetail() string {
 	}
 	if len(combined) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_combined_totals")))
+		combinedTitle := i18n.T("props.detail_combined_totals")
+		if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
+			combinedTitle += " (main + recent daemon window)"
+		}
+		lines = append(lines, "  "+sectionStyle.Render(combinedTitle))
 		lines = append(lines, "")
 		var tot fs.TokenTotals
 		for _, t := range combined {
@@ -1003,8 +1032,13 @@ func (m PropsModel) renderDetail() string {
 	lines = append(lines, "")
 	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_running")+": ")+
 		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Running)))
+	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_terminal")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonRunsTerminal)))
 	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
 		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
+	if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
+		lines = append(lines, "    "+subtleStyle.Render(fmt.Sprintf("running state checked in latest %d runs; total is directory-wide", m.detailDaemonRunsScanned)))
+	}
 	lines = append(lines, "")
 
 	// Raw recent token-ledger lanes are useful for diagnosis but visually noisy,

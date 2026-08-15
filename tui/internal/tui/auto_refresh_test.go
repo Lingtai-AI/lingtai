@@ -11,8 +11,8 @@ import (
 
 // Auto-refresh contract:
 //   - Enabled by default; only an explicit opt-out persists a key.
-//   - The kanban (props) view opts into the 1s tick via AutoReloadCmd, but
-//     skips while the picker or detail pane is open (don't interrupt the user).
+//   - The kanban (props) summary opts into the 1s tick via AutoReloadCmd, but
+//     skips while the picker or expensive detail pane is open.
 //   - The app-level tick drives a reload when enabled and re-arms; when
 //     disabled it drops without re-arming. Ctrl+R is untouched (covered by
 //     ctrl_r_refresh_test.go).
@@ -70,11 +70,11 @@ func TestPropsAutoReloadCmd(t *testing.T) {
 	}
 	m.pickerOpen = false
 
-	// Detail pane open: still reload the outer dashboard; the App-layer tick also
-	// refreshes detail caches in place before scheduling this command.
+	// Detail pane open: never attach its O(number of daemon runs) snapshot to
+	// the 1s app tick. Opening the pane and explicit Ctrl+R refresh it.
 	m.detailOpen = true
-	if m.AutoReloadCmd() == nil {
-		t.Fatal("props AutoReloadCmd should keep the Ctrl+D detail layer live")
+	if m.AutoReloadCmd() != nil {
+		t.Fatal("props AutoReloadCmd should skip while the Ctrl+D detail layer is open")
 	}
 }
 
@@ -93,7 +93,7 @@ func TestAppAutoRefreshTickReloadsAndRearms(t *testing.T) {
 	}
 }
 
-func TestAppAutoRefreshTickKeepsKanbanDetailLive(t *testing.T) {
+func TestAppAutoRefreshTickLeavesKanbanDetailSnapshotAlone(t *testing.T) {
 	a := App{
 		currentView: appViewProps,
 		props:       NewPropsModel(t.TempDir(), t.TempDir(), t.TempDir()),
@@ -102,7 +102,7 @@ func TestAppAutoRefreshTickKeepsKanbanDetailLive(t *testing.T) {
 	a.props.detailOpen = true
 	updated, cmd := a.Update(autoRefreshTickMsg{})
 	if cmd == nil {
-		t.Fatal("enabled auto-refresh tick should keep the kanban detail layer live")
+		t.Fatal("enabled auto-refresh tick should still re-arm while detail is open")
 	}
 	ua, ok := updated.(App)
 	if !ok {
@@ -110,6 +110,9 @@ func TestAppAutoRefreshTickKeepsKanbanDetailLive(t *testing.T) {
 	}
 	if !ua.props.detailOpen {
 		t.Fatal("auto-refresh should not close the kanban Ctrl+D detail layer")
+	}
+	if _, reloadCmd := ua.autoRefreshActiveView(); reloadCmd != nil {
+		t.Fatal("auto-refresh must not reload the expensive open detail snapshot")
 	}
 }
 

@@ -436,14 +436,41 @@ func ReadStatus(dir string) AgentStatus {
 	return s
 }
 
+type contextStatsCacheEntry struct {
+	size    int64
+	modTime time.Time
+	stats   ContextStats
+}
+
+var contextStatsCache = struct {
+	sync.Mutex
+	byPath map[string]contextStatsCacheEntry
+}{byPath: map[string]contextStatsCacheEntry{}}
+
 // ReadContextStats reads the agent's retained chat history and returns a
-// structural summary for diagnostics. Missing/unreadable/malformed rows are
-// treated as empty/partial data so the kanban detail view remains best-effort.
+// structural summary for diagnostics. Results are memoized by file size+mtime;
+// an unchanged detail reopen therefore does not decode the retained context
+// again, while a live append invalidates immediately.
 func ReadContextStats(dir string) ContextStats {
+	path := filepath.Join(dir, "history", "chat_history.jsonl")
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ContextStats{}
+	}
+	contextStatsCache.Lock()
+	cached, ok := contextStatsCache.byPath[filepath.Clean(path)]
+	if ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		stats := cached.stats
+		stats.ToolCounts = append([]ContextToolCount(nil), stats.ToolCounts...)
+		contextStatsCache.Unlock()
+		return stats
+	}
+	contextStatsCache.Unlock()
+
 	var stats ContextStats
 	callCounts := map[string]int{}
 	resultCounts := map[string]int{}
-	_ = forEachJSONLLine(filepath.Join(dir, "history", "chat_history.jsonl"), func(line []byte) {
+	_ = forEachJSONLLine(path, func(line []byte) {
 		var entry struct {
 			Role    string          `json:"role"`
 			System  string          `json:"system"`
@@ -539,6 +566,13 @@ func ReadContextStats(dir string) ContextStats {
 			Results: resultCounts[name],
 		})
 	}
+	stored := stats
+	stored.ToolCounts = append([]ContextToolCount(nil), stats.ToolCounts...)
+	contextStatsCache.Lock()
+	contextStatsCache.byPath[filepath.Clean(path)] = contextStatsCacheEntry{
+		size: info.Size(), modTime: info.ModTime(), stats: stored,
+	}
+	contextStatsCache.Unlock()
 	return stats
 }
 
@@ -595,31 +629,82 @@ func SumTokenLedger(path string) TokenTotals {
 		return cached
 	}
 
-	t, err = sumTokenLedgerFile(path)
+	scan, err := scanMainTokenLedgerFile(path, tokenLedgerCachedRecent)
 	if err != nil {
 		return TokenTotals{}
 	}
-	storeTokenLedgerTotals(path, info, t)
-	return t
+	storeTokenLedgerTotals(path, info, scan.totals)
+	storeTokenLedgerDetail(path, info, scan)
+	return scan.totals
 }
 
-func sumTokenLedgerFile(path string) (TokenTotals, error) {
-	var t TokenTotals
+const tokenLedgerCachedRecent = 100
+
+type mainTokenLedgerScan struct {
+	totals      TokenTotals
+	byProvider  map[string]TokenTotals
+	recent      []LedgerEntry // newest first
+	recentLimit int
+	rowCount    int
+}
+
+// scanMainTokenLedgerFile builds the ordinary totals and the detail provider /
+// recent-row snapshot in the same pass. The summary path already has to decode
+// this ledger once, so retaining 100 rows and a small provider map lets Ctrl+D
+// reuse that work instead of scanning a large main ledger again.
+func scanMainTokenLedgerFile(path string, recentLimit int) (mainTokenLedgerScan, error) {
+	scan := mainTokenLedgerScan{
+		byProvider:  map[string]TokenTotals{},
+		recentLimit: recentLimit,
+	}
+	var ring []LedgerEntry
+	next := 0
 	err := forEachJSONLLine(path, func(line []byte) {
 		var entry LedgerEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+		if err := json.Unmarshal(line, &entry); err != nil || isDaemonLedgerEntry(entry) {
 			return
 		}
-		if isDaemonLedgerEntry(entry) {
-			return
-		}
+		scan.rowCount++
+		scan.totals.Input += entry.Input
+		scan.totals.Output += entry.Output
+		scan.totals.Thinking += entry.Thinking
+		scan.totals.Cached += entry.Cached
+		scan.totals.APICalls++
+
+		provider := DeriveLedgerProvider(entry.Endpoint, entry.Model)
+		t := scan.byProvider[provider]
 		t.Input += entry.Input
 		t.Output += entry.Output
 		t.Thinking += entry.Thinking
 		t.Cached += entry.Cached
 		t.APICalls++
+		scan.byProvider[provider] = t
+
+		if recentLimit <= 0 {
+			ring = append(ring, entry)
+			return
+		}
+		if len(ring) < recentLimit {
+			ring = append(ring, entry)
+			return
+		}
+		ring[next] = entry
+		next = (next + 1) % recentLimit
 	})
-	return t, err
+	if err != nil {
+		return mainTokenLedgerScan{}, err
+	}
+	if recentLimit > 0 && len(ring) == recentLimit && next != 0 {
+		ordered := make([]LedgerEntry, 0, len(ring))
+		ordered = append(ordered, ring[next:]...)
+		ordered = append(ordered, ring[:next]...)
+		ring = ordered
+	}
+	for i, j := 0, len(ring)-1; i < j; i, j = i+1, j-1 {
+		ring[i], ring[j] = ring[j], ring[i]
+	}
+	scan.recent = ring
+	return scan, nil
 }
 
 type tokenLedgerCacheEntry struct {
@@ -632,6 +717,20 @@ var tokenLedgerTotalsCache = struct {
 	sync.Mutex
 	byPath map[string]tokenLedgerCacheEntry
 }{byPath: map[string]tokenLedgerCacheEntry{}}
+
+type tokenLedgerDetailCacheEntry struct {
+	size        int64
+	modTime     time.Time
+	byProvider  map[string]TokenTotals
+	recent      []LedgerEntry
+	recentLimit int
+	rowCount    int
+}
+
+var tokenLedgerDetailCache = struct {
+	sync.Mutex
+	byPath map[string]tokenLedgerDetailCacheEntry
+}{byPath: map[string]tokenLedgerDetailCacheEntry{}}
 
 type moltSessionTokenLedgerCacheEntry struct {
 	ledgerSize    int64
@@ -669,6 +768,51 @@ func storeTokenLedgerTotals(path string, info os.FileInfo, totals TokenTotals) {
 	}
 }
 
+func cachedTokenLedgerDetail(path string, info os.FileInfo, recentN int) (map[string]TokenTotals, []LedgerEntry, bool) {
+	key := filepath.Clean(path)
+	tokenLedgerDetailCache.Lock()
+	defer tokenLedgerDetailCache.Unlock()
+	entry, ok := tokenLedgerDetailCache.byPath[key]
+	if !ok || entry.size != info.Size() || !entry.modTime.Equal(info.ModTime()) {
+		return nil, nil, false
+	}
+	if recentN <= 0 {
+		if entry.recentLimit > 0 && entry.rowCount > len(entry.recent) {
+			return nil, nil, false
+		}
+	} else if entry.recentLimit > 0 && entry.recentLimit < recentN && entry.rowCount > len(entry.recent) {
+		return nil, nil, false
+	}
+	providers := cloneTokenTotalsMap(entry.byProvider)
+	recent := entry.recent
+	if recentN > 0 && len(recent) > recentN {
+		recent = recent[:recentN]
+	}
+	return providers, append([]LedgerEntry(nil), recent...), true
+}
+
+func storeTokenLedgerDetail(path string, info os.FileInfo, scan mainTokenLedgerScan) {
+	key := filepath.Clean(path)
+	tokenLedgerDetailCache.Lock()
+	defer tokenLedgerDetailCache.Unlock()
+	tokenLedgerDetailCache.byPath[key] = tokenLedgerDetailCacheEntry{
+		size:        info.Size(),
+		modTime:     info.ModTime(),
+		byProvider:  cloneTokenTotalsMap(scan.byProvider),
+		recent:      append([]LedgerEntry(nil), scan.recent...),
+		recentLimit: scan.recentLimit,
+		rowCount:    scan.rowCount,
+	}
+}
+
+func cloneTokenTotalsMap(src map[string]TokenTotals) map[string]TokenTotals {
+	out := make(map[string]TokenTotals, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
 // LedgerEntry is a single per-call line from logs/token_ledger.jsonl
 // surfaced to UI consumers (the kanban detail view, primarily). Older
 // entries written before kernel v0.7.x have no Model/Endpoint/Source — those
@@ -692,48 +836,24 @@ type LedgerEntry struct {
 
 // SumTokenLedgerByProvider reads a token_ledger.jsonl, groups main-agent
 // entries by derived provider name, and returns the totals plus the most-recent
-// `recentN` raw entries (newest first). Provider attribution comes from
-// the entry's `endpoint` host when present; falls back to a `model`
-// prefix match; otherwise "unknown".
-//
-// Daemon-sourced rows are skipped here and rendered from daemon run ledgers.
-// Missing/unreadable file returns empty maps and nil entries — caller
-// renders an empty state rather than erroring.
-func SumTokenLedgerByProvider(path string, recentN int) (
-	byProvider map[string]TokenTotals, recent []LedgerEntry,
-) {
-	byProvider = map[string]TokenTotals{}
-	_ = forEachJSONLLine(path, func(line []byte) {
-		var entry LedgerEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			return
-		}
-		if isDaemonLedgerEntry(entry) {
-			return
-		}
-		provider := DeriveLedgerProvider(entry.Endpoint, entry.Model)
-		t := byProvider[provider]
-		t.Input += entry.Input
-		t.Output += entry.Output
-		t.Thinking += entry.Thinking
-		t.Cached += entry.Cached
-		t.APICalls++
-		byProvider[provider] = t
-		recent = append(recent, entry)
-		if recentN > 0 && len(recent) > recentN {
-			copy(recent, recent[len(recent)-recentN:])
-			recent = recent[:recentN]
-		}
-	})
-	// Trim to the last recentN entries, newest last in file → newest at
-	// the end of `recent`. Reverse so callers can iterate "newest first".
-	if recentN > 0 && len(recent) > recentN {
-		recent = recent[len(recent)-recentN:]
+// recentN raw entries (newest first). A size+mtime snapshot populated by the
+// ordinary SumTokenLedger summary scan makes Ctrl+D a metadata-only cache hit
+// when the ledger has not changed.
+func SumTokenLedgerByProvider(path string, recentN int) (map[string]TokenTotals, []LedgerEntry) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return map[string]TokenTotals{}, nil
 	}
-	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
-		recent[i], recent[j] = recent[j], recent[i]
+	if providers, recent, ok := cachedTokenLedgerDetail(path, info, recentN); ok {
+		return providers, recent
 	}
-	return byProvider, recent
+	scan, err := scanMainTokenLedgerFile(path, recentN)
+	if err != nil {
+		return map[string]TokenTotals{}, nil
+	}
+	storeTokenLedgerTotals(path, info, scan.totals)
+	storeTokenLedgerDetail(path, info, scan)
+	return cloneTokenTotalsMap(scan.byProvider), append([]LedgerEntry(nil), scan.recent...)
 }
 
 // SumMoltSessionTokenLedger reads an agent's logs and sums non-daemon token
