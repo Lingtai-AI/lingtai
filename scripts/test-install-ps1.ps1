@@ -28,6 +28,7 @@
         -SkipPortal              TUI-only install (mirrors install.sh --skip-portal)
         -NoModifyPath            do not persist PATH changes
         -NonInteractive          never prompt (mirrors install.sh --non-interactive)
+        -Update                  update an existing install in place (mirrors install.sh --update)
         -DryRun                  plan only; make no filesystem writes
 
     Every run isolates HOME / USERPROFILE / LOCALAPPDATA / TEMP / TMP and all
@@ -1457,6 +1458,24 @@ try {
     }
     Assert-True ($r8b.ExitCode -ne 0) 'nonexistent archive path exits non-zero with -NonInteractive'
     Assert-NotContains $r8b.Stderr 'parameter cannot be found' '-NonInteractive binds as a real switch'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8c: -Update (mirrors install.sh --update) is an accepted switch
+    # and stays fail-loud. With no prior install receipt at GlobalDir, update
+    # mode must refuse (existing state is required to update), and must not
+    # bind-fail on the switch itself.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Update parses and requires an existing receipt'
+    $home8c = New-IsolatedHome
+    $r8c = Invoke-Installer @{
+        Version  = 'v9.9.9'
+        GlobalDir = (Join-Path $home8c '.lingtai-tui')
+        SkipVenv = $true
+        Update   = $true
+    }
+    Assert-True ($r8c.ExitCode -ne 0) '-Update without an existing receipt exits non-zero'
+    Assert-NotContains $r8c.Stderr 'parameter cannot be found' '-Update binds as a real switch'
+    Assert-Contains $r8c.Stderr 'install receipt' '-Update names the missing receipt as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under

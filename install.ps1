@@ -97,6 +97,14 @@
     skip (the runtime venv is provisioned by uv, not a package manager), so on
     this platform the flag only controls the success/failure pauses.
 
+.PARAMETER Update
+    Update an existing install in place. Mirrors install.sh's --update: requires
+    -Version (release tag), targets the existing BinDir (from the existing
+    install.json receipt when -BinDir is omitted), and re-publishes the receipt
+    in place instead of refusing on existing state. Fails loud when no prior
+    install receipt exists at GlobalDir. Cannot be combined with -Latest or
+    local-artifact mode (-ArchivePath/-ChecksumPath).
+
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
     it may read and validate inputs (including the checksum) and print the plan,
@@ -138,6 +146,7 @@ param(
     [switch]$SkipPortal,
     [switch]$NoModifyPath,
     [switch]$NonInteractive,
+    [switch]$Update,
     [switch]$DryRun
 )
 
@@ -2086,8 +2095,11 @@ function Invoke-Main {
     Write-Host "------------------------------------" -ForegroundColor Magenta
     if ($DryRun) { Write-Warn "DRY RUN: no filesystem, PATH, or config writes will be made." }
 
-    # Resolve per-user, non-admin defaults.
-    if ([string]::IsNullOrWhiteSpace($BinDir))    { $BinDir    = Get-DefaultBinDir }
+    # Resolve per-user, non-admin defaults. -Update resolves BinDir from the
+    # existing install receipt below (or an explicit -BinDir), so the default
+    # is NOT applied in update mode -- a missing receipt must fail loud instead
+    # of silently defaulting to a fresh location.
+    if (-not $Update -and [string]::IsNullOrWhiteSpace($BinDir)) { $BinDir = Get-DefaultBinDir }
     if ([string]::IsNullOrWhiteSpace($GlobalDir)) { $GlobalDir = Get-DefaultGlobalDir }
 
     $rawArch = $env:PROCESSOR_ARCHITECTURE
@@ -2097,8 +2109,12 @@ function Invoke-Main {
     }
 
     # prefix is the parent of BinDir, matching install.sh's <prefix>/bin layout.
-    $prefix = Split-Path $BinDir -Parent
-    if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+    # In -Update mode BinDir is resolved below from the existing receipt (or an
+    # explicit -BinDir), so defer this computation until after that block.
+    if (-not $Update) {
+        $prefix = Split-Path $BinDir -Parent
+        if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+    }
 
     # Mode selection: local artifact requires BOTH ArchivePath and ChecksumPath.
     $haveArchive  = -not [string]::IsNullOrWhiteSpace($ArchivePath)
@@ -2108,6 +2124,43 @@ function Invoke-Main {
     }
     if ($haveArchive -and [string]::IsNullOrWhiteSpace($Version)) {
         Fail "-Version is required with -ArchivePath so staged bytes can be verified against an exact release."
+    }
+
+    # -Update is the in-place update contract (mirrors install.sh --update):
+    # requires -Version, targets the existing install's BinDir (resolved from
+    # the existing install.json receipt when -BinDir is omitted), and
+    # re-publishes the receipt in place instead of refusing on existing state.
+    if ($Update) {
+        if ($Latest) {
+            Fail "-Update cannot be combined with -Latest. Current-main mode already re-runs in place; use -Latest alone for a current-main update."
+        }
+        if ($haveArchive) {
+            Fail "-Update cannot be combined with -ArchivePath/-ChecksumPath. Local-artifact mode is an explicit single-artifact install; use -Version for an update."
+        }
+        if ([string]::IsNullOrWhiteSpace($Version)) {
+            Fail "-Update requires -Version <release-tag> so the update can be verified against an exact release."
+        }
+        if ([string]::IsNullOrWhiteSpace($BinDir)) {
+            $receiptPath = Join-Path $GlobalDir 'install.json'
+            if (-not (Test-Path -LiteralPath $receiptPath)) {
+                Fail "-Update requires an existing install receipt at $receiptPath; run install.ps1 without -Update first."
+            }
+            $existing = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            if ([string]::IsNullOrWhiteSpace($existing.bin_dir)) {
+                Fail "Existing install receipt at $receiptPath has no bin_dir; pass -BinDir explicitly."
+            }
+            $BinDir = $existing.bin_dir
+            Write-Step "Update target BinDir (from receipt): $BinDir"
+        }
+        if (-not (Test-Path -LiteralPath $BinDir)) {
+            Fail "Update target bin dir does not exist: $BinDir"
+        }
+        # prefix is the parent of BinDir, matching install.sh's <prefix>/bin
+        # layout; recompute after receipt-based resolution so the republished
+        # receipt records the same prefix as the existing one.
+        $prefix = Split-Path $BinDir -Parent
+        if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+        Write-Info "Mode: in-place update of an existing install (-Update)"
     }
     if ($Latest) {
         $conflicts = New-Object System.Collections.Generic.List[string]
