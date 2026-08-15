@@ -520,7 +520,13 @@ function Write-InstallMetadata {
         [string]$TuiCommit = '',
         [string]$KernelCommit = ''
     )
-    $stamped = $ResolvedRef -replace '^v', ''
+    # The receipt's stamped_version mirrors install.sh exactly: the resolved tag
+    # WITH its v prefix (e.g. v0.19.1), because that is what `lingtai-tui version`
+    # reports (release.yml builds with -X main.version=$TAG) and what the TUI
+    # updater compares against (tui_updater.go compares StampedVersion to the
+    # vX.Y.Z GitHub release tag). Stripping the v here previously made both
+    # verify.ps1 and the TUI's own updater fail on healthy Windows installs.
+    $stamped = $ResolvedRef
     $upgradeCommand = 're-run install.ps1 with a newer -ArchivePath/-Version'
     if ($SourceMode -eq 'latest-main') {
         if ($TuiCommit -notmatch '^[0-9a-fA-F]{40}$') { Fail "Current-main install metadata requires a full TUI commit SHA." }

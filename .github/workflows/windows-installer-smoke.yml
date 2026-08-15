@@ -18,6 +18,10 @@ on:
     paths:
       - 'install.ps1'
       - 'scripts/remove.ps1'
+      - 'scripts/update.ps1'
+      - 'scripts/fix.ps1'
+      - 'scripts/verify.ps1'
+      - 'scripts/dev.ps1'
       - 'scripts/test-install-ps1.ps1'
       - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'
@@ -28,6 +32,10 @@ on:
     paths:
       - 'install.ps1'
       - 'scripts/remove.ps1'
+      - 'scripts/update.ps1'
+      - 'scripts/fix.ps1'
+      - 'scripts/verify.ps1'
+      - 'scripts/dev.ps1'
       - 'scripts/test-install-ps1.ps1'
       - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'
@@ -99,6 +107,20 @@ jobs:
         run: |
           .\scripts\test-remove-ps1.ps1
 
+      - name: Parse-only smoke for lifecycle PS1 scripts (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $files = @('scripts\update.ps1', 'scripts\fix.ps1', 'scripts\verify.ps1', 'scripts\dev.ps1')
+          foreach ($f in $files) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$f : $($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "Parse errors in $f"
+            }
+            Write-Host "Parse OK: $f"
+          }
+
   powershell-7:
     name: PowerShell 7 (Core)
     runs-on: windows-latest
@@ -158,6 +180,20 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-remove-ps1.ps1
+
+      - name: Parse-only smoke for lifecycle PS1 scripts (PowerShell 7)
+        shell: pwsh
+        run: |
+          $files = @('scripts/update.ps1', 'scripts/fix.ps1', 'scripts/verify.ps1', 'scripts/dev.ps1')
+          foreach ($f in $files) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$f : $($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "Parse errors in $f"
+            }
+            Write-Host "Parse OK: $f"
+          }
 
   windows-current-main-smoke:
     name: Windows current-main install smoke (pwsh)

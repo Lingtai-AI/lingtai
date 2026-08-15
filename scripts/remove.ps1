@@ -149,7 +149,12 @@ function Invoke-Main {
         Fail "install metadata bin_dir does not match -BinDir; refusing to remove a target this receipt does not own."
     }
     $installKind = Get-JsonProperty $data 'install_kind'
-    $validKinds = @('release-asset', 'source-build', 'dev-source', 'powershell-release-asset', 'powershell-local-artifact')
+    # Windows-native kinds written by install.ps1 (-Latest, -Ref, -FromSource,
+    # release-asset, and local-artifact) plus the POSIX kinds remove.sh accepts
+    # for cross-platform receipts. Keeping this in lockstep with install.ps1's
+    # Write-InstallMetadata install_kind values is part of the installer parity
+    # contract (CONTRACT.md); a kind install.ps1 writes must be removable here.
+    $validKinds = @('release-asset', 'source-build', 'dev-source', 'powershell-release-asset', 'powershell-local-artifact', 'powershell-source-build', 'powershell-source-ref', 'powershell-latest-main')
     if ($validKinds -notcontains $installKind) { Fail "install metadata install_kind is not recognized or missing." }
 
     $tuiTarget = Join-Path $BinDir 'lingtai-tui.exe'
