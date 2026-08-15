@@ -9,7 +9,7 @@ description: >
   → authorized institutional publisher → LibGen and saves the paper, metadata, and a resumable
   manifest under `papers/{slug}/`.
   Read the body when you need to escape the script: custom query shapes, citation networks,
-  scholar analysis, LaTeX writing, or a tier-specific API call. Indexes 12 deep-dive API
+  scholar analysis, LaTeX writing, or a tier-specific API call. Indexes 13 deep-dive API
   references and 6 pipeline workflows under `reference/`.
 version: 3.0.0
 allowed-tools: Bash(python3 *) Bash(curl *) Bash(pip *) Bash(pip3 *)
@@ -94,7 +94,7 @@ I have an arXiv ID          → reference/api-arxiv.md (direct PDF link)
 I have a PMID               → reference/api-europe-pmc.md
 I have a bibcode            → reference/api-nasa-ads.md (requires free key)
 I only have keywords        → reference/decision-tree.md → pick API by discipline
-I need a citation network   → reference/api-semantic-scholar.md or api-openalex.md
+I need a citation network   → reference/api-semantic-scholar.md (single paper) or api-semantic-scholar-batch.md (large corpus) or api-openalex.md
 I need to override the PDF ladder → reference/pipeline-obtain-pdf.md
 Tier-5 publisher-extract failed and I want to retry it manually → reference/publisher-page-extraction.md
 OA + authorized-publisher failed and I have a batch + the user's Zotero → reference/zotero-institutional-fulltext-handoff.md
@@ -109,7 +109,7 @@ I hit an API error          → reference/error-handling.md
 
 ## Reference index
 
-### API references (12)
+### API references (13)
 
 Each card includes endpoint parameters, runnable code, response shape, rate limits, and fallbacks.
 
@@ -120,6 +120,7 @@ Each card includes endpoint parameters, runnable code, response shape, rate limi
 | DOI Resolver | [api-doi-resolver.md](reference/api-doi-resolver.md) | Batch DOI → structured citation | No |
 | OpenAlex | [api-openalex.md](reference/api-openalex.md) | Discovery, institution/concept analysis | No |
 | Semantic Scholar | [api-semantic-scholar.md](reference/api-semantic-scholar.md) | Citation networks, TLDR | No (tight limits) |
+| Semantic Scholar Batch | [api-semantic-scholar-batch.md](reference/api-semantic-scholar-batch.md) | Citation-graph construction from large ID lists | No (tight limits) |
 | CORE | [api-core.md](reference/api-core.md) | OA full-text downloads | Optional (recommended) |
 | PubMed | [api-pubmed.md](reference/api-pubmed.md) | Biomedical search, PMC full text | No |
 | Unpaywall | [api-unpaywall.md](reference/api-unpaywall.md) | OA versions / PDFs | email (real) |
@@ -159,7 +160,7 @@ Each card includes endpoint parameters, runnable code, response shape, rate limi
 
 - **Unpaywall's `email` parameter is required and must be real** — placeholder addresses get HTTP 422. Set `$LINGTAI_RESEARCH_EMAIL` once.
 - **CORE without an API key is harshly rate-limited** (~100/day vs 10,000/day with a free key from https://core.ac.uk/services/api).
-- **Semantic Scholar free tier is very tight** (~100 reqs / 5 min). Request a key for any serious citation-network work.
+- **Semantic Scholar free tier is very tight** (~100 req/day/IP, ~1 req/s practical). For large-corpus citation graphs use the batch endpoint — [api-semantic-scholar-batch.md](reference/api-semantic-scholar-batch.md). Request a key for any serious citation-network work.
 - **Google Scholar requires a stealth browser** (camoufox or playwright-stealth v2); legacy `playwright_stealth` API does not work.
 - **arXiv enforces HTTPS** — HTTP requests are 301-redirected automatically.
 - **Library Genesis legality varies by jurisdiction** — use is the user's responsibility. Pass `--no-libgen` to opt out.

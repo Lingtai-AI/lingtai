@@ -87,6 +87,8 @@ What is your input?
     │   └── scholar-analysis pipeline → trend chart + gap identification
     ├── Need to generate a literature review?
     │   └── citation-tracking pipeline → compile_literature_review()
+    ├── Need citation edges over a large corpus (hundreds+ papers)?
+    │   └── Semantic Scholar batch → POST /paper/batch (see api-semantic-scholar-batch.md)
     └── Writing/compiling a paper?
         └── latex-writing pipeline → compile + bibliography + figures + debug
 ```
@@ -119,6 +121,7 @@ Key integration points:
 | Unpaywall | ✅ | email | Open access status and free PDFs | ~10 req/s | [api-unpaywall.md](api-unpaywall.md) |
 | Europe PMC | ✅ | No | Biomedical literature, PMID lookup, full text | ~5 req/s | [api-europe-pmc.md](api-europe-pmc.md) |
 | Semantic Scholar | ✅ | Recommended | Citation networks, TLDR summaries | Strict without key | [api-semantic-scholar.md](api-semantic-scholar.md) |
+| Semantic Scholar Batch | ✅ | No | Bulk reference lists, citation graphs from large ID lists | ~100 req/day (no key) | [api-semantic-scholar-batch.md](api-semantic-scholar-batch.md) |
 | NASA ADS | ✅ | Yes (free) | Astrophysics/astronomy, BibTeX export | Reasonable | [api-nasa-ads.md](api-nasa-ads.md) |
 | INSPIRE-HEP | ✅ | No | High-energy physics, author profiles | Be respectful | [api-inspire-hep.md](api-inspire-hep.md) |
 | CORE | ✅ | Optional | OA full-text downloads | Very strict w/o key | [api-core.md](api-core.md) |
@@ -146,6 +149,7 @@ Key integration points:
 | View yearly trends in a field | OpenAlex year-by-year query | scholar-analysis |
 | Find all papers by an author | OpenAlex `filter=author.id:{id}` | scholar-analysis |
 | Find who cited a paper | OpenAlex `filter=cites:{doi}` | scholar-analysis |
+| Build a citation graph over a large corpus | Semantic Scholar batch `POST /paper/batch` (50-100 IDs/req) | api-semantic-scholar-batch |
 | Generate APA references | citation-tracking pipeline | citation-tracking |
 | Export BibTeX | NASA ADS or INSPIRE-HEP (built-in), or citation-tracking | citation-tracking |
 | Scrape Scholar search results | curl+BS (≤1 request/session) | discovery |

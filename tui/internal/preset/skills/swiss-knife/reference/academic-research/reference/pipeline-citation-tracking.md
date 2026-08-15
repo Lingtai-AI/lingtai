@@ -78,6 +78,7 @@ section.
 - Citation formats vary slightly across journals — always confirm the target journal's formatting requirements
 - BibTeX keys must be unique; auto-generated keys may conflict with existing entries
 - CrossRef and OpenAlex use different field names — standardize before formatting
+- For citation-graph construction over a large corpus (hundreds to tens of thousands of papers), fetch reference lists in bulk with the Semantic Scholar batch endpoint — [api-semantic-scholar-batch.md](api-semantic-scholar-batch.md). GROBID-only PDF reference extraction can severely undercount references; the batch endpoint returns each reference's ArXiv/DOI IDs for exact in-corpus edge matching.
 - The `host_venue` field in OpenAlex may be updated to `primary_location`
 
 ## Related Pipelines
@@ -87,3 +88,4 @@ section.
 - [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md) — Citation network & trend analysis
 - [pipeline-latex-writing.md](pipeline-latex-writing.md) — **BibTeX → `.bib` file integration**: after generating BibTeX entries, append to `references.bib` and compile with `latexmk`. See that pipeline's §3 (Bibliography Management) for the full workflow.
 - [decision-tree.md](decision-tree.md) — Comprehensive decision routing
+- [api-semantic-scholar-batch.md](api-semantic-scholar-batch.md) — Semantic Scholar batch endpoint for large-scale citation-graph construction
