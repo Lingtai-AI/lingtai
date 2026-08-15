@@ -3987,9 +3987,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	// Pre-fill prompt paths based on language — also overridden below in setup mode.
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
-	m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
-	m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
-	m.commentInput.SetValue("")
+	setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
+	setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
+	setPromptPathInputValue(&m.commentInput, "")
 	m.covenantDirty = false
 	m.soulFlowDirty = false
 	m.karmaIdx = 0   // true
@@ -4051,17 +4051,17 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		}
 		// Behavioral-layer paths live at the top level of init.json, not under manifest.
 		if s, ok := m.setupKeepInitJSON["covenant_file"].(string); ok && s != "" {
-			m.covenantInput.SetValue(s)
+			setPromptPathInputValue(&m.covenantInput, s)
 			m.covenantDirty = true
 		}
 		if s, ok := m.setupKeepInitJSON["soul_file"].(string); ok && s != "" {
-			m.soulFlowInput.SetValue(s)
+			setPromptPathInputValue(&m.soulFlowInput, s)
 			m.soulFlowDirty = true
 		}
 		if s, ok := m.setupKeepInitJSON["comment_file"].(string); ok && s != "" {
-			m.commentInput.SetValue(s)
+			setPromptPathInputValue(&m.commentInput, s)
 		} else if s, ok := m.setupKeepInitJSON["comment"].(string); ok {
-			m.commentInput.SetValue(s)
+			setPromptPathInputValue(&m.commentInput, s)
 		}
 	}
 
@@ -4185,11 +4185,35 @@ func (m *FirstRunModel) updatePromptPaths() {
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
 	if !m.covenantDirty {
-		m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
+		setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
 	}
 	if !m.soulFlowDirty {
-		m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
+		setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
 	}
+}
+
+func setPromptPathInputValue(input *textinput.Model, value string) {
+	input.SetValue(collapseDuplicatePromptPathLines(value))
+}
+
+func collapseDuplicatePromptPathLines(value string) string {
+	lines := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	})
+	if len(lines) <= 1 {
+		return strings.TrimSpace(value)
+	}
+	seen := make(map[string]bool, len(lines))
+	collapsed := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		collapsed = append(collapsed, line)
+	}
+	return strings.Join(collapsed, " ")
 }
 
 // getPresetProvider extracts provider name from a preset
