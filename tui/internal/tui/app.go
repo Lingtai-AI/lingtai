@@ -401,7 +401,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case mailRefreshMsg, mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg:
+	case mailRefreshMsg, mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg, homeAsyncStatsMsg:
 		// Mail content/count rebuilds, older pages, post-frame persistence, and
 		// telemetry can outlive the view that launched them. Route all at the root so Projects/Help
 		// cannot drop Mail's state machine; MailModel owns generation acceptance.
@@ -1877,6 +1877,7 @@ func (a App) returnFromVisit() (App, tea.Cmd) {
 func (a *App) resumeMailModel(restored MailModel) tea.Cmd {
 	a.installMailModel(restored)
 	a.mail.homeTelemetryInFlight = false
+	a.mail.homeAsyncStatsInFlight = false
 	var refreshCmd tea.Cmd
 	if a.mail.initialLoading {
 		refreshCmd = a.issueMailInitialRebuild()

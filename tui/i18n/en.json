@@ -841,5 +841,11 @@
   "firstrun.self_heal_done": "Self-healed config.json from %d key(s) in .env. Continue to propagate to your agents.",
   "firstrun.self_heal_failed": "Self-heal failed: %v",
   "degraded.banner": "⚠ config.json keys missing — derived from .env; /setup to restore",
-  "doctor.d4_no_agent_cli": "→ No agent selected — D4 (addon secrets) skipped on the CLI; run /doctor in the TUI for per-agent checks."
+  "doctor.d4_no_agent_cli": "→ No agent selected — D4 (addon secrets) skipped on the CLI; run /doctor in the TUI for per-agent checks.",
+  "mail.async_label": "Async:",
+  "mail.async_running": "running",
+  "mail.async_queued": "queued",
+  "mail.async_done": "done",
+  "mail.async_failed": "failed",
+  "mail.async_daemons_hint": "/daemons for details"
 }

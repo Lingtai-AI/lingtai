@@ -35,6 +35,9 @@ type NetworkActivity struct {
 // DaemonCounts summarizes daemon run files under a single agent directory.
 type DaemonCounts struct {
 	Running int `json:"running"`
+	Queued  int `json:"queued"`
+	Done    int `json:"done"`
+	Failed  int `json:"failed"`
 	Total   int `json:"total"`
 }
 
@@ -300,11 +303,40 @@ func CountDaemons(agentDir string) DaemonCounts {
 			continue
 		}
 		counts.Total++
-		if isRunningDaemonState(state) {
-			counts.Running++
+		switch stateBucket(state.State) {
+		case "running":
+			if isRunningDaemonState(state) {
+				counts.Running++
+			}
+		case "queued":
+			counts.Queued++
+		case "done":
+			counts.Done++
+		case "failed":
+			counts.Failed++
 		}
 	}
 	return counts
+}
+
+// stateBucket maps a daemon.json state string to the home async-stats bucket.
+// Terminal failure states (failed/cancelled/timeout) share the "failed" bucket;
+// "running" and "active" are the live bucket; everything else (queued, pending,
+// etc.) falls through to "queued" when not finished, and is ignored otherwise.
+func stateBucket(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running", "active":
+		return "running"
+	case "done":
+		return "done"
+	case "failed", "cancelled", "timeout", "canceled":
+		return "failed"
+	default:
+		if state == "" {
+			return ""
+		}
+		return "queued"
+	}
 }
 
 func readDaemonStateFile(path string) (daemonStateFile, bool) {
