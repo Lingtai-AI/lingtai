@@ -1310,7 +1310,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 
 func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	if errs := m.working.Validate(); len(errs) > 0 {
-		m.saveErr = errs[0].Error()
+		m.saveErr = localizedPresetValidationError(errs[0])
 		return m, nil
 	}
 	m.saveErr = ""
@@ -1365,6 +1365,24 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	}
 	normalizeLLMForCommit(committed.Manifest)
 	return m, m.commitCmd(committed)
+}
+
+func localizedPresetValidationError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch err.Error() {
+	case "description.summary must be non-empty":
+		return i18n.T("preset_editor.validation.description_summary_required")
+	case "manifest.llm must be an object":
+		return i18n.T("preset_editor.validation.llm_object_required")
+	case "manifest.llm.provider must be non-empty":
+		return i18n.T("preset_editor.validation.llm_provider_required")
+	case "manifest.llm.model must be non-empty":
+		return i18n.T("preset_editor.validation.llm_model_required")
+	default:
+		return err.Error()
+	}
 }
 
 // commitCmd is the single PresetEditorCommitMsg constructor. Every host writes
