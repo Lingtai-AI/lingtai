@@ -661,6 +661,140 @@ func TestDaemonDetailSnapshotInvalidatesLiveRunOnNewLedgerRow(t *testing.T) {
 	}
 }
 
+// --- 10-minute live-window tests (CountDaemons) ---
+
+// setRunDirMtime backdates a run directory's mtime to stamp. The daemon.json
+// inside keeps its own fresh mtime, so any read of the state file would be
+// observable through the counts.
+func setRunDirMtime(t *testing.T, agentDir, runID string, stamp time.Time) {
+	t.Helper()
+	runDir := filepath.Join(agentDir, "daemons", runID)
+	if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+		t.Fatalf("chtimes run dir %s: %v", runID, err)
+	}
+}
+
+func TestCountDaemonsWindowIncludesRecentRuns(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "r1", map[string]interface{}{"state": "running"})
+	writeDaemonState(t, agentDir, "r2", map[string]interface{}{"state": "active"})
+	writeDaemonState(t, agentDir, "r3", map[string]interface{}{"state": "done"})
+	writeDaemonState(t, agentDir, "r4", map[string]interface{}{"state": "failed"})
+	writeDaemonState(t, agentDir, "r5", map[string]interface{}{"state": "queued"})
+	// One second inside the window; every state shows while recent.
+	inside := time.Now().Add(-(daemonListWindow - time.Second))
+	for _, runID := range []string{"r1", "r2", "r3", "r4", "r5"} {
+		setRunDirMtime(t, agentDir, runID, inside)
+	}
+
+	counts := CountDaemons(agentDir)
+	if counts.Running != 2 || counts.Queued != 1 || counts.Done != 1 || counts.Failed != 1 || counts.Total != 5 {
+		t.Fatalf("recent-window counts = %+v, want running:2 queued:1 done:1 failed:1 total:5", counts)
+	}
+}
+
+func TestCountDaemonsWindowSkipsStaleRunsWithoutReadingState(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "fresh", map[string]interface{}{"state": "running"})
+
+	// Stale runs: their daemon.json files are fresh on disk and would each count
+	// as running/done/failed if opened, but the run directories are far outside
+	// the window. CountDaemons must short-circuit on the directory mtime before
+	// any state-file read, so none of these can leak into the summary.
+	for _, runID := range []string{"stale-running", "stale-done", "stale-failed"} {
+		writeDaemonState(t, agentDir, runID, map[string]interface{}{"state": "running"})
+		setRunDirMtime(t, agentDir, runID, time.Now().Add(-(daemonListWindow + time.Hour)))
+	}
+
+	counts := CountDaemons(agentDir)
+	if counts.Total != 1 || counts.Running != 1 || counts.Done != 0 || counts.Failed != 0 || counts.Queued != 0 {
+		t.Fatalf("stale runs leaked into summary: %+v", counts)
+	}
+}
+
+func TestCountDaemonsWindowBoundary(t *testing.T) {
+	now := time.Now()
+	if !withinDaemonListWindow(now.Add(-daemonListWindow), now) {
+		t.Error("run exactly daemonListWindow old should still be included")
+	}
+	if !withinDaemonListWindow(now, now) {
+		t.Error("run with zero age should be included")
+	}
+	if !withinDaemonListWindow(now.Add(time.Minute), now) {
+		t.Error("future-mtime run (clock skew) should be included")
+	}
+	if withinDaemonListWindow(now.Add(-(daemonListWindow + time.Nanosecond)), now) {
+		t.Error("run just past daemonListWindow should be excluded")
+	}
+}
+
+func TestCountDaemonsWindowGatesFlatDaemonJSON(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "sub", map[string]interface{}{"state": "done"})
+
+	// Legacy flat layout: a daemon.json directly under daemons/ is gated by its
+	// own file mtime, not a run-directory mtime.
+	flat := filepath.Join(agentDir, "daemons", "daemon.json")
+	if err := os.MkdirAll(filepath.Dir(flat), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(flat, []byte(`{"state":"running"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-(daemonListWindow + time.Hour))
+	if err := os.Chtimes(flat, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	counts := CountDaemons(agentDir)
+	if counts.Running != 0 || counts.Total != 1 {
+		t.Fatalf("stale flat daemon.json counted: %+v", counts)
+	}
+}
+
+// BenchmarkCountDaemonsManyStaleRuns measures the per-second summary over a
+// daemons directory dominated by historical runs: the window gate must skip all
+// stale directories on directory metadata alone, never opening their state
+// files, so the tick stays cheap regardless of accumulated history.
+func BenchmarkCountDaemonsManyStaleRuns(b *testing.B) {
+	agentDir := b.TempDir()
+	daemonDir := filepath.Join(agentDir, "daemons")
+	staleBase := time.Now().Add(-(daemonListWindow + 30*24*time.Hour))
+	for i := 0; i < 1500; i++ {
+		runID := fmt.Sprintf("em-%04d", i)
+		runDir := filepath.Join(daemonDir, runID)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "daemon.json"), []byte(`{"state":"done"}`), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		stamp := staleBase.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+			b.Fatal(err)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		runID := fmt.Sprintf("live-%d", i)
+		runDir := filepath.Join(daemonDir, runID)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "daemon.json"), []byte(`{"state":"running"}`), 0o644); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		counts := CountDaemons(agentDir)
+		if counts.Total != 5 || counts.Running != 5 {
+			b.Fatalf("bad counts: %+v", counts)
+		}
+	}
+}
+
 func BenchmarkDaemonDetailSnapshot1500Runs(b *testing.B) {
 	agentDir := b.TempDir()
 	base := time.Unix(1_700_000_000, 0)
