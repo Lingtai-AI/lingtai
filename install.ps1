@@ -89,6 +89,14 @@
 .PARAMETER NoModifyPath
     Do not persist PATH changes. Persistent user PATH is left untouched.
 
+.PARAMETER NonInteractive
+    Never prompt. Mirrors install.sh's --non-interactive: suppresses the
+    interactive "Press Enter to close this window" pauses that a double-click /
+    shortcut / Start-Process launch normally shows, so automated invocations
+    never block on console input. Windows has no OS-package install step to
+    skip (the runtime venv is provisioned by uv, not a package manager), so on
+    this platform the flag only controls the success/failure pauses.
+
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
     it may read and validate inputs (including the checksum) and print the plan,
@@ -129,6 +137,7 @@ param(
     [switch]$SkipVenv,
     [switch]$SkipPortal,
     [switch]$NoModifyPath,
+    [switch]$NonInteractive,
     [switch]$DryRun
 )
 
@@ -2272,8 +2281,8 @@ try {
     # complete in under a second after the big download, so the window vanishing
     # right after the download reads as a crash ("闪退") even though the
     # install succeeded. Only pause for a real interactive console; piped/
-    # automated invocations stay non-blocking.
-    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    # automated invocations stay non-blocking, and -NonInteractive never pauses.
+    if (-not $NonInteractive -and $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
         Write-Host ""
         Write-Host "Installation complete. Press Enter to close this window..." -ForegroundColor DarkGray
         [void][Console]::ReadLine()
@@ -2290,8 +2299,9 @@ try {
     # (double-click, shortcut, Start-Process, `curl | iex`), the window closes
     # the instant `exit` runs -- the error above vanishes before it can be read
     # and the install looks like a silent crash ("闪退"). Only pause for a real
-    # interactive console; piped/automated invocations stay non-blocking.
-    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    # interactive console; piped/automated invocations stay non-blocking, and
+    # -NonInteractive never pauses.
+    if (-not $NonInteractive -and $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
         Write-Host ""
         Write-Host "Installation failed. Press Enter to close this window..." -ForegroundColor DarkGray
         [void][Console]::ReadLine()

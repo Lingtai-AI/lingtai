@@ -25,7 +25,9 @@
         -ChecksumPath <path>     SHA-256 sidecar for -ArchivePath
         -Latest                  explicit pinned current-main development install
         -SkipVenv                skip the Python runtime venv step
+        -SkipPortal              TUI-only install (mirrors install.sh --skip-portal)
         -NoModifyPath            do not persist PATH changes
+        -NonInteractive          never prompt (mirrors install.sh --non-interactive)
         -DryRun                  plan only; make no filesystem writes
 
     Every run isolates HOME / USERPROFILE / LOCALAPPDATA / TEMP / TMP and all
@@ -1431,6 +1433,30 @@ try {
         NoModifyPath = $true
     }
     Assert-True ($r8.ExitCode -ne 0) 'nonexistent archive path exits non-zero'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8b: -NonInteractive is an accepted switch (mirrors install.sh
+    # --non-interactive) and does not change fail-loud semantics. An unknown
+    # switch would fail PowerShell parameter binding with a
+    # "parameter cannot be found" diagnostic; here the structurally invalid
+    # invocation must still surface as a non-zero exit WITHOUT that diagnostic,
+    # proving the switch parses.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -NonInteractive parses and stays fail-loud'
+    $home8b = New-IsolatedHome
+    $binDir8b = Join-Path $home8b 'bin dir'
+    $r8b = Invoke-Installer @{
+        Version        = 'v9.9.9'
+        BinDir         = $binDir8b
+        GlobalDir      = (Join-Path $home8b '.lingtai-tui')
+        ArchivePath    = (Join-Path $TestRoot 'no-such-archive.zip')
+        ChecksumPath   = $fx.ChecksumPath
+        SkipVenv       = $true
+        NoModifyPath   = $true
+        NonInteractive = $true
+    }
+    Assert-True ($r8b.ExitCode -ne 0) 'nonexistent archive path exits non-zero with -NonInteractive'
+    Assert-NotContains $r8b.Stderr 'parameter cannot be found' '-NonInteractive binds as a real switch'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under

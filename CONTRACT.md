@@ -375,7 +375,7 @@ Concretely:
 | `--source auto\|github\|gitee` | — | **missing**: PS1 always uses GitHub for release binaries; only `-Latest` build mirrors are CN-aware |
 | `--ref <ref>` / `--from-source` | — | **missing**: PS1 has no arbitrary-ref or force-source build (only `-Latest`) |
 | `--update` (in-place) | — | **missing**: PS1 has no in-place update; re-run `install.ps1` |
-| `--non-interactive` | `-DryRun` (partial) | **partial**: PS1 has plan-only `-DryRun` but no equivalent no-prompt install switch |
+| `--non-interactive` | `-NonInteractive` | synced |
 | `-ArchivePath` / `-ChecksumPath` (local artifact) | — | POSIX-N/A (Windows-only) |
 | `-DryRun` (plan-only) | — | POSIX-N/A (Windows-only) |
 | `-NoModifyPath` | — | POSIX-N/A (Windows-only) |
