@@ -372,7 +372,7 @@ Concretely:
 | `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
 | `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
-| `--source auto\|github\|gitee` | — | **missing**: PS1 always uses GitHub for release binaries; only `-Latest` build mirrors are CN-aware |
+| `--source auto\|github\|gitee` | `-Source` | synced |
 | `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
 | `--update` (in-place) | `-Update` | synced |
 | `--non-interactive` | `-NonInteractive` | synced |

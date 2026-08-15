@@ -118,6 +118,14 @@
     builds that release tag from source instead of downloading the archive.
     Cannot be combined with -Latest or local-artifact mode.
 
+.PARAMETER Source
+    Release source provider: auto|github|gitee (default: auto, or
+    $env:LINGTAI_SOURCE). Mirrors install.sh's --source. auto prefers Gitee
+    for mainland-China hosts via a bounded, fail-open country lookup; an
+    explicit override always wins and skips detection. gitee resolves release
+    tags, bundle manifests, and kernel releases from the Gitee mirror
+    (huangzesen1997/lingtai + huangzesen1997/lingtai-kernel).
+
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
     it may read and validate inputs (including the checksum) and print the plan,
@@ -161,6 +169,7 @@ param(
     [switch]$NonInteractive,
     [string]$Ref,
     [switch]$FromSource,
+    [string]$Source = $env:LINGTAI_SOURCE,
     [switch]$Update,
     [switch]$DryRun
 )
@@ -181,6 +190,17 @@ $RepoUrl = "https://github.com/$Repo"
 # always use the real GitHub API.
 $ApiBase = if ($env:LINGTAI_GITHUB_API_BASE) { $env:LINGTAI_GITHUB_API_BASE } else { "https://api.github.com/repos/$Repo" }
 $KernelApiBase = if ($env:LINGTAI_KERNEL_GITHUB_API_BASE) { $env:LINGTAI_KERNEL_GITHUB_API_BASE } else { "https://api.github.com/repos/Lingtai-AI/lingtai-kernel" }
+
+# --- Source provider (--source auto|github|gitee) ----------------------------
+# Gitee mirror: a real repository mirror of the TUI/kernel; release assets may
+# not exist for every tag yet (same fail-open stance as install.sh -- URLs are
+# only returned after the Gitee API confirms presence, never invented).
+$GiteeOwner = if ($env:LINGTAI_GITEE_OWNER) { $env:LINGTAI_GITEE_OWNER } else { 'huangzesen1997' }
+$GiteeRepo = if ($env:LINGTAI_GITEE_REPO) { $env:LINGTAI_GITEE_REPO } else { 'lingtai' }
+$GiteeKernelRepo = if ($env:LINGTAI_GITEE_KERNEL_REPO) { $env:LINGTAI_GITEE_KERNEL_REPO } else { 'lingtai-kernel' }
+$GiteeApiBase = if ($env:LINGTAI_GITEE_API_BASE) { $env:LINGTAI_GITEE_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeRepo" }
+$GiteeKernelApiBase = if ($env:LINGTAI_GITEE_KERNEL_API_BASE) { $env:LINGTAI_GITEE_KERNEL_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeKernelRepo" }
+$script:BundleProvider = 'github'  # resolved by Resolve-SourceProvider: github|gitee
 
 # --- Output helpers ----------------------------------------------------------
 
@@ -612,20 +632,110 @@ function Resolve-PublicTag {
         }
         return $Requested
     }
-    $release = Invoke-GitHubApi -Url "$ApiBase/releases/latest"
+    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/latest"
     $tag = $release.tag_name
     if ([string]::IsNullOrWhiteSpace($tag) -or $tag -notmatch '^v\d+\.\d+\.\d+$') {
-        Fail "Could not resolve an exact vX.Y.Z tag from the latest GitHub release (got '$tag')."
+        Fail "Could not resolve an exact vX.Y.Z tag from the latest $($script:BundleProvider) release (got '$tag')."
     }
     return $tag
 }
 
-# Get-ReleaseAssetUrl returns the browser_download_url for a named asset on an
-# exact tag's release, or $null if that release has no such asset. Uses the
-# release-by-tag listing so a missing asset is detected before any download.
+# --- Source provider (auto|github|gitee) -------------------------------------
+
+# Test-CountryCn does a bounded, fail-open public-IP country lookup and returns
+# $true when the caller appears to be in mainland China, $false otherwise
+# (including "could not tell"). Mirrors install.sh's detect_country_cn: only
+# the two-letter country code is requested; every probe is short-timeout and
+# its result is discarded on any error.
+function Test-CountryCn {
+    $timeout = 3
+    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
+    foreach ($url in @('https://ipapi.co/country/', 'https://ifconfig.co/country-iso')) {
+        try {
+            $body = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop).Content
+            $country = ($body | Out-String).Trim()
+            if ($country -match '^(?i)cn$') { return $true }
+        } catch {
+            # fail-open: try the next endpoint
+        }
+    }
+    return $false
+}
+
+# Test-GiteeReachable is a cheap liveness probe for the Gitee API, bounded the
+# same way install.sh's gitee_reachable is: a short-timeout HEAD/GET on the
+# repo metadata, discarded on any error.
+function Test-GiteeReachable {
+    $timeout = 3
+    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
+    try {
+        $probe = Invoke-WebRequest -Uri $GiteeApiBase -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop
+        return ($null -ne $probe)
+    } catch {
+        return $false
+    }
+}
+
+# Resolve-SourceProvider sets $script:BundleProvider to 'github' or 'gitee'
+# per the -Source/LINGTAI_SOURCE override: explicit github|gitee wins with no
+# detection; auto runs a bounded country lookup, preferring gitee for
+# mainland-China hosts when gitee is reachable, else github (fail-open).
+# Mirrors install.sh's resolve_source_provider.
+function Resolve-SourceProvider {
+    $arg = if ([string]::IsNullOrWhiteSpace($Source)) { 'auto' } else { $Source.ToLowerInvariant() }
+    switch ($arg) {
+        'github' { $script:BundleProvider = 'github'; return }
+        'gitee'  { $script:BundleProvider = 'gitee';  return }
+        'auto'   { break }
+        default  { Fail "-Source must be one of auto|github|gitee, got: $Source" }
+    }
+    $script:BundleProvider = 'github'
+    # The offline contract suite overrides the API base env vars; country
+    # detection would add bounded network probes that are meaningless there,
+    # so skip detection and stay on GitHub when an API override is present
+    # (same spirit as install.sh's test shims -- production auto still probes).
+    if ($env:LINGTAI_GITHUB_API_BASE -or $env:LINGTAI_KERNEL_GITHUB_API_BASE -or $env:LINGTAI_GITEE_API_BASE) {
+        return
+    }
+    if (Test-CountryCn) {
+        if (Test-GiteeReachable) {
+            $script:BundleProvider = 'gitee'
+            Write-Step "Country lookup suggests mainland China and Gitee is reachable; using Gitee release provider."
+        } else {
+            Write-Step "Country lookup suggests mainland China but Gitee is unreachable; using GitHub release provider."
+        }
+    }
+}
+
+# Get-TuiApiBase returns the provider-correct release API base for the TUI
+# repo. GitHub is the default; Gitee is the mirror.
+function Get-TuiApiBase {
+    if ($script:BundleProvider -eq 'gitee') { return $GiteeApiBase }
+    return $ApiBase
+}
+
+# Get-KernelApiBase returns the provider-correct release API base for the
+# kernel repo, mirroring install.sh's kernel_gitee_api_base per-lookup.
+function Get-KernelApiBase {
+    if ($script:BundleProvider -eq 'gitee') { return $GiteeKernelApiBase }
+    return $KernelApiBase
+}
+
+# Get-ReleaseAssetUrl returns the download URL for a named asset on an exact
+# tag's release, or $null if that release has no such asset. Provider-aware:
+# GitHub uses the release's assets[]; Gitee v5 uses attach_files[] with
+# browserDownloadUrl (or browser_download_url). Uses the release-by-tag
+# listing so a missing asset is detected before any download.
 function Get-ReleaseAssetUrl {
     param([string]$Tag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$ApiBase/releases/tags/$Tag"
+    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/tags/$Tag"
+    if ($script:BundleProvider -eq 'gitee') {
+        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+        if (-not $asset) { return $null }
+        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
+        if ($asset.browser_download_url) { return $asset.browser_download_url }
+        return $null
+    }
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
@@ -782,16 +892,30 @@ function Confirm-BundleManifest {
 }
 
 # Get-BundleManifest resolves the tag's lingtai-bundle-manifest.json asset and
-# returns the Confirm-BundleManifest result. Fails loud if the release has no
-# such asset or it fails strict validation -- there is no fallback source.
+# returns the Confirm-BundleManifest result. Mirrors install.sh's
+# fetch_bundle_manifest: if the preferred provider has no bundle manifest for
+# the tag, falls back to the OTHER provider for the SAME tag (never re-resolves
+# "latest"). Fails loud only if neither provider has a valid manifest.
 function Get-BundleManifest {
     param([string]$Tag)
-    $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
-    if (-not $url) {
-        Fail "Release $Tag has no lingtai-bundle-manifest.json asset. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
+    foreach ($provider in @($script:BundleProvider, $(if ($script:BundleProvider -eq 'gitee') { 'github' } else { 'gitee' }))) {
+        $saved = $script:BundleProvider
+        $script:BundleProvider = $provider
+        try {
+            $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
+            if ($url) {
+                $raw = Get-TextAssetContent -Url $url
+                $result = Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
+                if ($provider -ne $saved) {
+                    Write-Step "$saved has no bundle manifest for $Tag; validated it from $provider for the same tag."
+                }
+                return $result
+            }
+        } finally {
+            $script:BundleProvider = $saved
+        }
     }
-    $raw = Get-TextAssetContent -Url $url
-    return Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
+    Fail "Release $Tag has no lingtai-bundle-manifest.json on either provider. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
 }
 
 # --- Kernel release manifest (schema lingtai.kernel.release/v1) --------------
@@ -841,10 +965,17 @@ function Confirm-KernelManifest {
 
 # Get-KernelAssetUrl returns the browser_download_url for a named asset on the
 # pinned kernel release, or $null if that release has no such asset -- the
-# kernel-repo analogue of Get-ReleaseAssetUrl.
+# kernel-repo analogue of Get-ReleaseAssetUrl (provider-aware for Gitee).
 function Get-KernelAssetUrl {
     param([string]$KernelTag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$KernelApiBase/releases/tags/$KernelTag"
+    $release = Invoke-GitHubApi -Url "$(Get-KernelApiBase)/releases/tags/$KernelTag"
+    if ($script:BundleProvider -eq 'gitee') {
+        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+        if (-not $asset) { return $null }
+        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
+        if ($asset.browser_download_url) { return $asset.browser_download_url }
+        return $null
+    }
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
@@ -2208,6 +2339,12 @@ function Invoke-Main {
     Write-Host "LingTai -- native Windows installer" -ForegroundColor Magenta
     Write-Host "------------------------------------" -ForegroundColor Magenta
     if ($DryRun) { Write-Warn "DRY RUN: no filesystem, PATH, or config writes will be made." }
+
+    # Resolve the release source provider up front (explicit -Source override
+    # wins; auto runs a bounded country lookup) so every API helper below uses
+    # one consistent provider for tag/asset/bundle/kernel resolution.
+    Resolve-SourceProvider
+    Write-Info "Release provider: $($script:BundleProvider)"
 
     # Resolve per-user, non-admin defaults. -Update resolves BinDir from the
     # existing install receipt below (or an explicit -BinDir), so the default

@@ -30,6 +30,7 @@
         -NonInteractive          never prompt (mirrors install.sh --non-interactive)
         -Ref <ref>               build a specific git ref from source (mirrors install.sh --ref)
         -FromSource              always build from source (mirrors install.sh --from-source)
+        -Source <mode>           release provider auto|github|gitee (mirrors install.sh --source)
         -Update                  update an existing install in place (mirrors install.sh --update)
         -DryRun                  plan only; make no filesystem writes
 
@@ -1512,6 +1513,23 @@ try {
     Assert-True ($r8e.ExitCode -ne 0) '-FromSource with local-artifact mode exits non-zero'
     Assert-NotContains $r8e.Stderr 'parameter cannot be found' '-FromSource binds as a real switch'
     Assert-Contains $r8e.Stderr '-FromSource' '-FromSource names the conflict as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8f: -Source (mirrors install.sh --source) is an accepted switch
+    # and rejects invalid provider values fail-loud, while an explicit valid
+    # override (github) skips country detection.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Source parses and rejects invalid providers'
+    $home8f = New-IsolatedHome
+    $r8f = Invoke-Installer @{
+        Version    = 'v9.9.9'
+        GlobalDir  = (Join-Path $home8f '.lingtai-tui')
+        SkipVenv   = $true
+        Source     = 'bogus'
+    }
+    Assert-True ($r8f.ExitCode -ne 0) '-Source bogus exits non-zero'
+    Assert-NotContains $r8f.Stderr 'parameter cannot be found' '-Source binds as a real switch'
+    Assert-Contains $r8f.Stderr 'auto|github|gitee' '-Source names the valid values as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under
