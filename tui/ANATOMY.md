@@ -15,6 +15,8 @@ related_files:
   - tui/main_startup_decision_test.go
   - tui/internal/tui/launcher.go
   - tui/internal/tui/app.go
+  - tui/internal/tui/home_async_stats.go
+  - tui/internal/tui/home_async_stats_test.go
   - tui/internal/process/launcher.go
   - tui/internal/fs/signal.go
   - tui/Makefile

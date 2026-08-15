@@ -25,7 +25,13 @@
         -ChecksumPath <path>     SHA-256 sidecar for -ArchivePath
         -Latest                  explicit pinned current-main development install
         -SkipVenv                skip the Python runtime venv step
+        -SkipPortal              TUI-only install (mirrors install.sh --skip-portal)
         -NoModifyPath            do not persist PATH changes
+        -NonInteractive          never prompt (mirrors install.sh --non-interactive)
+        -Ref <ref>               build a specific git ref from source (mirrors install.sh --ref)
+        -FromSource              always build from source (mirrors install.sh --from-source)
+        -Source <mode>           release provider auto|github|gitee (mirrors install.sh --source)
+        -Update                  update an existing install in place (mirrors install.sh --update)
         -DryRun                  plan only; make no filesystem writes
 
     Every run isolates HOME / USERPROFILE / LOCALAPPDATA / TEMP / TMP and all
@@ -1431,6 +1437,99 @@ try {
         NoModifyPath = $true
     }
     Assert-True ($r8.ExitCode -ne 0) 'nonexistent archive path exits non-zero'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8b: -NonInteractive is an accepted switch (mirrors install.sh
+    # --non-interactive) and does not change fail-loud semantics. An unknown
+    # switch would fail PowerShell parameter binding with a
+    # "parameter cannot be found" diagnostic; here the structurally invalid
+    # invocation must still surface as a non-zero exit WITHOUT that diagnostic,
+    # proving the switch parses.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -NonInteractive parses and stays fail-loud'
+    $home8b = New-IsolatedHome
+    $binDir8b = Join-Path $home8b 'bin dir'
+    $r8b = Invoke-Installer @{
+        Version        = 'v9.9.9'
+        BinDir         = $binDir8b
+        GlobalDir      = (Join-Path $home8b '.lingtai-tui')
+        ArchivePath    = (Join-Path $TestRoot 'no-such-archive.zip')
+        ChecksumPath   = $fx.ChecksumPath
+        SkipVenv       = $true
+        NoModifyPath   = $true
+        NonInteractive = $true
+    }
+    Assert-True ($r8b.ExitCode -ne 0) 'nonexistent archive path exits non-zero with -NonInteractive'
+    Assert-NotContains $r8b.Stderr 'parameter cannot be found' '-NonInteractive binds as a real switch'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8c: -Update (mirrors install.sh --update) is an accepted switch
+    # and stays fail-loud. With no prior install receipt at GlobalDir, update
+    # mode must refuse (existing state is required to update), and must not
+    # bind-fail on the switch itself.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Update parses and requires an existing receipt'
+    $home8c = New-IsolatedHome
+    $r8c = Invoke-Installer @{
+        Version  = 'v9.9.9'
+        GlobalDir = (Join-Path $home8c '.lingtai-tui')
+        SkipVenv = $true
+        Update   = $true
+    }
+    Assert-True ($r8c.ExitCode -ne 0) '-Update without an existing receipt exits non-zero'
+    Assert-NotContains (Get-InstallerOutput $r8c) 'parameter cannot be found' '-Update binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8c) 'install receipt' '-Update names the missing receipt as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8d: -Ref (mirrors install.sh --ref) is an accepted switch and
+    # stays fail-loud. An arbitrary ref has no pinned kernel bundle, so -Ref
+    # without -SkipVenv must refuse with the explicit "pass -SkipVenv" style
+    # guidance, proving both the switch and its SkipVenv requirement bind.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Ref parses and requires -SkipVenv'
+    $home8d = New-IsolatedHome
+    $r8d = Invoke-Installer @{
+        Ref      = 'some-branch'
+        GlobalDir = (Join-Path $home8d '.lingtai-tui')
+    }
+    Assert-True ($r8d.ExitCode -ne 0) '-Ref without -SkipVenv exits non-zero'
+    Assert-NotContains (Get-InstallerOutput $r8d) 'parameter cannot be found' '-Ref binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8d) '-SkipVenv' '-Ref names the -SkipVenv requirement as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8e: -FromSource (mirrors install.sh --from-source) is an accepted
+    # switch and stays fail-loud. It cannot combine with local-artifact mode.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -FromSource parses and rejects local-artifact mode'
+    $home8e = New-IsolatedHome
+    $r8e = Invoke-Installer @{
+        Version      = 'v9.9.9'
+        GlobalDir    = (Join-Path $home8e '.lingtai-tui')
+        ArchivePath  = (Join-Path $TestRoot 'no-such-archive.zip')
+        ChecksumPath = $fx.ChecksumPath
+        SkipVenv     = $true
+        FromSource   = $true
+    }
+    Assert-True ($r8e.ExitCode -ne 0) '-FromSource with local-artifact mode exits non-zero'
+    Assert-NotContains (Get-InstallerOutput $r8e) 'parameter cannot be found' '-FromSource binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8e) '-FromSource' '-FromSource names the conflict as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8f: -Source (mirrors install.sh --source) is an accepted switch
+    # and rejects invalid provider values fail-loud, while an explicit valid
+    # override (github) skips country detection.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Source parses and rejects invalid providers'
+    $home8f = New-IsolatedHome
+    $r8f = Invoke-Installer @{
+        Version    = 'v9.9.9'
+        GlobalDir  = (Join-Path $home8f '.lingtai-tui')
+        SkipVenv   = $true
+        Source     = 'bogus'
+    }
+    Assert-True ($r8f.ExitCode -ne 0) '-Source bogus exits non-zero'
+    Assert-NotContains (Get-InstallerOutput $r8f) 'parameter cannot be found' '-Source binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8f) 'auto|github|gitee' '-Source names the valid values as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under

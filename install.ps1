@@ -89,6 +89,43 @@
 .PARAMETER NoModifyPath
     Do not persist PATH changes. Persistent user PATH is left untouched.
 
+.PARAMETER NonInteractive
+    Never prompt. Mirrors install.sh's --non-interactive: suppresses the
+    interactive "Press Enter to close this window" pauses that a double-click /
+    shortcut / Start-Process launch normally shows, so automated invocations
+    never block on console input. Windows has no OS-package install step to
+    skip (the runtime venv is provisioned by uv, not a package manager), so on
+    this platform the flag only controls the success/failure pauses.
+
+.PARAMETER Update
+    Update an existing install in place. Mirrors install.sh's --update: requires
+    -Version (release tag), targets the existing BinDir (from the existing
+    install.json receipt when -BinDir is omitted), and re-publishes the receipt
+    in place instead of refusing on existing state. Fails loud when no prior
+    install receipt exists at GlobalDir. Cannot be combined with -Latest or
+    local-artifact mode (-ArchivePath/-ChecksumPath).
+
+.PARAMETER Ref
+    Build a specific git branch/tag/commit from source. Mirrors install.sh's
+    --ref: an explicit source build of that ref (no release asset, no pinned
+    kernel bundle), so it requires -SkipVenv -- an arbitrary ref has no pinned
+    kernel release to provision the Python runtime from. Cannot be combined
+    with -Latest, -Version, -Update, or local-artifact mode.
+
+.PARAMETER FromSource
+    Always build from source, skipping prebuilt release assets. Mirrors
+    install.sh's --from-source. With -Ref it is implied; with -Version it
+    builds that release tag from source instead of downloading the archive.
+    Cannot be combined with -Latest or local-artifact mode.
+
+.PARAMETER Source
+    Release source provider: auto|github|gitee (default: auto, or
+    $env:LINGTAI_SOURCE). Mirrors install.sh's --source. auto prefers Gitee
+    for mainland-China hosts via a bounded, fail-open country lookup; an
+    explicit override always wins and skips detection. gitee resolves release
+    tags, bundle manifests, and kernel releases from the Gitee mirror
+    (huangzesen1997/lingtai + huangzesen1997/lingtai-kernel).
+
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
     it may read and validate inputs (including the checksum) and print the plan,
@@ -129,6 +166,11 @@ param(
     [switch]$SkipVenv,
     [switch]$SkipPortal,
     [switch]$NoModifyPath,
+    [switch]$NonInteractive,
+    [string]$Ref,
+    [switch]$FromSource,
+    [string]$Source = $env:LINGTAI_SOURCE,
+    [switch]$Update,
     [switch]$DryRun
 )
 
@@ -148,6 +190,17 @@ $RepoUrl = "https://github.com/$Repo"
 # always use the real GitHub API.
 $ApiBase = if ($env:LINGTAI_GITHUB_API_BASE) { $env:LINGTAI_GITHUB_API_BASE } else { "https://api.github.com/repos/$Repo" }
 $KernelApiBase = if ($env:LINGTAI_KERNEL_GITHUB_API_BASE) { $env:LINGTAI_KERNEL_GITHUB_API_BASE } else { "https://api.github.com/repos/Lingtai-AI/lingtai-kernel" }
+
+# --- Source provider (--source auto|github|gitee) ----------------------------
+# Gitee mirror: a real repository mirror of the TUI/kernel; release assets may
+# not exist for every tag yet (same fail-open stance as install.sh -- URLs are
+# only returned after the Gitee API confirms presence, never invented).
+$GiteeOwner = if ($env:LINGTAI_GITEE_OWNER) { $env:LINGTAI_GITEE_OWNER } else { 'huangzesen1997' }
+$GiteeRepo = if ($env:LINGTAI_GITEE_REPO) { $env:LINGTAI_GITEE_REPO } else { 'lingtai' }
+$GiteeKernelRepo = if ($env:LINGTAI_GITEE_KERNEL_REPO) { $env:LINGTAI_GITEE_KERNEL_REPO } else { 'lingtai-kernel' }
+$GiteeApiBase = if ($env:LINGTAI_GITEE_API_BASE) { $env:LINGTAI_GITEE_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeRepo" }
+$GiteeKernelApiBase = if ($env:LINGTAI_GITEE_KERNEL_API_BASE) { $env:LINGTAI_GITEE_KERNEL_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeKernelRepo" }
+$script:BundleProvider = 'github'  # resolved by Resolve-SourceProvider: github|gitee
 
 # --- Output helpers ----------------------------------------------------------
 
@@ -467,7 +520,13 @@ function Write-InstallMetadata {
         [string]$TuiCommit = '',
         [string]$KernelCommit = ''
     )
-    $stamped = $ResolvedRef -replace '^v', ''
+    # The receipt's stamped_version mirrors install.sh exactly: the resolved tag
+    # WITH its v prefix (e.g. v0.19.1), because that is what `lingtai-tui version`
+    # reports (release.yml builds with -X main.version=$TAG) and what the TUI
+    # updater compares against (tui_updater.go compares StampedVersion to the
+    # vX.Y.Z GitHub release tag). Stripping the v here previously made both
+    # verify.ps1 and the TUI's own updater fail on healthy Windows installs.
+    $stamped = $ResolvedRef
     $upgradeCommand = 're-run install.ps1 with a newer -ArchivePath/-Version'
     if ($SourceMode -eq 'latest-main') {
         if ($TuiCommit -notmatch '^[0-9a-fA-F]{40}$') { Fail "Current-main install metadata requires a full TUI commit SHA." }
@@ -579,20 +638,110 @@ function Resolve-PublicTag {
         }
         return $Requested
     }
-    $release = Invoke-GitHubApi -Url "$ApiBase/releases/latest"
+    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/latest"
     $tag = $release.tag_name
     if ([string]::IsNullOrWhiteSpace($tag) -or $tag -notmatch '^v\d+\.\d+\.\d+$') {
-        Fail "Could not resolve an exact vX.Y.Z tag from the latest GitHub release (got '$tag')."
+        Fail "Could not resolve an exact vX.Y.Z tag from the latest $($script:BundleProvider) release (got '$tag')."
     }
     return $tag
 }
 
-# Get-ReleaseAssetUrl returns the browser_download_url for a named asset on an
-# exact tag's release, or $null if that release has no such asset. Uses the
-# release-by-tag listing so a missing asset is detected before any download.
+# --- Source provider (auto|github|gitee) -------------------------------------
+
+# Test-CountryCn does a bounded, fail-open public-IP country lookup and returns
+# $true when the caller appears to be in mainland China, $false otherwise
+# (including "could not tell"). Mirrors install.sh's detect_country_cn: only
+# the two-letter country code is requested; every probe is short-timeout and
+# its result is discarded on any error.
+function Test-CountryCn {
+    $timeout = 3
+    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
+    foreach ($url in @('https://ipapi.co/country/', 'https://ifconfig.co/country-iso')) {
+        try {
+            $body = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop).Content
+            $country = ($body | Out-String).Trim()
+            if ($country -match '^(?i)cn$') { return $true }
+        } catch {
+            # fail-open: try the next endpoint
+        }
+    }
+    return $false
+}
+
+# Test-GiteeReachable is a cheap liveness probe for the Gitee API, bounded the
+# same way install.sh's gitee_reachable is: a short-timeout HEAD/GET on the
+# repo metadata, discarded on any error.
+function Test-GiteeReachable {
+    $timeout = 3
+    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
+    try {
+        $probe = Invoke-WebRequest -Uri $GiteeApiBase -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop
+        return ($null -ne $probe)
+    } catch {
+        return $false
+    }
+}
+
+# Resolve-SourceProvider sets $script:BundleProvider to 'github' or 'gitee'
+# per the -Source/LINGTAI_SOURCE override: explicit github|gitee wins with no
+# detection; auto runs a bounded country lookup, preferring gitee for
+# mainland-China hosts when gitee is reachable, else github (fail-open).
+# Mirrors install.sh's resolve_source_provider.
+function Resolve-SourceProvider {
+    $arg = if ([string]::IsNullOrWhiteSpace($Source)) { 'auto' } else { $Source.ToLowerInvariant() }
+    switch ($arg) {
+        'github' { $script:BundleProvider = 'github'; return }
+        'gitee'  { $script:BundleProvider = 'gitee';  return }
+        'auto'   { break }
+        default  { Fail "-Source must be one of auto|github|gitee, got: $Source" }
+    }
+    $script:BundleProvider = 'github'
+    # The offline contract suite overrides the API base env vars; country
+    # detection would add bounded network probes that are meaningless there,
+    # so skip detection and stay on GitHub when an API override is present
+    # (same spirit as install.sh's test shims -- production auto still probes).
+    if ($env:LINGTAI_GITHUB_API_BASE -or $env:LINGTAI_KERNEL_GITHUB_API_BASE -or $env:LINGTAI_GITEE_API_BASE) {
+        return
+    }
+    if (Test-CountryCn) {
+        if (Test-GiteeReachable) {
+            $script:BundleProvider = 'gitee'
+            Write-Step "Country lookup suggests mainland China and Gitee is reachable; using Gitee release provider."
+        } else {
+            Write-Step "Country lookup suggests mainland China but Gitee is unreachable; using GitHub release provider."
+        }
+    }
+}
+
+# Get-TuiApiBase returns the provider-correct release API base for the TUI
+# repo. GitHub is the default; Gitee is the mirror.
+function Get-TuiApiBase {
+    if ($script:BundleProvider -eq 'gitee') { return $GiteeApiBase }
+    return $ApiBase
+}
+
+# Get-KernelApiBase returns the provider-correct release API base for the
+# kernel repo, mirroring install.sh's kernel_gitee_api_base per-lookup.
+function Get-KernelApiBase {
+    if ($script:BundleProvider -eq 'gitee') { return $GiteeKernelApiBase }
+    return $KernelApiBase
+}
+
+# Get-ReleaseAssetUrl returns the download URL for a named asset on an exact
+# tag's release, or $null if that release has no such asset. Provider-aware:
+# GitHub uses the release's assets[]; Gitee v5 uses attach_files[] with
+# browserDownloadUrl (or browser_download_url). Uses the release-by-tag
+# listing so a missing asset is detected before any download.
 function Get-ReleaseAssetUrl {
     param([string]$Tag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$ApiBase/releases/tags/$Tag"
+    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/tags/$Tag"
+    if ($script:BundleProvider -eq 'gitee') {
+        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+        if (-not $asset) { return $null }
+        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
+        if ($asset.browser_download_url) { return $asset.browser_download_url }
+        return $null
+    }
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
@@ -749,16 +898,30 @@ function Confirm-BundleManifest {
 }
 
 # Get-BundleManifest resolves the tag's lingtai-bundle-manifest.json asset and
-# returns the Confirm-BundleManifest result. Fails loud if the release has no
-# such asset or it fails strict validation -- there is no fallback source.
+# returns the Confirm-BundleManifest result. Mirrors install.sh's
+# fetch_bundle_manifest: if the preferred provider has no bundle manifest for
+# the tag, falls back to the OTHER provider for the SAME tag (never re-resolves
+# "latest"). Fails loud only if neither provider has a valid manifest.
 function Get-BundleManifest {
     param([string]$Tag)
-    $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
-    if (-not $url) {
-        Fail "Release $Tag has no lingtai-bundle-manifest.json asset. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
+    foreach ($provider in @($script:BundleProvider, $(if ($script:BundleProvider -eq 'gitee') { 'github' } else { 'gitee' }))) {
+        $saved = $script:BundleProvider
+        $script:BundleProvider = $provider
+        try {
+            $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
+            if ($url) {
+                $raw = Get-TextAssetContent -Url $url
+                $result = Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
+                if ($provider -ne $saved) {
+                    Write-Step "$saved has no bundle manifest for $Tag; validated it from $provider for the same tag."
+                }
+                return $result
+            }
+        } finally {
+            $script:BundleProvider = $saved
+        }
     }
-    $raw = Get-TextAssetContent -Url $url
-    return Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
+    Fail "Release $Tag has no lingtai-bundle-manifest.json on either provider. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
 }
 
 # --- Kernel release manifest (schema lingtai.kernel.release/v1) --------------
@@ -808,10 +971,17 @@ function Confirm-KernelManifest {
 
 # Get-KernelAssetUrl returns the browser_download_url for a named asset on the
 # pinned kernel release, or $null if that release has no such asset -- the
-# kernel-repo analogue of Get-ReleaseAssetUrl.
+# kernel-repo analogue of Get-ReleaseAssetUrl (provider-aware for Gitee).
 function Get-KernelAssetUrl {
     param([string]$KernelTag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$KernelApiBase/releases/tags/$KernelTag"
+    $release = Invoke-GitHubApi -Url "$(Get-KernelApiBase)/releases/tags/$KernelTag"
+    if ($script:BundleProvider -eq 'gitee') {
+        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+        if (-not $asset) { return $null }
+        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
+        if ($asset.browser_download_url) { return $asset.browser_download_url }
+        return $null
+    }
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
@@ -1841,6 +2011,105 @@ function Build-LatestMain {
     return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = $kernelSource; TuiSha = $tuiSha; KernelSha = $kernelSha; Version = $version; Tui = $tuiOut; Portal = $portalOut; DryRun = $false }
 }
 
+# Resolve-RefSha resolves an arbitrary git ref (branch/tag/commit) to a full
+# 40-hex commit SHA over the remote, mirroring install.sh --ref source builds.
+# A bare 40-hex commit is accepted as-is; anything else is tried as a branch
+# and then a tag. Fails loud on any unresolved/invalid ref.
+function Resolve-RefSha {
+    param([string]$RemoteUrl, [string]$Label, [string]$Ref)
+    if ($Ref -match '^[0-9a-fA-F]{40}$') { return $Ref.ToLowerInvariant() }
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        foreach ($candidate in @("refs/heads/$Ref", "refs/tags/$Ref")) {
+            $lines = & git ls-remote $RemoteUrl $candidate 2>$null
+            $gitExit = $LASTEXITCODE
+            if ($gitExit -eq 0 -and $lines) {
+                $sha = (($lines | Select-Object -First 1) -split '\s+' | Select-Object -First 1)
+                if ($sha -match '^[0-9a-fA-F]{40}$') { return $sha.ToLowerInvariant() }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    Fail "Could not resolve $Label ref '$Ref' from $RemoteUrl (tried branch and tag). Install Git and verify network access."
+}
+
+# Build-SourceRef clones the TUI repository at an arbitrary ref and builds both
+# binaries (portal unless -SkipPortal), mirroring install.sh's build_from_source
+# for --ref / --from-source. No kernel source is checked out here: -Ref builds
+# have no pinned kernel bundle (they require -SkipVenv), and -FromSource release
+# builds provision the kernel from the release bundle via the normal venv path.
+function Build-SourceRef {
+    param([string]$Ref)
+    $phase = Start-Phase 'Checking build prerequisites (git, Go, Node.js/npm, CPython 3.11-3.13) ...'
+    $prerequisites = Confirm-DevPrerequisites
+    if ($prerequisites.Deferred) { return @{ DryRun = $true; PrerequisitesDeferred = $true } }
+    Complete-Phase -Clock $phase -Message 'prerequisites satisfied'
+    $tuiSha = Resolve-RefSha -RemoteUrl $RepoUrl -Label 'TUI' -Ref $Ref
+    Write-Info "Resolved TUI ref '$Ref' commit: $tuiSha"
+    if ($DryRun) {
+        if ($SkipPortal) {
+            Write-Step "[dry-run] would shallow-checkout TUI ref '$Ref' and build lingtai-tui.exe only (portal skipped by -SkipPortal)"
+        } else {
+            Write-Step "[dry-run] would shallow-checkout TUI ref '$Ref' and build lingtai-tui.exe plus required lingtai-portal.exe"
+        }
+        return @{ TuiSha = $tuiSha; KernelSha = ''; DryRun = $true }
+    }
+
+    $stage = New-StagingDir
+    $tuiSource = Join-Path $stage 'lingtai'
+    $buildLog = Join-Path $stage 'build.log'
+    Write-Step "Build log: $buildLog"
+
+    $phase = Start-Phase "Checking out TUI ref '$Ref' ..."
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch',$Ref,$RepoUrl,$tuiSource) -Failure "TUI ref '$Ref' checkout failed" -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'fetch','--depth','1','origin',$tuiSha) -Failure "TUI ref '$Ref' pinned commit fetch failed" -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'checkout','--detach',$tuiSha) -Failure "TUI ref '$Ref' pinned checkout failed" -LogPath $buildLog
+    $actualTui = (& git -C $tuiSource rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($actualTui -ne $tuiSha) { Fail "TUI checkout mismatch: resolved $tuiSha but checked out $actualTui. Staging kept at $stage." }
+    Complete-Phase -Clock $phase -Message "TUI at $($tuiSha.Substring(0,12))"
+
+    $version = "$Ref-$tuiSha"
+    $tuiOut = Join-Path $stage 'lingtai-tui.exe'
+    $portalOut = Join-Path $stage 'lingtai-portal.exe'
+
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Building the portal web frontend (npm ci + npm run build; the longest step) ...'
+        Push-Location (Join-Path $tuiSource 'portal/web')
+        try {
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed' -LogPath $buildLog
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed' -LogPath $buildLog
+        } finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'portal web assets built'
+    }
+
+    $phase = Start-Phase 'Compiling lingtai-tui.exe ...'
+    Push-Location (Join-Path $tuiSource 'tui')
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$tuiOut,'.') -Failure 'lingtai-tui.exe build failed' -LogPath $buildLog }
+    finally { Pop-Location }
+    Complete-Phase -Clock $phase -Message 'lingtai-tui.exe compiled'
+
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Compiling lingtai-portal.exe ...'
+        Push-Location (Join-Path $tuiSource 'portal')
+        try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' -LogPath $buildLog }
+        finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'lingtai-portal.exe compiled'
+    }
+
+    Confirm-StagedVersion -StagedTui $tuiOut -Requested $version
+    if ($SkipPortal) {
+        Write-Step "-SkipPortal: portal build skipped; install will be TUI-only"
+        return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = ''; TuiSha = $tuiSha; KernelSha = ''; Version = $version; Tui = $tuiOut; Portal = $null; DryRun = $false }
+    }
+    $portalProbe = & $portalOut 'version' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $portalProbe.Trim() -ne "lingtai-portal $version") {
+        Fail "Built lingtai-portal.exe failed provenance verification (expected 'lingtai-portal $version', got '$($portalProbe.Trim())'). Staging kept at $stage."
+    }
+    return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = ''; TuiSha = $tuiSha; KernelSha = ''; Version = $version; Tui = $tuiOut; Portal = $portalOut; DryRun = $false }
+}
+
 function Install-MainVenv {
     param([string]$KernelSource, [string]$KernelSha, [string]$GlobalDir, [string]$PythonIndexUrl)
     $phase = Start-Phase 'Provisioning the Python runtime venv and installing the pinned kernel ...'
@@ -1887,19 +2156,19 @@ function Install-MainVenv {
 }
 
 function Install-FromBuiltMain {
-    param([hashtable]$Build, [string]$BinDir)
+    param([hashtable]$Build, [string]$BinDir, [string]$Label = 'pinned main')
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Remove-ParkedManagedBinaries -BinDir $BinDir
     Copy-ManagedBinary -Source $Build.Tui -Destination $tuiDest
     if ($SkipPortal) {
         Write-Step "-SkipPortal: not installing lingtai-portal.exe"
-        Write-Ok "Installed pinned main TUI binary into $BinDir (TUI-only)"
+        Write-Ok "Installed $Label TUI binary into $BinDir (TUI-only)"
         return @($tuiDest)
     }
     $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
     Copy-ManagedBinary -Source $Build.Portal -Destination $portalDest
-    Write-Ok "Installed pinned main binaries into $BinDir"
+    Write-Ok "Installed $Label binaries into $BinDir"
     return @($tuiDest,$portalDest)
 }
 
@@ -2077,8 +2346,17 @@ function Invoke-Main {
     Write-Host "------------------------------------" -ForegroundColor Magenta
     if ($DryRun) { Write-Warn "DRY RUN: no filesystem, PATH, or config writes will be made." }
 
-    # Resolve per-user, non-admin defaults.
-    if ([string]::IsNullOrWhiteSpace($BinDir))    { $BinDir    = Get-DefaultBinDir }
+    # Resolve the release source provider up front (explicit -Source override
+    # wins; auto runs a bounded country lookup) so every API helper below uses
+    # one consistent provider for tag/asset/bundle/kernel resolution.
+    Resolve-SourceProvider
+    Write-Info "Release provider: $($script:BundleProvider)"
+
+    # Resolve per-user, non-admin defaults. -Update resolves BinDir from the
+    # existing install receipt below (or an explicit -BinDir), so the default
+    # is NOT applied in update mode -- a missing receipt must fail loud instead
+    # of silently defaulting to a fresh location.
+    if (-not $Update -and [string]::IsNullOrWhiteSpace($BinDir)) { $BinDir = Get-DefaultBinDir }
     if ([string]::IsNullOrWhiteSpace($GlobalDir)) { $GlobalDir = Get-DefaultGlobalDir }
 
     $rawArch = $env:PROCESSOR_ARCHITECTURE
@@ -2088,8 +2366,12 @@ function Invoke-Main {
     }
 
     # prefix is the parent of BinDir, matching install.sh's <prefix>/bin layout.
-    $prefix = Split-Path $BinDir -Parent
-    if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+    # In -Update mode BinDir is resolved below from the existing receipt (or an
+    # explicit -BinDir), so defer this computation until after that block.
+    if (-not $Update) {
+        $prefix = Split-Path $BinDir -Parent
+        if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+    }
 
     # Mode selection: local artifact requires BOTH ArchivePath and ChecksumPath.
     $haveArchive  = -not [string]::IsNullOrWhiteSpace($ArchivePath)
@@ -2100,11 +2382,96 @@ function Invoke-Main {
     if ($haveArchive -and [string]::IsNullOrWhiteSpace($Version)) {
         Fail "-Version is required with -ArchivePath so staged bytes can be verified against an exact release."
     }
+
+    # -Update is the in-place update contract (mirrors install.sh --update):
+    # requires -Version, targets the existing install's BinDir (resolved from
+    # the existing install.json receipt when -BinDir is omitted), and
+    # re-publishes the receipt in place instead of refusing on existing state.
+    if ($Update) {
+        if ($Latest) {
+            Fail "-Update cannot be combined with -Latest. Current-main mode already re-runs in place; use -Latest alone for a current-main update."
+        }
+        if ($haveArchive) {
+            Fail "-Update cannot be combined with -ArchivePath/-ChecksumPath. Local-artifact mode is an explicit single-artifact install; use -Version for an update."
+        }
+        if ([string]::IsNullOrWhiteSpace($Version)) {
+            Fail "-Update requires -Version <release-tag> so the update can be verified against an exact release."
+        }
+        if ([string]::IsNullOrWhiteSpace($BinDir)) {
+            $receiptPath = Join-Path $GlobalDir 'install.json'
+            if (-not (Test-Path -LiteralPath $receiptPath)) {
+                Fail "-Update requires an existing install receipt at $receiptPath; run install.ps1 without -Update first."
+            }
+            $existing = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            if ([string]::IsNullOrWhiteSpace($existing.bin_dir)) {
+                Fail "Existing install receipt at $receiptPath has no bin_dir; pass -BinDir explicitly."
+            }
+            $BinDir = $existing.bin_dir
+            Write-Step "Update target BinDir (from receipt): $BinDir"
+        }
+        if (-not (Test-Path -LiteralPath $BinDir)) {
+            Fail "Update target bin dir does not exist: $BinDir"
+        }
+        # prefix is the parent of BinDir, matching install.sh's <prefix>/bin
+        # layout; recompute after receipt-based resolution so the republished
+        # receipt records the same prefix as the existing one.
+        $prefix = Split-Path $BinDir -Parent
+        if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
+        Write-Info "Mode: in-place update of an existing install (-Update)"
+    }
+
+    # -Ref is an explicit source build of an arbitrary git branch/tag/commit
+    # (mirrors install.sh --ref). An arbitrary ref has no pinned kernel release
+    # bundle, so it requires -SkipVenv for a TUI/portal-only install -- exactly
+    # like install.sh's "pass --skip-python" fail-loud guidance.
+    if ($Ref) {
+        $conflicts = New-Object System.Collections.Generic.List[string]
+        if ($Latest) { $conflicts.Add('-Latest') }
+        if ($Update) { $conflicts.Add('-Update') }
+        if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
+        if ($haveArchive) { $conflicts.Add('-ArchivePath/-ChecksumPath') }
+        if ($conflicts.Count -gt 0) {
+            Fail "-Ref cannot be combined with $($conflicts -join ', '). -Ref is an explicit source build of that ref."
+        }
+        if (-not $SkipVenv) {
+            Fail "-Ref builds have no pinned kernel release bundle to install from. Pass -SkipVenv to install the TUI/portal binaries only (mirrors install.sh --ref)."
+        }
+        Write-Info "Mode: source build of ref '$Ref' (-Ref)"
+        Write-Step "Binaries -> $BinDir"
+        Write-Step "State    -> $GlobalDir"
+        # 3 phases with -SkipPortal (prerequisites, checkout, TUI compile);
+        # 5 without (adds portal web + portal compile).
+        if ($SkipPortal) { Set-PhaseTotal 3 } else { Set-PhaseTotal 5 }
+        $refBuild = Build-SourceRef -Ref $Ref
+        if ($DryRun) {
+            Write-Step "[dry-run] would copy the built binaries into $BinDir and write source-ref provenance"
+            return
+        }
+        $refManaged = Install-FromBuiltMain -Build $refBuild -BinDir $BinDir -Label "ref $Ref"
+        Add-ToPath -Dir $BinDir
+        Write-InstallMetadata -GlobalDir $GlobalDir -Prefix $prefix -BinDir $BinDir -RequestedRef $Ref -ResolvedRef $Ref -ResolvedCommit $refBuild.TuiSha -InstallKind 'powershell-source-ref' -ManagedBinaries $refManaged -SourceMode 'source-ref' -TuiCommit $refBuild.TuiSha
+        Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline "Source build of '$Ref' complete." -Facts ([ordered]@{
+            'TUI commit' = $refBuild.TuiSha
+            'stamped as' = $refBuild.Version
+            'build log'  = (Join-Path $refBuild.Stage 'build.log')
+        })
+        return
+    }
+
+    # -FromSource conflict checks (mirrors install.sh --from-source: it cannot
+    # combine with --latest, and local-artifact mode already supplies the
+    # binaries so forcing a source build is contradictory).
+    if ($FromSource) {
+        if ($Latest) { Fail "-FromSource cannot be combined with -Latest. Current-main mode already builds from source." }
+        if ($haveArchive) { Fail "-FromSource cannot be combined with -ArchivePath/-ChecksumPath. Local-artifact mode already supplies the binaries." }
+    }
     if ($Latest) {
         $conflicts = New-Object System.Collections.Generic.List[string]
         if ($haveArchive) { $conflicts.Add('-ArchivePath/-ChecksumPath') }
         if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
         if ($SkipVenv) { $conflicts.Add('-SkipVenv') }
+        if ($Ref) { $conflicts.Add('-Ref') }
+        if ($FromSource) { $conflicts.Add('-FromSource') }
         if ($conflicts.Count -gt 0) {
             Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries (unless -SkipPortal) and provisions the checked-out kernel runtime."
         }
@@ -2196,9 +2563,23 @@ function Invoke-Main {
     # 3. Install binaries. When step 1 already resolved a tag/bundle (public
     # mode, venv not skipped), pass that SAME resolution through instead of
     # letting Install-FromPublicRelease re-resolve "latest" a second time.
+    # -FromSource forces a source build of the resolved tag (mirrors
+    # install.sh --from-source): the kernel runtime still comes from the
+    # release bundle, only the TUI/portal binaries are built from source.
     Write-Phase "Install binaries"
     if ($haveArchive) {
         $managed = Install-FromLocalArtifact -Archive $ArchivePath -Sidecar $ChecksumPath -BinDir $BinDir -Requested $Version
+    } elseif ($FromSource) {
+        # Step 1 skips tag resolution under -SkipVenv, so resolve the tag here
+        # when needed -- a source build still needs an exact ref to clone.
+        if ([string]::IsNullOrWhiteSpace($resolvedTag)) { $resolvedTag = Resolve-PublicTag -Requested $Version }
+        if ($DryRun) {
+            Write-Step "[dry-run] would build TUI/portal from source at tag $resolvedTag and install into $BinDir"
+            $managed = @()
+        } else {
+            $srcBuild = Build-SourceRef -Ref $resolvedTag
+            $managed = Install-FromBuiltMain -Build $srcBuild -BinDir $BinDir -Label "release tag $resolvedTag"
+        }
     } elseif ($bundle) {
         $result = Install-FromPublicRelease -BinDir $BinDir -Requested $Version -ResolvedTag $resolvedTag -ResolvedBundle $bundle
         $managed = $result.Managed
@@ -2235,7 +2616,7 @@ function Invoke-Main {
             RequestedRef    = $Version
             ResolvedRef     = $resolvedTag
             ResolvedCommit  = $(if ($bundle) { $bundle.TuiCommit } else { '' })
-            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } else { 'powershell-release-asset' })
+            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } elseif ($FromSource) { 'powershell-source-build' } else { 'powershell-release-asset' })
             ManagedBinaries = $managed
         }
         if ($kernelMeta) {
@@ -2272,8 +2653,8 @@ try {
     # complete in under a second after the big download, so the window vanishing
     # right after the download reads as a crash ("闪退") even though the
     # install succeeded. Only pause for a real interactive console; piped/
-    # automated invocations stay non-blocking.
-    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    # automated invocations stay non-blocking, and -NonInteractive never pauses.
+    if (-not $NonInteractive -and $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
         Write-Host ""
         Write-Host "Installation complete. Press Enter to close this window..." -ForegroundColor DarkGray
         [void][Console]::ReadLine()
@@ -2290,8 +2671,9 @@ try {
     # (double-click, shortcut, Start-Process, `curl | iex`), the window closes
     # the instant `exit` runs -- the error above vanishes before it can be read
     # and the install looks like a silent crash ("闪退"). Only pause for a real
-    # interactive console; piped/automated invocations stay non-blocking.
-    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    # interactive console; piped/automated invocations stay non-blocking, and
+    # -NonInteractive never pauses.
+    if (-not $NonInteractive -and $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
         Write-Host ""
         Write-Host "Installation failed. Press Enter to close this window..." -ForegroundColor DarkGray
         [void][Console]::ReadLine()

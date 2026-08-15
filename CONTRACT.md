@@ -344,8 +344,8 @@ native-Windows counterpart and MUST mirror every functional capability of
 authorized (e.g. Homebrew migration is POSIX-only, Windows PATH handling is
 Windows-only). The same rule covers the maintenance children: the six lifecycle
 assets (`update.sh`, `fix.sh`, `verify.sh`, `dev.sh`, `remove.sh`) are the
-canonical surface, and Windows counterparts (`remove.ps1` today; `update.ps1`,
-`fix.ps1`, `verify.ps1`, `dev.ps1` to be added) MUST be created and kept in
+canonical surface, and the Windows counterparts (`update.ps1`, `fix.ps1`,
+`verify.ps1`, `dev.ps1`, `remove.ps1`) MUST be created and kept in
 parity as those POSIX capabilities evolve.
 
 Concretely:
@@ -372,18 +372,18 @@ Concretely:
 | `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
 | `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
-| `--source auto\|github\|gitee` | — | **missing**: PS1 always uses GitHub for release binaries; only `-Latest` build mirrors are CN-aware |
-| `--ref <ref>` / `--from-source` | — | **missing**: PS1 has no arbitrary-ref or force-source build (only `-Latest`) |
-| `--update` (in-place) | — | **missing**: PS1 has no in-place update; re-run `install.ps1` |
-| `--non-interactive` | `-DryRun` (partial) | **partial**: PS1 has plan-only `-DryRun` but no equivalent no-prompt install switch |
+| `--source auto\|github\|gitee` | `-Source` | synced |
+| `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
+| `--update` (in-place) | `-Update` | synced |
+| `--non-interactive` | `-NonInteractive` | synced |
 | `-ArchivePath` / `-ChecksumPath` (local artifact) | — | POSIX-N/A (Windows-only) |
 | `-DryRun` (plan-only) | — | POSIX-N/A (Windows-only) |
 | `-NoModifyPath` | — | POSIX-N/A (Windows-only) |
 | `-GlobalDir` | — | POSIX-N/A (Windows-only) |
-| `update.sh` | `update.ps1` | **missing**: to be added |
-| `fix.sh` | `fix.ps1` | **missing**: to be added |
-| `verify.sh` | `verify.ps1` | **missing**: to be added |
-| `dev.sh` | `dev.ps1` | **missing**: to be added |
+| `update.sh` | `update.ps1` | synced (this PR) |
+| `fix.sh` | `fix.ps1` | synced (this PR) |
+| `verify.sh` | `verify.ps1` | synced (this PR) |
+| `dev.sh` | `dev.ps1` | synced (this PR) |
 | `remove.sh` | `remove.ps1` | synced |
 
 This contract was established by Jason 2026-08-15 (`install.sh` canonical;
