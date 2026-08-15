@@ -105,6 +105,19 @@
     install receipt exists at GlobalDir. Cannot be combined with -Latest or
     local-artifact mode (-ArchivePath/-ChecksumPath).
 
+.PARAMETER Ref
+    Build a specific git branch/tag/commit from source. Mirrors install.sh's
+    --ref: an explicit source build of that ref (no release asset, no pinned
+    kernel bundle), so it requires -SkipVenv -- an arbitrary ref has no pinned
+    kernel release to provision the Python runtime from. Cannot be combined
+    with -Latest, -Version, -Update, or local-artifact mode.
+
+.PARAMETER FromSource
+    Always build from source, skipping prebuilt release assets. Mirrors
+    install.sh's --from-source. With -Ref it is implied; with -Version it
+    builds that release tag from source instead of downloading the archive.
+    Cannot be combined with -Latest or local-artifact mode.
+
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
     it may read and validate inputs (including the checksum) and print the plan,
@@ -146,6 +159,8 @@ param(
     [switch]$SkipPortal,
     [switch]$NoModifyPath,
     [switch]$NonInteractive,
+    [string]$Ref,
+    [switch]$FromSource,
     [switch]$Update,
     [switch]$DryRun
 )
@@ -1859,6 +1874,105 @@ function Build-LatestMain {
     return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = $kernelSource; TuiSha = $tuiSha; KernelSha = $kernelSha; Version = $version; Tui = $tuiOut; Portal = $portalOut; DryRun = $false }
 }
 
+# Resolve-RefSha resolves an arbitrary git ref (branch/tag/commit) to a full
+# 40-hex commit SHA over the remote, mirroring install.sh --ref source builds.
+# A bare 40-hex commit is accepted as-is; anything else is tried as a branch
+# and then a tag. Fails loud on any unresolved/invalid ref.
+function Resolve-RefSha {
+    param([string]$RemoteUrl, [string]$Label, [string]$Ref)
+    if ($Ref -match '^[0-9a-fA-F]{40}$') { return $Ref.ToLowerInvariant() }
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        foreach ($candidate in @("refs/heads/$Ref", "refs/tags/$Ref")) {
+            $lines = & git ls-remote $RemoteUrl $candidate 2>$null
+            $gitExit = $LASTEXITCODE
+            if ($gitExit -eq 0 -and $lines) {
+                $sha = (($lines | Select-Object -First 1) -split '\s+' | Select-Object -First 1)
+                if ($sha -match '^[0-9a-fA-F]{40}$') { return $sha.ToLowerInvariant() }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    Fail "Could not resolve $Label ref '$Ref' from $RemoteUrl (tried branch and tag). Install Git and verify network access."
+}
+
+# Build-SourceRef clones the TUI repository at an arbitrary ref and builds both
+# binaries (portal unless -SkipPortal), mirroring install.sh's build_from_source
+# for --ref / --from-source. No kernel source is checked out here: -Ref builds
+# have no pinned kernel bundle (they require -SkipVenv), and -FromSource release
+# builds provision the kernel from the release bundle via the normal venv path.
+function Build-SourceRef {
+    param([string]$Ref)
+    $phase = Start-Phase 'Checking build prerequisites (git, Go, Node.js/npm, CPython 3.11-3.13) ...'
+    $prerequisites = Confirm-DevPrerequisites
+    if ($prerequisites.Deferred) { return @{ DryRun = $true; PrerequisitesDeferred = $true } }
+    Complete-Phase -Clock $phase -Message 'prerequisites satisfied'
+    $tuiSha = Resolve-RefSha -RemoteUrl $RepoUrl -Label 'TUI' -Ref $Ref
+    Write-Info "Resolved TUI ref '$Ref' commit: $tuiSha"
+    if ($DryRun) {
+        if ($SkipPortal) {
+            Write-Step "[dry-run] would shallow-checkout TUI ref '$Ref' and build lingtai-tui.exe only (portal skipped by -SkipPortal)"
+        } else {
+            Write-Step "[dry-run] would shallow-checkout TUI ref '$Ref' and build lingtai-tui.exe plus required lingtai-portal.exe"
+        }
+        return @{ TuiSha = $tuiSha; KernelSha = ''; DryRun = $true }
+    }
+
+    $stage = New-StagingDir
+    $tuiSource = Join-Path $stage 'lingtai'
+    $buildLog = Join-Path $stage 'build.log'
+    Write-Step "Build log: $buildLog"
+
+    $phase = Start-Phase "Checking out TUI ref '$Ref' ..."
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch',$Ref,$RepoUrl,$tuiSource) -Failure "TUI ref '$Ref' checkout failed" -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'fetch','--depth','1','origin',$tuiSha) -Failure "TUI ref '$Ref' pinned commit fetch failed" -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'checkout','--detach',$tuiSha) -Failure "TUI ref '$Ref' pinned checkout failed" -LogPath $buildLog
+    $actualTui = (& git -C $tuiSource rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($actualTui -ne $tuiSha) { Fail "TUI checkout mismatch: resolved $tuiSha but checked out $actualTui. Staging kept at $stage." }
+    Complete-Phase -Clock $phase -Message "TUI at $($tuiSha.Substring(0,12))"
+
+    $version = "$Ref-$tuiSha"
+    $tuiOut = Join-Path $stage 'lingtai-tui.exe'
+    $portalOut = Join-Path $stage 'lingtai-portal.exe'
+
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Building the portal web frontend (npm ci + npm run build; the longest step) ...'
+        Push-Location (Join-Path $tuiSource 'portal/web')
+        try {
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed' -LogPath $buildLog
+            Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed' -LogPath $buildLog
+        } finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'portal web assets built'
+    }
+
+    $phase = Start-Phase 'Compiling lingtai-tui.exe ...'
+    Push-Location (Join-Path $tuiSource 'tui')
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$tuiOut,'.') -Failure 'lingtai-tui.exe build failed' -LogPath $buildLog }
+    finally { Pop-Location }
+    Complete-Phase -Clock $phase -Message 'lingtai-tui.exe compiled'
+
+    if (-not $SkipPortal) {
+        $phase = Start-Phase 'Compiling lingtai-portal.exe ...'
+        Push-Location (Join-Path $tuiSource 'portal')
+        try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' -LogPath $buildLog }
+        finally { Pop-Location }
+        Complete-Phase -Clock $phase -Message 'lingtai-portal.exe compiled'
+    }
+
+    Confirm-StagedVersion -StagedTui $tuiOut -Requested $version
+    if ($SkipPortal) {
+        Write-Step "-SkipPortal: portal build skipped; install will be TUI-only"
+        return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = ''; TuiSha = $tuiSha; KernelSha = ''; Version = $version; Tui = $tuiOut; Portal = $null; DryRun = $false }
+    }
+    $portalProbe = & $portalOut 'version' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $portalProbe.Trim() -ne "lingtai-portal $version") {
+        Fail "Built lingtai-portal.exe failed provenance verification (expected 'lingtai-portal $version', got '$($portalProbe.Trim())'). Staging kept at $stage."
+    }
+    return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = ''; TuiSha = $tuiSha; KernelSha = ''; Version = $version; Tui = $tuiOut; Portal = $portalOut; DryRun = $false }
+}
+
 function Install-MainVenv {
     param([string]$KernelSource, [string]$KernelSha, [string]$GlobalDir, [string]$PythonIndexUrl)
     $phase = Start-Phase 'Provisioning the Python runtime venv and installing the pinned kernel ...'
@@ -1905,19 +2019,19 @@ function Install-MainVenv {
 }
 
 function Install-FromBuiltMain {
-    param([hashtable]$Build, [string]$BinDir)
+    param([hashtable]$Build, [string]$BinDir, [string]$Label = 'pinned main')
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Remove-ParkedManagedBinaries -BinDir $BinDir
     Copy-ManagedBinary -Source $Build.Tui -Destination $tuiDest
     if ($SkipPortal) {
         Write-Step "-SkipPortal: not installing lingtai-portal.exe"
-        Write-Ok "Installed pinned main TUI binary into $BinDir (TUI-only)"
+        Write-Ok "Installed $Label TUI binary into $BinDir (TUI-only)"
         return @($tuiDest)
     }
     $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
     Copy-ManagedBinary -Source $Build.Portal -Destination $portalDest
-    Write-Ok "Installed pinned main binaries into $BinDir"
+    Write-Ok "Installed $Label binaries into $BinDir"
     return @($tuiDest,$portalDest)
 }
 
@@ -2162,11 +2276,59 @@ function Invoke-Main {
         if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
         Write-Info "Mode: in-place update of an existing install (-Update)"
     }
+
+    # -Ref is an explicit source build of an arbitrary git branch/tag/commit
+    # (mirrors install.sh --ref). An arbitrary ref has no pinned kernel release
+    # bundle, so it requires -SkipVenv for a TUI/portal-only install -- exactly
+    # like install.sh's "pass --skip-python" fail-loud guidance.
+    if ($Ref) {
+        $conflicts = New-Object System.Collections.Generic.List[string]
+        if ($Latest) { $conflicts.Add('-Latest') }
+        if ($Update) { $conflicts.Add('-Update') }
+        if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
+        if ($haveArchive) { $conflicts.Add('-ArchivePath/-ChecksumPath') }
+        if ($conflicts.Count -gt 0) {
+            Fail "-Ref cannot be combined with $($conflicts -join ', '). -Ref is an explicit source build of that ref."
+        }
+        if (-not $SkipVenv) {
+            Fail "-Ref builds have no pinned kernel release bundle to install from. Pass -SkipVenv to install the TUI/portal binaries only (mirrors install.sh --ref)."
+        }
+        Write-Info "Mode: source build of ref '$Ref' (-Ref)"
+        Write-Step "Binaries -> $BinDir"
+        Write-Step "State    -> $GlobalDir"
+        # 3 phases with -SkipPortal (prerequisites, checkout, TUI compile);
+        # 5 without (adds portal web + portal compile).
+        if ($SkipPortal) { Set-PhaseTotal 3 } else { Set-PhaseTotal 5 }
+        $refBuild = Build-SourceRef -Ref $Ref
+        if ($DryRun) {
+            Write-Step "[dry-run] would copy the built binaries into $BinDir and write source-ref provenance"
+            return
+        }
+        $refManaged = Install-FromBuiltMain -Build $refBuild -BinDir $BinDir -Label "ref $Ref"
+        Add-ToPath -Dir $BinDir
+        Write-InstallMetadata -GlobalDir $GlobalDir -Prefix $prefix -BinDir $BinDir -RequestedRef $Ref -ResolvedRef $Ref -ResolvedCommit $refBuild.TuiSha -InstallKind 'powershell-source-ref' -ManagedBinaries $refManaged -SourceMode 'source-ref' -TuiCommit $refBuild.TuiSha
+        Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline "Source build of '$Ref' complete." -Facts ([ordered]@{
+            'TUI commit' = $refBuild.TuiSha
+            'stamped as' = $refBuild.Version
+            'build log'  = (Join-Path $refBuild.Stage 'build.log')
+        })
+        return
+    }
+
+    # -FromSource conflict checks (mirrors install.sh --from-source: it cannot
+    # combine with --latest, and local-artifact mode already supplies the
+    # binaries so forcing a source build is contradictory).
+    if ($FromSource) {
+        if ($Latest) { Fail "-FromSource cannot be combined with -Latest. Current-main mode already builds from source." }
+        if ($haveArchive) { Fail "-FromSource cannot be combined with -ArchivePath/-ChecksumPath. Local-artifact mode already supplies the binaries." }
+    }
     if ($Latest) {
         $conflicts = New-Object System.Collections.Generic.List[string]
         if ($haveArchive) { $conflicts.Add('-ArchivePath/-ChecksumPath') }
         if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
         if ($SkipVenv) { $conflicts.Add('-SkipVenv') }
+        if ($Ref) { $conflicts.Add('-Ref') }
+        if ($FromSource) { $conflicts.Add('-FromSource') }
         if ($conflicts.Count -gt 0) {
             Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries (unless -SkipPortal) and provisions the checked-out kernel runtime."
         }
@@ -2258,9 +2420,23 @@ function Invoke-Main {
     # 3. Install binaries. When step 1 already resolved a tag/bundle (public
     # mode, venv not skipped), pass that SAME resolution through instead of
     # letting Install-FromPublicRelease re-resolve "latest" a second time.
+    # -FromSource forces a source build of the resolved tag (mirrors
+    # install.sh --from-source): the kernel runtime still comes from the
+    # release bundle, only the TUI/portal binaries are built from source.
     Write-Phase "Install binaries"
     if ($haveArchive) {
         $managed = Install-FromLocalArtifact -Archive $ArchivePath -Sidecar $ChecksumPath -BinDir $BinDir -Requested $Version
+    } elseif ($FromSource) {
+        # Step 1 skips tag resolution under -SkipVenv, so resolve the tag here
+        # when needed -- a source build still needs an exact ref to clone.
+        if ([string]::IsNullOrWhiteSpace($resolvedTag)) { $resolvedTag = Resolve-PublicTag -Requested $Version }
+        if ($DryRun) {
+            Write-Step "[dry-run] would build TUI/portal from source at tag $resolvedTag and install into $BinDir"
+            $managed = @()
+        } else {
+            $srcBuild = Build-SourceRef -Ref $resolvedTag
+            $managed = Install-FromBuiltMain -Build $srcBuild -BinDir $BinDir -Label "release tag $resolvedTag"
+        }
     } elseif ($bundle) {
         $result = Install-FromPublicRelease -BinDir $BinDir -Requested $Version -ResolvedTag $resolvedTag -ResolvedBundle $bundle
         $managed = $result.Managed
@@ -2297,7 +2473,7 @@ function Invoke-Main {
             RequestedRef    = $Version
             ResolvedRef     = $resolvedTag
             ResolvedCommit  = $(if ($bundle) { $bundle.TuiCommit } else { '' })
-            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } else { 'powershell-release-asset' })
+            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } elseif ($FromSource) { 'powershell-source-build' } else { 'powershell-release-asset' })
             ManagedBinaries = $managed
         }
         if ($kernelMeta) {

@@ -373,7 +373,7 @@ Concretely:
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
 | `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
 | `--source auto\|github\|gitee` | — | **missing**: PS1 always uses GitHub for release binaries; only `-Latest` build mirrors are CN-aware |
-| `--ref <ref>` / `--from-source` | — | **missing**: PS1 has no arbitrary-ref or force-source build (only `-Latest`) |
+| `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
 | `--update` (in-place) | `-Update` | synced |
 | `--non-interactive` | `-NonInteractive` | synced |
 | `-ArchivePath` / `-ChecksumPath` (local artifact) | — | POSIX-N/A (Windows-only) |

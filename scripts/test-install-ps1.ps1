@@ -28,6 +28,8 @@
         -SkipPortal              TUI-only install (mirrors install.sh --skip-portal)
         -NoModifyPath            do not persist PATH changes
         -NonInteractive          never prompt (mirrors install.sh --non-interactive)
+        -Ref <ref>               build a specific git ref from source (mirrors install.sh --ref)
+        -FromSource              always build from source (mirrors install.sh --from-source)
         -Update                  update an existing install in place (mirrors install.sh --update)
         -DryRun                  plan only; make no filesystem writes
 
@@ -1476,6 +1478,40 @@ try {
     Assert-True ($r8c.ExitCode -ne 0) '-Update without an existing receipt exits non-zero'
     Assert-NotContains $r8c.Stderr 'parameter cannot be found' '-Update binds as a real switch'
     Assert-Contains $r8c.Stderr 'install receipt' '-Update names the missing receipt as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8d: -Ref (mirrors install.sh --ref) is an accepted switch and
+    # stays fail-loud. An arbitrary ref has no pinned kernel bundle, so -Ref
+    # without -SkipVenv must refuse with the explicit "pass -SkipVenv" style
+    # guidance, proving both the switch and its SkipVenv requirement bind.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -Ref parses and requires -SkipVenv'
+    $home8d = New-IsolatedHome
+    $r8d = Invoke-Installer @{
+        Ref      = 'some-branch'
+        GlobalDir = (Join-Path $home8d '.lingtai-tui')
+    }
+    Assert-True ($r8d.ExitCode -ne 0) '-Ref without -SkipVenv exits non-zero'
+    Assert-NotContains $r8d.Stderr 'parameter cannot be found' '-Ref binds as a real switch'
+    Assert-Contains $r8d.Stderr '-SkipVenv' '-Ref names the -SkipVenv requirement as the reason'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 8e: -FromSource (mirrors install.sh --from-source) is an accepted
+    # switch and stays fail-loud. It cannot combine with local-artifact mode.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: -FromSource parses and rejects local-artifact mode'
+    $home8e = New-IsolatedHome
+    $r8e = Invoke-Installer @{
+        Version      = 'v9.9.9'
+        GlobalDir    = (Join-Path $home8e '.lingtai-tui')
+        ArchivePath  = (Join-Path $TestRoot 'no-such-archive.zip')
+        ChecksumPath = $fx.ChecksumPath
+        SkipVenv     = $true
+        FromSource   = $true
+    }
+    Assert-True ($r8e.ExitCode -ne 0) '-FromSource with local-artifact mode exits non-zero'
+    Assert-NotContains $r8e.Stderr 'parameter cannot be found' '-FromSource binds as a real switch'
+    Assert-Contains $r8e.Stderr '-FromSource' '-FromSource names the conflict as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under
