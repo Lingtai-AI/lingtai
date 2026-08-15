@@ -1477,8 +1477,8 @@ try {
         Update   = $true
     }
     Assert-True ($r8c.ExitCode -ne 0) '-Update without an existing receipt exits non-zero'
-    Assert-NotContains $r8c.Stderr 'parameter cannot be found' '-Update binds as a real switch'
-    Assert-Contains $r8c.Stderr 'install receipt' '-Update names the missing receipt as the reason'
+    Assert-NotContains (Get-InstallerOutput $r8c) 'parameter cannot be found' '-Update binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8c) 'install receipt' '-Update names the missing receipt as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 8d: -Ref (mirrors install.sh --ref) is an accepted switch and
@@ -1493,8 +1493,8 @@ try {
         GlobalDir = (Join-Path $home8d '.lingtai-tui')
     }
     Assert-True ($r8d.ExitCode -ne 0) '-Ref without -SkipVenv exits non-zero'
-    Assert-NotContains $r8d.Stderr 'parameter cannot be found' '-Ref binds as a real switch'
-    Assert-Contains $r8d.Stderr '-SkipVenv' '-Ref names the -SkipVenv requirement as the reason'
+    Assert-NotContains (Get-InstallerOutput $r8d) 'parameter cannot be found' '-Ref binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8d) '-SkipVenv' '-Ref names the -SkipVenv requirement as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 8e: -FromSource (mirrors install.sh --from-source) is an accepted
@@ -1511,8 +1511,8 @@ try {
         FromSource   = $true
     }
     Assert-True ($r8e.ExitCode -ne 0) '-FromSource with local-artifact mode exits non-zero'
-    Assert-NotContains $r8e.Stderr 'parameter cannot be found' '-FromSource binds as a real switch'
-    Assert-Contains $r8e.Stderr '-FromSource' '-FromSource names the conflict as the reason'
+    Assert-NotContains (Get-InstallerOutput $r8e) 'parameter cannot be found' '-FromSource binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8e) '-FromSource' '-FromSource names the conflict as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 8f: -Source (mirrors install.sh --source) is an accepted switch
@@ -1528,8 +1528,8 @@ try {
         Source     = 'bogus'
     }
     Assert-True ($r8f.ExitCode -ne 0) '-Source bogus exits non-zero'
-    Assert-NotContains $r8f.Stderr 'parameter cannot be found' '-Source binds as a real switch'
-    Assert-Contains $r8f.Stderr 'auto|github|gitee' '-Source names the valid values as the reason'
+    Assert-NotContains (Get-InstallerOutput $r8f) 'parameter cannot be found' '-Source binds as a real switch'
+    Assert-Contains (Get-InstallerOutput $r8f) 'auto|github|gitee' '-Source names the valid values as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under
