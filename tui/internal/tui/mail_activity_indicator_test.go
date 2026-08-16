@@ -46,8 +46,9 @@ func TestStateGlyphActiveAnimates(t *testing.T) {
 }
 
 // TestActiveElapsed verifies the elapsed suffix renders only while ACTIVE with
-// a non-zero start time, formatted as seconds under a minute and minutes above.
-// Offsets are mid-interval to avoid second/minute boundary flake.
+// a non-zero start time, always formatted as whole seconds so the value matches
+// the Telegram Task Card footer's ``active (N s)``. Offsets are mid-interval to
+// avoid second/minute boundary flake.
 func TestActiveElapsed(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -59,7 +60,7 @@ func TestActiveElapsed(t *testing.T) {
 		{"not active drops timer", "idle", now.Add(-30 * time.Second), ""},
 		{"active but zero start", "active", time.Time{}, ""},
 		{"active seconds", "active", now.Add(-12500 * time.Millisecond), " 12s"},
-		{"active minutes", "active", now.Add(-210 * time.Second), " 3m"},
+		{"active minutes still seconds", "active", now.Add(-210 * time.Second), " 210s"},
 	}
 	for _, c := range cases {
 		m := MailModel{orchState: c.state, activeSince: c.since}
@@ -73,8 +74,8 @@ func TestActiveElapsed(t *testing.T) {
 // ACTIVE, preserved while staying ACTIVE, and cleared on any non-ACTIVE refresh
 // (including the synthesized suspended/refreshing states, which arrive as
 // non-ACTIVE through the same mailRefreshMsg path). When the refresh carries a
-// kernel last_progress_at it is used as the baseline (so "active N sec" measures
-// seconds since the last tool call), falling back to wall-clock when absent.
+// kernel last_api_call_at it is used as the baseline (so "active N sec" measures
+// seconds since the last API call), falling back to wall-clock when absent.
 func TestActiveSinceLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
@@ -95,9 +96,9 @@ func TestActiveSinceLifecycle(t *testing.T) {
 
 	// Stay ACTIVE with fresh kernel progress → baseline advances to it.
 	progress := time.Now().Add(-4 * time.Second)
-	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true, lastProgressAt: progress})
+	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true, lastApiCallAt: progress})
 	if !m.activeSince.Equal(progress) {
-		t.Errorf("activeSince should advance to last_progress_at; was %v, now %v", first, m.activeSince)
+		t.Errorf("activeSince should advance to last_api_call_at; was %v, now %v", first, m.activeSince)
 	}
 
 	// Leave ACTIVE → timer cleared so the badge drops the elapsed suffix.

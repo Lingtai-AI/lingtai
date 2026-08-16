@@ -129,6 +129,7 @@ type networkStatusSnapshot struct {
 	Runtime    struct {
 		State          string             `json:"state"`
 		LastProgressAt tolerantJSONNumber `json:"last_progress_at"`
+			LastApiCallAt  tolerantJSONNumber `json:"last_api_call_at"`
 		NoProgressSecs tolerantJSONNumber `json:"no_progress_seconds"`
 		UptimeSeconds  tolerantJSONNumber `json:"uptime_seconds"`
 		StaminaLeft    tolerantJSONNumber `json:"stamina_left"`
@@ -230,6 +231,31 @@ func LastProgressAt(agentDir string, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	if !strings.EqualFold(status.Runtime.State, NetworkStatusActive) {
+		return time.Time{}, false
+	}
+	return statusFreshnessTime(now, unixSeconds(status.Runtime.LastProgressAt.Value))
+}
+
+// LastApiCallAt returns the agent's clamped runtime.last_api_call_at from its
+// .status.json, falling back to runtime.last_progress_at when the newer field
+// is absent (older kernels). Zero + false when the file is missing, both
+// fields are absent/invalid, the runtime state is not active, or the
+// timestamp is beyond the future grace window. This is the "how long has it
+// been active since its last API call" signal (Jason 2026-08-16): while the
+// model thinks or a tool runs, last_api_call_at stays put and the age grows;
+// when a new API call starts it resets.
+func LastApiCallAt(agentDir string, now time.Time) (time.Time, bool) {
+	status, _, ok := readNetworkStatusSnapshot(agentDir)
+	if !ok {
+		return time.Time{}, false
+	}
+	if !strings.EqualFold(status.Runtime.State, NetworkStatusActive) {
+		return time.Time{}, false
+	}
+	if status.Runtime.LastApiCallAt.OK {
+		return statusFreshnessTime(now, unixSeconds(status.Runtime.LastApiCallAt.Value))
+	}
+	if !status.Runtime.LastProgressAt.OK {
 		return time.Time{}, false
 	}
 	return statusFreshnessTime(now, unixSeconds(status.Runtime.LastProgressAt.Value))
