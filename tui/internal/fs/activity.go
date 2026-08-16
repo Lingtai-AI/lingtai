@@ -280,7 +280,27 @@ type daemonStateFile struct {
 	FinishedAt json.RawMessage `json:"finished_at"`
 }
 
-// CountDaemons counts parseable daemon.json files under agentDir/daemons.
+// daemonListWindow bounds the daemon runs shown by the live kanban summary and
+// the mail async-work row to runs whose run directory was modified within the
+// last 10 minutes. Done/active/failed states are all included while recent.
+// Older historical runs remain browsable through the /daemons view; the
+// per-second dashboard never opens their state files, so a quiet week of
+// history costs no IO on the 1s tick.
+const daemonListWindow = 10 * time.Minute
+
+// withinDaemonListWindow reports whether a run's directory mtime is fresh
+// enough for the live daemon summary to scan it. The boundary is inclusive: a
+// run exactly daemonListWindow old is still shown. Future mtimes (clock skew)
+// yield a negative age and are treated as fresh.
+func withinDaemonListWindow(runModTime, now time.Time) bool {
+	return now.Sub(runModTime) <= daemonListWindow
+}
+
+// CountDaemons counts parseable daemon.json files under agentDir/daemons whose
+// run directory was modified within the last daemonListWindow. The recency gate
+// runs on directory metadata already returned by ReadDir, so stale historical
+// runs are skipped before any daemon.json read: the per-second kanban/mail
+// summary only ever opens state files for recently-active runs.
 func CountDaemons(agentDir string) DaemonCounts {
 	daemonDir := filepath.Join(agentDir, "daemons")
 	entries, err := os.ReadDir(daemonDir)
@@ -288,6 +308,7 @@ func CountDaemons(agentDir string) DaemonCounts {
 		return DaemonCounts{}
 	}
 
+	now := time.Now()
 	var counts DaemonCounts
 	for _, entry := range entries {
 		var path string
@@ -296,6 +317,13 @@ func CountDaemons(agentDir string) DaemonCounts {
 		} else if entry.Name() == "daemon.json" {
 			path = filepath.Join(daemonDir, entry.Name())
 		} else {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if !withinDaemonListWindow(info.ModTime(), now) {
 			continue
 		}
 		state, ok := readDaemonStateFile(path)

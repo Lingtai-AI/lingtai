@@ -578,7 +578,98 @@ func TestDaemonLedgerSummaryZeroCLITokensFallsBackToLegacyTokens(t *testing.T) {
 	}
 }
 
-func TestDaemonDetailSnapshotBoundsRunContentsButCountsAllDirectories(t *testing.T) {
+// --- 10-minute live-window tests (CountDaemons) ---
+
+// setRunDirMtime backdates a run directory's mtime to stamp. The daemon.json
+// inside keeps its own fresh mtime, so any read of the state file would be
+// observable through the counts.
+func setRunDirMtime(t *testing.T, agentDir, runID string, stamp time.Time) {
+	t.Helper()
+	runDir := filepath.Join(agentDir, "daemons", runID)
+	if err := os.Chtimes(runDir, stamp, stamp); err != nil {
+		t.Fatalf("chtimes run dir %s: %v", runID, err)
+	}
+}
+
+func TestCountDaemonsWindowIncludesRecentRuns(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "r1", map[string]interface{}{"state": "running"})
+	writeDaemonState(t, agentDir, "r2", map[string]interface{}{"state": "active"})
+	writeDaemonState(t, agentDir, "r3", map[string]interface{}{"state": "done"})
+	writeDaemonState(t, agentDir, "r4", map[string]interface{}{"state": "failed"})
+	writeDaemonState(t, agentDir, "r5", map[string]interface{}{"state": "queued"})
+	// One second inside the window; every state shows while recent.
+	inside := time.Now().Add(-(daemonListWindow - time.Second))
+	for _, runID := range []string{"r1", "r2", "r3", "r4", "r5"} {
+		setRunDirMtime(t, agentDir, runID, inside)
+	}
+
+	counts := CountDaemons(agentDir)
+	if counts.Running != 2 || counts.Queued != 1 || counts.Done != 1 || counts.Failed != 1 || counts.Total != 5 {
+		t.Fatalf("recent-window counts = %+v, want running:2 queued:1 done:1 failed:1 total:5", counts)
+	}
+}
+
+func TestCountDaemonsWindowSkipsStaleRunsWithoutReadingState(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "fresh", map[string]interface{}{"state": "running"})
+
+	// Stale runs: their daemon.json files are fresh on disk and would each count
+	// as running/done/failed if opened, but the run directories are far outside
+	// the window. CountDaemons must short-circuit on the directory mtime before
+	// any state-file read, so none of these can leak into the summary.
+	for _, runID := range []string{"stale-running", "stale-done", "stale-failed"} {
+		writeDaemonState(t, agentDir, runID, map[string]interface{}{"state": "running"})
+		setRunDirMtime(t, agentDir, runID, time.Now().Add(-(daemonListWindow + time.Hour)))
+	}
+
+	counts := CountDaemons(agentDir)
+	if counts.Total != 1 || counts.Running != 1 || counts.Done != 0 || counts.Failed != 0 || counts.Queued != 0 {
+		t.Fatalf("stale runs leaked into summary: %+v", counts)
+	}
+}
+
+// TestDaemonRecentLedgerSummaryReadsOnlyWindow proves the mail async-row token
+// summary aggregates only runs inside daemonListWindow (10 minutes): fresh runs
+// contribute per-call ledger totals (with the cli_tokens fallback for CLI
+// backends that write no ledger), while a stale run's ledger is never opened.
+func TestDaemonRecentLedgerSummaryReadsOnlyWindow(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonLedger(t, agentDir, "fresh-a", []string{
+		`{"input":100,"output":20,"thinking":5,"cached":40}`,
+		`{"input":200,"output":50,"thinking":10,"cached":80}`,
+	})
+	writeDaemonLedger(t, agentDir, "fresh-b", []string{
+		`{"input":300,"output":60,"thinking":15,"cached":120}`,
+	})
+	// In-window CLI-backend run with no per-call ledger: falls back to cli_tokens.
+	writeDaemonState(t, agentDir, "fresh-cli", map[string]interface{}{
+		"cli_tokens": map[string]interface{}{"input": 500, "output": 100, "thinking": 20, "cached": 50, "calls": 3},
+	})
+	// Stale run far outside the window: its ledger must never be read.
+	writeDaemonLedger(t, agentDir, "stale", []string{
+		`{"input":99999,"output":99999,"thinking":99999,"cached":99999}`,
+	})
+	inside := time.Now().Add(-(daemonListWindow - time.Second))
+	for _, runID := range []string{"fresh-a", "fresh-b", "fresh-cli"} {
+		setRunDirMtime(t, agentDir, runID, inside)
+	}
+	setRunDirMtime(t, agentDir, "stale", time.Now().Add(-(daemonListWindow + time.Hour)))
+
+	got := DaemonRecentLedgerSummary(agentDir)
+	// fresh-a: 300/70/15/120 + 2 calls; fresh-b: 300/60/15/120 + 1 call;
+	// fresh-cli fallback: input=cli.Input+Cached=550, output 100, thinking 20,
+	// cached 50, calls 3. The stale run's 99999 totals must not appear.
+	if got.Input != 1150 || got.Output != 230 || got.Thinking != 50 || got.Cached != 290 || got.APICalls != 6 {
+		t.Fatalf("recent ledger summary = %+v, want input:1150 output:230 thinking:50 cached:290 calls:6", got)
+	}
+}
+
+// TestDaemonDetailSnapshotReturnsRecentRuns proves the Ctrl+D detail snapshot
+// still reads only the newest recentRunN run directories in one stateless pass
+// (no cache, no retention) and returns their ledger rows, state counts, and
+// window metadata.
+func TestDaemonDetailSnapshotReturnsRecentRuns(t *testing.T) {
 	agentDir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)
 	for i := 1; i <= 5; i++ {
@@ -613,84 +704,5 @@ func TestDaemonDetailSnapshotBoundsRunContentsButCountsAllDirectories(t *testing
 	}
 	if len(snapshot.Recent) != 2 || snapshot.Recent[0].Input != 5 || snapshot.Recent[1].Input != 4 {
 		t.Fatalf("recent rows = %+v", snapshot.Recent)
-	}
-}
-
-func TestDaemonDetailSnapshotInvalidatesLiveRunOnNewLedgerRow(t *testing.T) {
-	agentDir := t.TempDir()
-	runID := "em-live"
-	writeDaemonState(t, agentDir, runID, map[string]interface{}{
-		"handle": "em-live",
-		"state":  "running",
-	})
-	writeDaemonLedger(t, agentDir, runID, []string{
-		`{"ts":"2026-01-01T00:00:01Z","input":1}`,
-	})
-	heartbeat := filepath.Join(agentDir, "daemons", runID, ".heartbeat")
-	if err := os.WriteFile(heartbeat, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	first := ReadDaemonDetailSnapshot(agentDir, 128, 100)
-	if len(first.Recent) != 1 {
-		t.Fatalf("first rows = %d, want 1", len(first.Recent))
-	}
-	ledger := filepath.Join(agentDir, "daemons", runID, "logs", "token_ledger.jsonl")
-	f, err := os.OpenFile(ledger, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(`{"ts":"2026-01-01T00:00:02Z","input":2}` + "\n"); err != nil {
-		f.Close()
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	future := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(heartbeat, future, future); err != nil {
-		t.Fatal(err)
-	}
-
-	second := ReadDaemonDetailSnapshot(agentDir, 128, 100)
-	if len(second.Recent) != 2 || second.Recent[0].Input != 2 {
-		t.Fatalf("live append hidden by cache: %+v", second.Recent)
-	}
-	if got := second.ByProvider["unknown"].Input; got != 3 {
-		t.Fatalf("live total input = %d, want 3", got)
-	}
-}
-
-func BenchmarkDaemonDetailSnapshot1500Runs(b *testing.B) {
-	agentDir := b.TempDir()
-	base := time.Unix(1_700_000_000, 0)
-	for i := 0; i < 1500; i++ {
-		runID := fmt.Sprintf("em-%04d", i)
-		runDir := filepath.Join(agentDir, "daemons", runID)
-		logsDir := filepath.Join(runDir, "logs")
-		if err := os.MkdirAll(logsDir, 0o755); err != nil {
-			b.Fatal(err)
-		}
-		card := fmt.Sprintf(`{"handle":%q,"state":"done"}`, runID)
-		if err := os.WriteFile(filepath.Join(runDir, "daemon.json"), []byte(card), 0o644); err != nil {
-			b.Fatal(err)
-		}
-		ledger := fmt.Sprintf(`{"ts":"2026-01-01T00:00:00.%06dZ","input":1}`+"\n", i)
-		if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"), []byte(ledger), 0o644); err != nil {
-			b.Fatal(err)
-		}
-		stamp := base.Add(time.Duration(i) * time.Second)
-		if err := os.Chtimes(runDir, stamp, stamp); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		snapshot := ReadDaemonDetailSnapshot(agentDir, 128, 100)
-		if snapshot.TotalRuns != 1500 || snapshot.ScannedRuns != 128 || len(snapshot.Recent) != 100 {
-			b.Fatalf("bad snapshot: total=%d scanned=%d rows=%d", snapshot.TotalRuns, snapshot.ScannedRuns, len(snapshot.Recent))
-		}
 	}
 }

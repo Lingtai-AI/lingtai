@@ -854,5 +854,9 @@
   "mail.async_queued": "排队",
   "mail.async_done": "完成",
   "mail.async_failed": "失败",
+  "mail.async_in": "输入",
+  "mail.async_out": "输出",
+  "mail.async_cache": "缓存",
+  "mail.async_calls": "调用",
   "mail.async_daemons_hint": "/daemons 查看详情"
 }

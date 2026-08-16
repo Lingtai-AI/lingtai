@@ -854,5 +854,9 @@
   "mail.async_queued": "queued",
   "mail.async_done": "done",
   "mail.async_failed": "failed",
+  "mail.async_in": "in",
+  "mail.async_out": "out",
+  "mail.async_cache": "cache",
+  "mail.async_calls": "calls",
   "mail.async_daemons_hint": "/daemons for details"
 }
