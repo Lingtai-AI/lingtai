@@ -201,10 +201,14 @@ func TestAppViewMailComposerCursorDirectAndTelemetry(t *testing.T) {
 		app := App{currentView: appViewMail, mail: mail, startupBanner: "ROOT"}
 		app, _ = visibleRailV2Apply(app, tea.WindowSizeMsg{Width: 100, Height: 25})
 		app.mail.loadedExtra = 1
+		// The only top banner left is the one-time initial-loading line: no
+		// history-count state exists to keep a banner visible. Assert it here so
+		// this stays the both-banners-plus-telemetry geometry the case tests.
+		app.mail.initialLoading = true
 		app.mail.lastBannerLines = -1
 		app.mail.syncViewportHeight()
-		if !app.mail.historyCountLoading {
-			t.Fatal("ordinary geometry fixture did not retain its visible history-count loading banner")
+		if app.mail.bannerLineCount() != 2 {
+			t.Fatalf("ordinary geometry fixture wanted both banners reserved, got %d lines", app.mail.bannerLineCount())
 		}
 		_ = app.mail.input.Focus()
 		app = appCursorType(app, "telemetry cursor")

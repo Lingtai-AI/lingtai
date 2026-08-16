@@ -218,9 +218,11 @@ func (m ProjectsModel) loadDataMsg(requestSeq uint64) tea.Msg {
 				Name:    filepath.Base(p),
 				Current: p == currentProject,
 			}
-			// Load network info for each project
+			// Load network info for each project. Mail edges are skipped: the
+			// summary shows agents and states, and counting messages would mean
+			// reading every inbox of every agent of every listed network.
 			lingtaiDir := filepath.Join(p, ".lingtai")
-			net, _ := fs.BuildNetwork(lingtaiDir)
+			net, _ := fs.BuildNetworkWithOptions(lingtaiDir, fs.NetworkOptions{SkipMailEdges: true})
 			entry.Network = net
 			projects = append(projects, entry)
 		}
@@ -1312,11 +1314,8 @@ func (m ProjectsModel) renderRight(maxW int) string {
 		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(net.Activity.Status)))
 	}
 
-	// Mail count
-	if stats.TotalMails > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.total_mails")+": ")+valueStyle.Render(fmt.Sprintf("%d", stats.TotalMails)))
-	}
+	// No mail count: the summary is built from a mail-edge-free snapshot, and a
+	// total message number is exactly what this view must not compute.
 
 	return strings.Join(lines, "\n")
 }

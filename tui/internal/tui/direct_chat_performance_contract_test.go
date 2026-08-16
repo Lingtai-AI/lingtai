@@ -258,8 +258,11 @@ func TestDirectFirstPaintIsBoundedToConfiguredMailPageSize(t *testing.T) {
 	if strings.Contains(view, directPerformanceMarker(0)) {
 		t.Errorf("current direct view included oldest full-history marker %q", directPerformanceMarker(0))
 	}
-	if got := len(app.mail.acceptedSnapshot.messagesForUnread(app.mail.humanDir)); got != directPerformanceMessages {
-		t.Errorf("full accepted snapshot = %d messages; want retained full %d", got, directPerformanceMessages)
+	// The accepted snapshot is itself bounded by the hard recent-message window:
+	// the page never retains more than fs.RecentMessageLimit entries, and this
+	// fixture deliberately writes more than that.
+	if got := len(app.mail.acceptedSnapshot.messagesForUnread(app.mail.humanDir)); got != fs.RecentMessageLimit {
+		t.Errorf("accepted snapshot = %d messages; want the bounded window %d", got, fs.RecentMessageLimit)
 	}
 }
 

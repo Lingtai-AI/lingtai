@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // mailMessage is the union of internal mailbox and IMAP message formats.
@@ -92,21 +94,27 @@ type parsedMail struct {
 	Source      string // "inbox", "sent", "imap:account"
 }
 
-// buildMailboxEntries scans the inbox of the given agent (or human) directory
+// buildMailboxEntries scans the mailbox of the given agent (or human) directory
 // and returns MarkdownEntry items for the viewer. agentDir must be the full
 // path to a directory containing a mailbox/inbox subdirectory (e.g.
 // .lingtai/human or .lingtai/<agent>).
+//
+// Only the newest fs.RecentMessageLimit messages are loaded. That window is the
+// page: entries outside it are never read, never rendered into markdown, and
+// therefore never searched. No total-message count is computed anywhere.
 func buildMailboxEntries(agentDir string) []MarkdownEntry {
-	var mails []parsedMail
+	return buildMailboxEntriesWindow(agentDir, fs.RecentMessageLimit)
+}
 
-	inbox := filepath.Join(agentDir, "mailbox", "inbox")
-	mails = append(mails, scanInternalMailbox(inbox, "inbox")...)
-
-	sent := filepath.Join(agentDir, "mailbox", "sent")
-	mails = append(mails, scanInternalMailbox(sent, "sent")...)
-
-	archive := filepath.Join(agentDir, "mailbox", "archive")
-	mails = append(mails, scanInternalMailbox(archive, "archive")...)
+// buildMailboxEntriesWindow is buildMailboxEntries with an explicit window, so
+// the cap is exercisable in a test without seeding a cap-sized mailbox.
+func buildMailboxEntriesWindow(agentDir string, limit int) []MarkdownEntry {
+	mailbox := filepath.Join(agentDir, "mailbox")
+	mails := scanRecentInternalMailboxes(limit, []mailboxScanTarget{
+		{dir: filepath.Join(mailbox, "inbox"), source: "inbox"},
+		{dir: filepath.Join(mailbox, "sent"), source: "sent"},
+		{dir: filepath.Join(mailbox, "archive"), source: "archive"},
+	})
 
 	// Sort by time descending (newest first)
 	sort.Slice(mails, func(i, j int) bool {
@@ -213,62 +221,105 @@ func buildMailboxEntries(agentDir string) []MarkdownEntry {
 	return result
 }
 
-func scanInternalMailbox(dir, source string) []parsedMail {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+// mailboxScanTarget is one mailbox folder to display, plus the group label its
+// messages are filed under in the viewer.
+type mailboxScanTarget struct {
+	dir    string
+	source string
+}
+
+// mailboxLeaf is one candidate message: the folder it lives in and its mailbox
+// id. The display window is settled over these — names only — before any body
+// is opened.
+type mailboxLeaf struct {
+	target mailboxScanTarget
+	id     string
+}
+
+// scanRecentInternalMailboxes loads the newest `limit` messages across every
+// target folder. It is the only mailbox reader on the /mailbox path, and it is
+// bounded before the expensive half: directory listings pick the window by
+// mailbox id, and only the surviving ids have their message.json read and
+// parsed. A mailbox holding a hundred thousand messages therefore costs one
+// ReadDir per folder plus `limit` body reads, not one read per message ever
+// received.
+//
+// Trimming per folder and then globally is exact rather than approximate: a
+// folder can contribute at most `limit` entries to the merged newest-`limit`,
+// so dropping its own older ids first cannot remove anything the global window
+// would have kept. A limit <= 0 loads every message.
+func scanRecentInternalMailboxes(limit int, targets []mailboxScanTarget) []parsedMail {
+	var leaves []mailboxLeaf
+	for _, target := range targets {
+		for _, id := range fs.RecentMailboxIDs(target.dir, limit) {
+			leaves = append(leaves, mailboxLeaf{target: target, id: id})
+		}
 	}
-	var mails []parsedMail
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		msgPath := filepath.Join(dir, entry.Name(), "message.json")
-		data, err := os.ReadFile(msgPath)
-		if err != nil {
-			continue
-		}
-		var msg mailMessage
-		if json.Unmarshal(data, &msg) != nil {
-			continue
-		}
+	// Order by mailbox id, which is a sortable UTC stamp, so the merged window
+	// is chronological across folders. Leaves are kept per folder rather than
+	// deduplicated by id: the same id in inbox/ and sent/ is a self-addressed
+	// message and owns a row in both groups.
+	sort.SliceStable(leaves, func(i, j int) bool { return leaves[i].id < leaves[j].id })
+	if limit > 0 && len(leaves) > limit {
+		leaves = leaves[len(leaves)-limit:]
+	}
 
-		stamp := msg.ReceivedAt
-		if stamp == "" {
-			stamp = msg.SentAt
+	mails := make([]parsedMail, 0, len(leaves))
+	for _, leaf := range leaves {
+		if mail, ok := readInternalMail(leaf.target, leaf.id); ok {
+			mails = append(mails, mail)
 		}
-		t, _ := time.Parse(time.RFC3339, stamp)
-
-		to := ""
-		switch v := msg.To.(type) {
-		case string:
-			to = v
-		case []interface{}:
-			parts := make([]string, 0, len(v))
-			for _, x := range v {
-				if s, ok := x.(string); ok {
-					parts = append(parts, s)
-				}
-			}
-			to = strings.Join(parts, ", ")
-		}
-
-		atts := parseAttachments(msg.Attachments)
-		if len(atts) == 0 {
-			atts = parseAttachments(msg.Files)
-		}
-
-		mails = append(mails, parsedMail{
-			From:        msg.From,
-			To:          to,
-			Subject:     msg.Subject,
-			Body:        msg.Message,
-			Time:        t,
-			Attachments: atts,
-			Source:      source,
-		})
 	}
 	return mails
+}
+
+// readInternalMail reads and normalizes one mailbox leaf for display. A missing
+// or malformed message.json reports false and is skipped, matching the previous
+// scan's silent-skip behavior.
+func readInternalMail(target mailboxScanTarget, id string) (parsedMail, bool) {
+	data, err := os.ReadFile(filepath.Join(target.dir, id, "message.json"))
+	if err != nil {
+		return parsedMail{}, false
+	}
+	var msg mailMessage
+	if json.Unmarshal(data, &msg) != nil {
+		return parsedMail{}, false
+	}
+
+	stamp := msg.ReceivedAt
+	if stamp == "" {
+		stamp = msg.SentAt
+	}
+	t, _ := time.Parse(time.RFC3339, stamp)
+
+	to := ""
+	switch v := msg.To.(type) {
+	case string:
+		to = v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		to = strings.Join(parts, ", ")
+	}
+
+	atts := parseAttachments(msg.Attachments)
+	if len(atts) == 0 {
+		atts = parseAttachments(msg.Files)
+	}
+
+	return parsedMail{
+		From:        msg.From,
+		To:          to,
+		Subject:     msg.Subject,
+		Body:        msg.Message,
+		Time:        t,
+		Attachments: atts,
+		Source:      target.source,
+	}, true
 }
 
 func scanImapMailbox(dir, account string) []parsedMail {

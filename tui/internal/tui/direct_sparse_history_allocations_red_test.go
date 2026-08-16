@@ -85,7 +85,16 @@ func newReviewSparseFixture(t *testing.T, unrelated int) reviewSparseFixture {
 	if !mail.acceptedSnapshot.ready {
 		t.Fatal("real refresh did not install an accepted publication")
 	}
-	if got, want := len(mail.acceptedSnapshot.cache.Messages), len(accepted); got != want {
+	// The accepted publication is bounded by the hard recent-message window. The
+	// sparse prefix is older than the direct tail, so every direct message this
+	// fixture measures survives the window while the unrelated bulk is what gets
+	// dropped — which is exactly the hidden history the allocation probe cares
+	// about staying independent of.
+	want := len(accepted)
+	if want > fs.RecentMessageLimit {
+		want = fs.RecentMessageLimit
+	}
+	if got := len(mail.acceptedSnapshot.cache.Messages); got != want {
 		t.Fatalf("accepted publication messages = %d, want %d", got, want)
 	}
 	return reviewSparseFixture{mail: mail, target: target}

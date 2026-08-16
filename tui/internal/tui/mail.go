@@ -80,8 +80,8 @@ type mailRefreshMsg struct {
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
 	directStates         map[string]string    // stable direct-thread key -> target lifecycle state
-	lastApiCallAt       time.Time            // orchestrator .status.json runtime.last_api_call_at (fallback last_progress_at; zero when absent)
-	directLastApiCall   map[string]time.Time // stable direct-thread key -> target last_api_call_at
+	lastApiCallAt        time.Time            // orchestrator .status.json runtime.last_api_call_at (fallback last_progress_at; zero when absent)
+	directLastApiCall    map[string]time.Time // stable direct-thread key -> target last_api_call_at
 	alive                bool
 	state                string // active, idle, stuck, asleep, suspended, or ""
 	activity             fs.NetworkActivity
@@ -97,28 +97,6 @@ type mailRefreshMsg struct {
 type mailPersistMsg struct {
 	generation   uint64
 	sessionCache *fs.SessionCache
-}
-
-// mailOlderPageMsg carries an async older-history page: a command-local session
-// cache rebuilt with a larger ingest window. Like the initial
-// rebuild it is generation-gated — a stale page (from a superseded activation)
-// must never replace the installed cache. It is only produced by explicit upward
-// navigation (Ctrl+U / top paging), never on the first-frame critical path.
-type mailOlderPageMsg struct {
-	generation   uint64
-	sessionCache *fs.SessionCache
-	ingestWindow int // cumulative newest-session content window; grows by pageSize per key
-}
-
-// mailHistoryCountMsg is the one asynchronous exact-count result for an
-// activation/source/horizon. Its originating cache identity remains the gate even
-// if Ctrl+U has since replaced the installed content cache.
-type mailHistoryCountMsg struct {
-	generation uint64
-	cache      *fs.SessionCache
-	identity   string
-	stats      fs.SessionHistoryStats
-	err        error
 }
 
 type tickMsg struct {
@@ -184,64 +162,57 @@ type directAgentLifecycle struct {
 }
 
 type MailModel struct {
-	humanDir             string
-	humanAddr            string
-	orchestrator         string // 本我 directory path (full path under .lingtai/)
-	orchAddr             string // 本我 address (from .agent.json)
-	orchName             string // 本我 agent name (true name)
-	orchNickname         string // 本我 nickname (display name override)
-	baseDir              string // .lingtai/ directory
-	visitExitHint        bool   // append subtle Esc-Esc return hint to the title row
-	verbose              verboseLevel
-	messages             []ChatMessage        // derived from the accepted mailbox snapshot
-	cache                fs.MailCache         // sole incremental mail producer
-	acceptedSnapshot     acceptedMailSnapshot // private consumer view installed after generation acceptance
-	pageSize             int                  // max messages shown (from settings)
-	loadedExtra          int                  // additional older messages loaded via ctrl+u
-	viewport             viewport.Model
-	input                InputModel
-	palette              PaletteModel
-	width                int
-	height               int
-	ready                bool
-	pollRate             time.Duration // refresh interval
-	orchAlive            bool
-	orchState            string // agent state from .agent.json
-	networkActivity      fs.NetworkActivity
-	statusFlash          string    // transient status message shown in status bar
-	statusExpiry         time.Time // when to clear the flash
-	lastInputLines       int
-	lastPaletteLines     int
-	lastBannerLines      int
-	lastTelemetryRows    int                    // how many additive home rows were reserved last sync
-	pendingMessage       string                 // full text from editor, sent on Enter
-	globalDir            string                 // ~/.lingtai-tui/
-	wasActive            bool                   // true if previous refresh was ACTIVE
-	quoteIdx             int                    // which quote to show (advances on each ACTIVE transition)
-	pulseTick            int                    // pulse animation counter while ACTIVE
-	activeSince          time.Time              // when the agent last entered ACTIVE (zero when not active)
-	inquiryState         string                 // "", "sent", "taken" — tracks /btw lifecycle
-	insightPending       bool                   // true when waiting for 5s insight delay
-	insightAt            time.Time              // when to fire the auto-insight
-	dismissedInsights    map[string]bool        // dismissed insight timestamps
-	showEditorWarn       bool                   // one-time vim warning overlay
-	editorWarnText       string                 // text to pass to editor after warning
-	insightsEnabled      bool                   // from settings — show insight events
-	toolCallTruncate     int                    // from settings — max chars per tool line (0 = no truncation)
-	sessionCache         *fs.SessionCache       // append-only session log
-	initialLoading       bool                   // true until the bounded initial content rebuild has been applied
-	ingestWindow         int                    // cumulative content window; initialized to pageSize and grows by pageSize
-	auxiliaryMessages    int                    // all renderable mail/inquiry entries, including older ones withheld across a partial event gap
-	olderLoadInFlight    bool                   // true while an async older-page rebuild is running (debounce + generation gate)
-	historyCountLoading  bool                   // neutral banner while exact count metadata is in flight
-	historyCountLoaded   bool                   // exact stats are accepted for this activation/source/horizon
-	historyCountCache    *fs.SessionCache       // originating cache identity gate for the one async count task
-	historyCountIdentity string                 // canonical source/horizon identity captured by historyCountCache
-	historyStats         fs.SessionHistoryStats // accepted exact count, reused across every older-page rebuild
-	copyMode             bool                   // chat-only: disables mouse capture so the terminal can select/copy visible text
-	generation           uint64                 // activation token; stale async messages are ignored without rescheduling
-	pollEpoch            uint64                 // timer-chain token; one tick/pulse loop is current inside an activation
-	beforeRebuild        func()                 // optional deterministic test hook before deferred rebuild I/O
+	humanDir          string
+	humanAddr         string
+	orchestrator      string // 本我 directory path (full path under .lingtai/)
+	orchAddr          string // 本我 address (from .agent.json)
+	orchName          string // 本我 agent name (true name)
+	orchNickname      string // 本我 nickname (display name override)
+	baseDir           string // .lingtai/ directory
+	visitExitHint     bool   // append subtle Esc-Esc return hint to the title row
+	verbose           verboseLevel
+	messages          []ChatMessage        // derived from the accepted mailbox snapshot
+	cache             fs.MailCache         // sole incremental mail producer
+	acceptedSnapshot  acceptedMailSnapshot // private consumer view installed after generation acceptance
+	pageSize          int                  // max messages shown (from settings)
+	loadedExtra       int                  // additional older messages loaded via ctrl+u
+	viewport          viewport.Model
+	input             InputModel
+	palette           PaletteModel
+	width             int
+	height            int
+	ready             bool
+	pollRate          time.Duration // refresh interval
+	orchAlive         bool
+	orchState         string // agent state from .agent.json
+	networkActivity   fs.NetworkActivity
+	statusFlash       string    // transient status message shown in status bar
+	statusExpiry      time.Time // when to clear the flash
+	lastInputLines    int
+	lastPaletteLines  int
+	lastBannerLines   int
+	lastTelemetryRows int              // how many additive home rows were reserved last sync
+	pendingMessage    string           // full text from editor, sent on Enter
+	globalDir         string           // ~/.lingtai-tui/
+	wasActive         bool             // true if previous refresh was ACTIVE
+	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
+	pulseTick         int              // pulse animation counter while ACTIVE
+	activeSince       time.Time        // when the agent last entered ACTIVE (zero when not active)
+	inquiryState      string           // "", "sent", "taken" — tracks /btw lifecycle
+	insightPending    bool             // true when waiting for 5s insight delay
+	insightAt         time.Time        // when to fire the auto-insight
+	dismissedInsights map[string]bool  // dismissed insight timestamps
+	showEditorWarn    bool             // one-time vim warning overlay
+	editorWarnText    string           // text to pass to editor after warning
+	insightsEnabled   bool             // from settings — show insight events
+	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
+	sessionCache      *fs.SessionCache // append-only session log
+	initialLoading    bool             // true until the bounded initial content rebuild has been applied
+	auxiliaryMessages int              // all renderable mail/inquiry entries, including older ones withheld across a partial event gap
+	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
+	generation        uint64           // activation token; stale async messages are ignored without rescheduling
+	pollEpoch         uint64           // timer-chain token; one tick/pulse loop is current inside an activation
+	beforeRebuild     func()           // optional deterministic test hook before deferred rebuild I/O
 
 	// The one monotonic refresh request serial with its newest-accepted
 	// completion watermark. Requests are issued only on the serialized Update
@@ -334,15 +305,17 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	// path (NewApp, before tea.Program.Run), so even the newest content window
 	// would delay the first frame on content-heavy projects. The rebuild is
 	// deferred to initialRebuild(), a command run by Init(), so the first frame
-	// paints immediately (empty) and the newest mail_page_size entries fill in a
-	// beat later. Exact full-history metadata counting remains separate and async.
+	// paints immediately (empty) and the newest bounded window fills in a beat
+	// later. Nothing counts the full history — there is no total to compute.
 	return m
 }
 
 // initialRebuild performs the one-time authoritative bounded content rebuild off
-// the synchronous launch path. It refreshes mail, loads the newest
-// mail_page_size canonical event entries plus current auxiliary sources, and
-// merges them chronologically. Exact full-history event counts run separately.
+// the synchronous launch path. Every source it touches is bounded before any
+// body is read: the newest fs.RecentMessageLimit mailbox entries, the newest
+// contentWindow() canonical event entries, plus current auxiliary sources,
+// merged chronologically. Nothing scans the full mailbox or full history, and
+// no exact total is computed — the page is painted from the window alone.
 // Running this as a tea.Cmd keeps the first frame instant. It returns a
 // mailRefreshMsg carrying command-local mail and session caches; the live model
 // installs and persists them only after accepting the message's generation, so
@@ -352,16 +325,14 @@ func (m MailModel) initialRebuild() tea.Msg {
 		m.beforeRebuild()
 	}
 	// Refresh mail cache before session rebuild so mail entries are included.
-	cache := m.cache.Refresh()
+	// The bounded variant reads at most fs.RecentMessageLimit message bodies
+	// regardless of how much mail the mailbox holds.
+	cache := m.cache.RefreshRecent(fs.RecentMessageLimit)
 	// Always rebuild from authoritative sources on launch. Keep both the in-memory
 	// snapshot and its session.jsonl write command-local until Update accepts this
 	// generation; stale work must have no effect on the installed cache.
-	//
-	// mail_page_size directly owns both the initial newest content window and the
-	// visible/reveal batch. Exact full-history metadata is launched separately
-	// after this bounded content result is accepted.
 	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
-	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.pageSize)
+	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.contentWindow())
 	m.cache = cache
 	// Tag the resulting refresh as the initial one so the handler can clear the
 	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
@@ -376,55 +347,20 @@ func (m MailModel) initialRebuild() tea.Msg {
 	return msg
 }
 
-// requestOlderPage starts an asynchronous load of the next older page of history.
-// It is invoked only by explicit upward navigation (Ctrl+U at the top of a
-// partial windowed cache) — never on the first-frame path. It marks a load
-// in-flight (debounce) and returns a generation-tagged command that rebuilds the
-// session cache with a window one page larger; the result is applied only after
-// the mailOlderPageMsg passes the generation + in-flight gate in Update. Returns
-// (m, nil) with no state change when there is nothing to load or a load is
-// already running.
-func (m MailModel) requestOlderPage() (MailModel, tea.Cmd) {
-	if m.olderLoadInFlight || !m.cacheIsPartial() {
-		return m, nil
+// contentWindow is the bounded number of newest canonical event entries any
+// rebuild ingests: the configured mail_page_size, never more than the hard
+// fs.RecentMessageLimit cap. There is no larger "older page" window — history
+// beyond this window is never loaded, so no code path can bypass the cap.
+func (m MailModel) contentWindow() int {
+	window := m.pageSize
+	if window > fs.RecentMessageLimit {
+		window = fs.RecentMessageLimit
 	}
-	m.olderLoadInFlight = true
-	nextWindow := m.ingestWindow + m.pageSize
-	generation := m.generation
-	return m, func() tea.Msg { return m.olderPageCmd(nextWindow, generation) }
-}
-
-// olderPageCmd performs the off-path windowed rebuild for an older page. It reuses
-// the same authoritative merge/sort/dedup/api-grouping path as the initial
-// rebuild and grows the content window by exactly one configured page per request,
-// so older entries stay chronologically ordered, duplicate-free across the boundary,
-// and api-call-group consistent. The rebuilt cache is command-local until Update
-// accepts this generation.
-func (m MailModel) olderPageCmd(window int, generation uint64) tea.Msg {
-	cache := m.acceptedSnapshot.cacheCopy(m.humanDir)
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
-	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
-	return mailOlderPageMsg{
-		generation:   generation,
-		sessionCache: sessionCache,
-		ingestWindow: window,
+	if window < 1 {
+		window = 1
 	}
+	return window
 }
-
-func (m MailModel) historyCountCmd(cache *fs.SessionCache, generation uint64) tea.Cmd {
-	return func() tea.Msg {
-		stats, gotIdentity, err := cache.ExactHistoryStats()
-		return mailHistoryCountMsg{
-			generation: generation,
-			cache:      cache,
-			identity:   gotIdentity,
-			stats:      stats,
-			err:        err,
-		}
-	}
-}
-
-func (m MailModel) firstFrameWindow() int { return m.pageSize }
 
 func adaptiveInputMaxHeight(windowHeight int) int {
 	maxHeight := windowHeight / 3
@@ -525,7 +461,7 @@ func (m *MailModel) inputRegionBounds() (start, end int) {
 	topBannerLines := 0
 	bottomBannerLines := 0
 	if _, direct := m.currentDirectTarget(); !direct {
-		if m.initialLoading || m.historyCountLoading || m.hasMoreOlder() {
+		if m.initialLoading {
 			topBannerLines = 1
 		}
 		if m.loadedExtra > 0 {
@@ -575,9 +511,11 @@ func (m *MailModel) scrollInputByWheel(msg tea.MouseWheelMsg) bool {
 }
 
 // bannerLineCount returns the total lines reserved for top and bottom banners.
+// The top banner is only the one-time loading line; there is no older-history
+// banner because no total-message count is ever computed.
 func (m *MailModel) bannerLineCount() int {
 	n := 0
-	if m.initialLoading || m.historyCountLoading || m.hasMoreOlder() {
+	if m.initialLoading {
 		n++ // top banner
 	}
 	if m.loadedExtra > 0 {
@@ -586,51 +524,23 @@ func (m *MailModel) bannerLineCount() int {
 	return n
 }
 
-// hasMoreOlder returns true when there is older history to reveal — either
-// already-loaded messages above the visible render window, OR (for a partial
-// windowed cache) older history still on disk that an older-page load would
-// fetch. The partial-cache case is what makes Ctrl+U meaningful after the
-// newest-window first frame, where the loaded set and the render window match.
-func (m *MailModel) hasMoreOlder() bool {
-	if !m.historyCountLoaded {
-		return m.cacheIsPartial()
-	}
-	return m.olderCount() > 0
+// cacheIsWindowed reports whether the installed session cache holds only the
+// newest window of canonical events (older entries stayed on disk and are never
+// loaded). buildMessages uses it to keep the rendered stream one contiguous
+// tail instead of crossing the gap left by the excluded older events.
+func (m *MailModel) cacheIsWindowed() bool {
+	return m.sessionCache != nil && !m.sessionCache.Complete()
 }
 
-// cacheIsPartial reports whether the installed session cache holds only a window
-// of the newest history (older pages remain on disk), so an older-page load can
-// fetch more.
-func (m *MailModel) cacheIsPartial() bool {
-	return m.sessionCache != nil && m.ingestWindow > 0 && !m.sessionCache.Complete()
-}
-
-// olderCount returns the accurate number of full-history Mail entries not yet
-// displayed. Event bodies outside a partial cache are represented only by
-// SessionCache.HistoryStats; mail and inquiry entries are fully loaded and are
-// already present in m.messages. This keeps counting independent of content
-// retention while preserving the current verbose/insights visibility semantics.
-func (m *MailModel) olderCount() int {
-	if !m.historyCountLoaded {
-		return 0
-	}
-	total := m.auxiliaryMessages
-	if m.verbose >= verboseThinking {
-		total += m.historyStats.Detailed
-	}
-	if m.insightsEnabled {
-		total += m.historyStats.Insights
-	}
-	hidden := total - len(m.visibleMessages())
-	if hidden < 0 {
-		return 0
-	}
-	return hidden
-}
-
-// visibleMessages returns the tail of m.messages limited by pageSize + loadedExtra.
+// visibleMessages returns the tail of m.messages limited by pageSize plus any
+// Ctrl+U reveal, and never more than the hard fs.RecentMessageLimit cap.
+// m.messages is already trimmed to that cap by buildMessages, so this is the
+// second, render-side half of the same invariant.
 func (m *MailModel) visibleMessages() []ChatMessage {
 	limit := m.pageSize + m.loadedExtra
+	if limit > fs.RecentMessageLimit {
+		limit = fs.RecentMessageLimit
+	}
 	if limit >= len(m.messages) {
 		return m.messages
 	}
@@ -701,7 +611,12 @@ func (m MailModel) refreshMail() tea.Msg {
 	// direct publication, and target lifecycle states. Update only validates
 	// and installs these
 	// detached results; it performs no manifest, unread, or clone work.
-	cache := m.cache.Refresh()
+	//
+	// The refresh is bounded: new mail still lands every tick (that is what keeps
+	// the live conversation current), but the retained snapshot never grows past
+	// the newest fs.RecentMessageLimit entries, so neither the first frame nor a
+	// steady-state tick pays for the whole mailbox.
+	cache := m.cache.RefreshRecent(fs.RecentMessageLimit)
 	acceptedSnapshot := newAcceptedMailSnapshot(cache)
 	selectorRows := discoverAgentSelectorRows(m.baseDir)
 	directPublication := fs.NewDirectMailPublication(
@@ -747,8 +662,8 @@ func (m MailModel) refreshMail() tea.Msg {
 		selectorRows:         selectorRows,
 		directPublication:    directPublication,
 		directStates:         directStates,
-		lastApiCallAt:       lastApiCallAt,
-		directLastApiCall:   directLastApiCall,
+		lastApiCallAt:        lastApiCallAt,
+		directLastApiCall:    directLastApiCall,
 		alive:                alive,
 		state:                state,
 		activity:             activity,
@@ -774,10 +689,6 @@ func (m *MailModel) buildMessages() {
 	mailCache := m.acceptedSnapshot.cacheCopy(m.humanDir)
 	// Ingest only the accepted mailbox publication into session.jsonl.
 	m.sessionCache.Refresh(mailCache, m.humanAddr, m.orchestrator, m.orchDisplayName())
-	if m.historyCountLoaded {
-		// Refresh incrementally advances the accepted exact metadata at EOF.
-		m.historyStats = m.sessionCache.HistoryStats()
-	}
 
 	// Build filtered view from the session cache.
 	allEntries := m.sessionCache.Entries()
@@ -787,7 +698,7 @@ func (m *MailModel) buildMessages() {
 	derivedApiCallSeq := 0
 	m.auxiliaryMessages = 0
 	firstLoadedEvent := -1
-	if m.cacheIsPartial() {
+	if m.cacheIsWindowed() {
 		for i, entry := range allEntries {
 			if entry.Type != "mail" && !(entry.Type == "insight" && entry.Source != "") {
 				firstLoadedEvent = i
@@ -820,9 +731,8 @@ func (m *MailModel) buildMessages() {
 		if !m.shouldShow(e) {
 			continue
 		}
-		// Mail and inquiry sources are loaded in full even when event content is
-		// windowed. Every other displayed entry originated in events.jsonl and is
-		// replaced by full-history count metadata in olderCount. While partial,
+		// Mail and inquiry sources carry their own bounded window; event content
+		// carries the contentWindow() one. While the event stream is windowed,
 		// withhold auxiliary entries older than the oldest loaded event so the
 		// rendered slice remains one chronological tail rather than crossing a gap.
 		isEventEntry := e.Type != "mail" && !(e.Type == "insight" && e.Source != "")
@@ -842,6 +752,14 @@ func (m *MailModel) buildMessages() {
 	sort.SliceStable(chatMsgs, func(i, j int) bool {
 		return chatMessageBefore(chatMsgs[i], chatMsgs[j])
 	})
+
+	// The one hard cap, applied to the merged stream: the page holds only the
+	// newest fs.RecentMessageLimit entries. Each source is already bounded before
+	// its bodies are read, so this trim is the single place the combined
+	// mail + event window becomes observable in the loaded snapshot.
+	if len(chatMsgs) > fs.RecentMessageLimit {
+		chatMsgs = chatMsgs[len(chatMsgs)-fs.RecentMessageLimit:]
+	}
 
 	// Restore dismissed state for insights.
 	for i := range chatMsgs {
@@ -1138,42 +1056,16 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			go fs.UpdateHumanLocation(m.humanDir)
 		}
 		var persistCmd tea.Cmd
-		var countCmd tea.Cmd
 		if msg.sessionCache != nil {
-			if msg.initial {
-				// A new activation owns one fresh source/horizon count task. Never
-				// carry accepted metadata across an authoritative initial snapshot.
-				m.historyCountLoading = false
-				m.historyCountLoaded = false
-				m.historyCountCache = nil
-				m.historyCountIdentity = ""
-				m.historyStats = fs.SessionHistoryStats{}
-			}
 			m.sessionCache = msg.sessionCache
-			// The same configured page owns initial content and visible reveal.
-			// A complete cache needs no further ingest expansion.
-			if msg.sessionCache.Complete() {
-				m.ingestWindow = 0
-			} else {
-				m.ingestWindow = m.pageSize
-			}
-			// A superseding first frame cancels any older-page load and resets the
-			// revealed-extra window; the fresh cache defines what is loaded.
-			m.olderLoadInFlight = false
+			// A superseding first frame resets the revealed-extra window; the fresh
+			// cache defines what is loaded. No count task is started here or
+			// anywhere else — the window is the whole story.
 			m.loadedExtra = 0
 			generation := msg.generation
 			sessionCache := msg.sessionCache
 			persistCmd = func() tea.Msg {
 				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
-			}
-			if msg.initial && !m.historyCountLoaded && m.historyCountCache == nil {
-				identity := sessionCache.HistoryCountIdentity()
-				if identity != "" {
-					m.historyCountLoading = true
-					m.historyCountCache = sessionCache
-					m.historyCountIdentity = identity
-					countCmd = m.historyCountCmd(sessionCache, generation)
-				}
 			}
 		}
 		if msg.initial {
@@ -1275,8 +1167,8 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// Let Bubble Tea paint the accepted history before the derived-cache write.
 		// The command itself performs no I/O; mailPersistMsg re-enters Update for a
 		// second generation/cache-identity gate and serialized persistence.
-		if persistCmd != nil || countCmd != nil {
-			return m, tea.Batch(persistCmd, countCmd, directVisibilityCmd, directUnreadCmd)
+		if persistCmd != nil {
+			return m, tea.Batch(persistCmd, directVisibilityCmd, directUnreadCmd)
 		}
 		// Kick off the first background telemetry fetch as soon as a refresh has
 		// landed (including ordinary refreshes), so the row can appear without
@@ -1299,113 +1191,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		msg.sessionCache.Persist()
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			return m, cmd
-		}
-		return m, nil
-
-	case mailHistoryCountMsg:
-		if msg.generation != m.generation || msg.cache == nil ||
-			msg.cache != m.historyCountCache || msg.identity != m.historyCountIdentity {
-			return m, nil
-		}
-		if msg.err != nil {
-			// Keep the neutral state; this activation never substitutes an estimate
-			// or retries the same source/horizon task on Ctrl+U.
-			return m, nil
-		}
-		// Ctrl+U may replace the bounded content cache while this count is running.
-		// Accept only against a current cache built from the same source/horizon,
-		// and take EOF-tail deltas from that currently refreshed cache rather than
-		// the detached origin cache (which stops receiving Refresh calls once it is
-		// replaced). A changed source/horizon starts a replacement count below.
-		if m.sessionCache == nil || m.sessionCache.HistoryCountIdentity() != msg.identity {
-			return m, nil
-		}
-		delta := m.sessionCache.HistoryStats()
-		m.historyStats = fs.SessionHistoryStats{
-			Detailed: msg.stats.Detailed + delta.Detailed,
-			Insights: msg.stats.Insights + delta.Insights,
-		}
-		m.historyCountLoading = false
-		m.historyCountLoaded = true
-		m.sessionCache.SetHistoryStats(m.historyStats)
-		if m.ready {
-			if _, direct := m.currentDirectTarget(); direct {
-				m.directChat.mainViewportDirty = true
-			} else {
-				m.syncViewportHeight()
-				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
-			}
-		}
-		return m, nil
-
-	case mailOlderPageMsg:
-		// An explicit older-page rebuild completed. Gate on generation and on a
-		// load actually being in flight, so a superseded activation (view switch,
-		// visit, or a fresh first frame) cannot install a stale enlarged cache.
-		if msg.generation != m.generation || !m.olderLoadInFlight || msg.sessionCache == nil {
-			return m, nil
-		}
-		m.olderLoadInFlight = false
-		complete := msg.sessionCache.Complete()
-		// Reveal the newly-loaded older page by growing the render window in
-		// lockstep with the ingest window (one page = pageSize messages).
-		m.loadedExtra += m.pageSize
-		if complete {
-			m.ingestWindow = 0
-		} else {
-			m.ingestWindow = msg.ingestWindow
-		}
-		m.sessionCache = msg.sessionCache
-		var countCmd tea.Cmd
-		identity := m.sessionCache.HistoryCountIdentity()
-		switch {
-		case identity == "":
-			// No canonical source/horizon means an exact number cannot be claimed.
-			// Keep the banner neutral rather than carrying metadata from another
-			// snapshot into this replacement cache.
-			m.historyCountLoading = true
-			m.historyCountLoaded = false
-			m.historyCountCache = nil
-			m.historyCountIdentity = ""
-			m.historyStats = fs.SessionHistoryStats{}
-		case identity != m.historyCountIdentity:
-			// The content request observed a genuinely newer/different source
-			// horizon. Supersede the old task once for this new snapshot; ordinary
-			// Ctrl+U rebuilds with the same identity continue to reuse one count.
-			m.historyCountLoading = true
-			m.historyCountLoaded = false
-			m.historyCountCache = m.sessionCache
-			m.historyCountIdentity = identity
-			m.historyStats = fs.SessionHistoryStats{}
-			countCmd = m.historyCountCmd(m.sessionCache, msg.generation)
-		case m.historyCountLoaded:
-			m.sessionCache.SetHistoryStats(m.historyStats)
-		}
-		m.buildMessages()
-		if m.ready {
-			if _, direct := m.currentDirectTarget(); direct {
-				m.directChat.mainViewportDirty = true
-			} else {
-				m.syncViewportHeight()
-				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
-				// Keep the reveal anchored near the top so the user sees the older
-				// content they asked for rather than jumping to the tail.
-				m.viewport.GotoTop()
-			}
-		}
-		// When the enlarged window has covered the whole history the cache is now
-		// complete and may be persisted as the authoritative derived file, exactly
-		// like an accepted initial rebuild.
-		var persistCmd tea.Cmd
-		if complete {
-			generation := msg.generation
-			sessionCache := msg.sessionCache
-			persistCmd = func() tea.Msg {
-				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
-			}
-		}
-		if persistCmd != nil || countCmd != nil {
-			return m, tea.Batch(persistCmd, countCmd)
 		}
 		return m, nil
 
@@ -1721,22 +1506,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 		case "ctrl+u":
 			if m.ready && m.viewport.AtTop() {
-				// First reveal any already-loaded older messages above the render
-				// window (cheap, synchronous). Only when the loaded set is exhausted
-				// and the cache is partial do we fetch the next older page from disk
-				// asynchronously — older history never loads on the first-frame path.
-				if len(m.messages) > m.pageSize+m.loadedExtra {
+				// Reveal already-loaded older messages above the render window
+				// (cheap, synchronous, no I/O). There is no disk-backed older page:
+				// the loaded window IS the history, so Ctrl+U can never pull the
+				// view past the fs.RecentMessageLimit entries already in memory.
+				if len(m.visibleMessages()) < len(m.messages) {
 					m.loadedExtra += m.pageSize
 					m.syncViewportHeight()
 					m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
 					return m, nil
-				}
-				if m.cacheIsPartial() {
-					var cmd tea.Cmd
-					m, cmd = m.requestOlderPage()
-					if cmd != nil {
-						return m, cmd
-					}
 				}
 			}
 			var cmd tea.Cmd
@@ -2307,7 +2085,7 @@ func activeElapsedFor(state string, activeSince time.Time) string {
 // activeElapsed returns a short " 12s" / " 240s" suffix while Main is ACTIVE,
 // or "" otherwise — the "how long has it been working" signal, always in
 // whole seconds so the value matches the Telegram Task Card footer's
-// ``active (N s)`` (Jason 2026-08-16).
+// "active (N s)" (Jason 2026-08-16).
 func (m MailModel) activeElapsed() string {
 	return activeElapsedFor(m.orchState, m.activeSince)
 }
@@ -2609,17 +2387,15 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	footer += statusBar
 
 	// Main history banners never belong to the strict current direct projection.
-	// Top banner: a one-time "loading... / 加载中..." line while the deferred
-	// initial session rebuild is still pending, then "▲ N older — ctrl+u to load".
+	// Top banner: the one-time loading line while the deferred initial session
+	// rebuild is still pending. There is no older-history banner — the page never
+	// computes how much history exists, so it has no total to announce.
 	topBanner := ""
 	bottomBanner := ""
 	if !direct {
-		if m.initialLoading || m.historyCountLoading {
+		if m.initialLoading {
 			loadingText := i18n.T("mail.initial_loading")
 			topBanner = StyleFaint.Render(centerText(loadingText, m.width)) + "\n"
-		} else if m.hasMoreOlder() {
-			bannerText := i18n.TF("mail.load_more", m.olderCount())
-			topBanner = StyleFaint.Render(centerText(bannerText, m.width)) + "\n"
 		}
 		// Bottom banner: "▼ ctrl+d to collapse to recent"
 		if m.loadedExtra > 0 {

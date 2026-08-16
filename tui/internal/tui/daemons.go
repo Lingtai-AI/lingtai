@@ -146,7 +146,9 @@ func (m DaemonsModel) Init() tea.Cmd {
 }
 
 func (m DaemonsModel) loadData() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	// Node discovery only — mail edges would add a full inbox scan per agent to
+	// a view that never shows message counts.
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 	var nodes []fs.AgentNode
 	for _, n := range net.Nodes {
 		if n.IsHuman || n.WorkingDir == "" {
