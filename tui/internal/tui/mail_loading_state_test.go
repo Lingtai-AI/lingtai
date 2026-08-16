@@ -96,9 +96,11 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	if m.initialLoading {
 		t.Fatal("initialLoading should be false after the initial rebuild message is applied")
 	}
-	view := m.View()
-	if !m.historyCountLoading || !strings.Contains(view, loadingBannerFragment) {
-		t.Fatal("content should paint under a neutral loading banner until exact count metadata arrives")
+	// The loading banner is now a single-shot state: the accepted initial rebuild
+	// clears it outright. Nothing waits on exact-count metadata, because no exact
+	// count is ever computed.
+	if strings.Contains(m.View(), loadingBannerFragment) {
+		t.Fatal("loading banner must clear as soon as the initial rebuild is accepted")
 	}
 
 	found := false
@@ -109,10 +111,6 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected rebuilt history after initial rebuild; got %d messages", len(m.messages))
-	}
-	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
-	if strings.Contains(m.View(), loadingBannerFragment) {
-		t.Fatal("neutral loading banner should clear after exact count metadata is accepted")
 	}
 }
 
@@ -129,11 +127,6 @@ func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	if m.initialLoading {
 		t.Fatal("loading should be cleared by the initial rebuild")
 	}
-	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
-	if m.historyCountLoading {
-		t.Fatal("exact-count loading should clear after metadata acceptance")
-	}
-
 	// A periodic refresh (untagged) must leave loading cleared.
 	periodic := m.refreshMail()
 	if rm, ok := periodic.(mailRefreshMsg); ok && rm.initial {

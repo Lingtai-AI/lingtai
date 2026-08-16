@@ -106,7 +106,7 @@ func TestMailProjectionKeepsExpandedEventHistoryWhileMailStaysSingleSource(t *te
 	}
 }
 
-func TestMailModelOnlyUsesAcceptedMailboxSnapshotForRenderAndOlderPage(t *testing.T) {
+func TestMailModelOnlyUsesAcceptedMailboxSnapshotForRender(t *testing.T) {
 	humanDir := t.TempDir()
 	orchDir := t.TempDir()
 	writeMailboxProjectionMessage(t, humanDir, "inbox", "accepted-mail", fs.MailMessage{
@@ -143,19 +143,6 @@ func TestMailModelOnlyUsesAcceptedMailboxSnapshotForRenderAndOlderPage(t *testin
 		renderBodies["mutated producer message"] != 0 ||
 		renderBodies["unaccepted producer message"] != 0 {
 		t.Errorf("render projection used live producer state: bodies=%v", renderBodies)
-	}
-
-	older := m.olderPageCmd(200, m.generation).(mailOlderPageMsg)
-	olderBodies := map[string]int{}
-	for _, entry := range older.sessionCache.Entries() {
-		if entry.Type == "mail" {
-			olderBodies[entry.Body]++
-		}
-	}
-	if olderBodies["accepted snapshot message"] != 1 ||
-		olderBodies["mutated producer message"] != 0 ||
-		olderBodies["unaccepted producer message"] != 0 {
-		t.Errorf("older-page reconstruction used live producer state: bodies=%v", olderBodies)
 	}
 }
 

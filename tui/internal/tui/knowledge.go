@@ -109,8 +109,10 @@ func (m KnowledgeModel) resizeViewer(viewer MarkdownViewerModel) (MarkdownViewer
 	return viewer, nil
 }
 
+// loadAgents discovers agents for the picker. Mail edges are skipped: they cost
+// a full inbox scan per agent and nothing here displays them.
 func (m KnowledgeModel) loadAgents() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 	var nodes []fs.AgentNode
 	for _, n := range net.Nodes {
 		if n.IsHuman {

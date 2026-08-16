@@ -487,7 +487,7 @@ func (m MailModel) revealOlderDirectPage(target fs.DirectTarget) (MailModel, boo
 	if horizon <= 0 {
 		horizon = m.pageSize
 	}
-	nextHorizon := horizon + m.pageSize
+	nextHorizon := fs.ClampToRecentMessageLimit(horizon + m.pageSize)
 	if nextHorizon <= horizon {
 		return m, false
 	}

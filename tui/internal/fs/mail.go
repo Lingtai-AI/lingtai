@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,6 +98,66 @@ func ReadInbox(dir string) ([]MailMessage, error) {
 
 func ReadSent(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "sent"))
+}
+
+// MessageLimitEnv names the environment variable that overrides the recent
+// message window. It is a performance opt-in, not a preference: it lives in the
+// environment rather than tui_config.json because the only reason to change it
+// is to trade first-frame cost against how much history a session can reach.
+const MessageLimitEnv = "LINGTAI_TUI_MESSAGE_LIMIT"
+
+// DefaultRecentMessageLimit is the window used whenever MessageLimitEnv is
+// unset or does not name a non-negative integer. It is the cap introduced with
+// the bounded page and remains the behavior of an untouched environment.
+const DefaultRecentMessageLimit = 1000
+
+// RecentMessageLimit resolves the cap on how many of the newest message
+// entries the TUI loads and displays. It bounds both the mailbox bodies read to
+// paint the page and the merged entry window the chat view renders, so the
+// first frame never costs a full-mailbox or full-history scan. There is
+// deliberately no exact total-message count anywhere above this cap: this
+// window IS the loaded history.
+//
+// MessageLimitEnv decides the window, and this function is the only parser of
+// it:
+//
+//	unset / not an integer / negative → DefaultRecentMessageLimit (1000)
+//	positive N                        → N
+//	0                                 → unlimited, the full historical load
+//
+// Zero is an explicit opt-in, not a degenerate window: every consumer in this
+// package already reads limit <= 0 as "no bound", so 0 restores the unbounded
+// pre-window behavior for an operator who would rather pay a full-mailbox scan
+// than lose reach into old history. An invalid value resolves to the default
+// rather than failing: the window is a cost knob on a read path, and a typo in
+// the environment must not keep the page from painting.
+//
+// The variable is read on every call rather than latched at startup. The window
+// is consulted per refresh, so a live read costs one getenv on an already
+// I/O-bound path and keeps the value testable without process-global state.
+func RecentMessageLimit() int {
+	raw, ok := os.LookupEnv(MessageLimitEnv)
+	if !ok {
+		return DefaultRecentMessageLimit
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || limit < 0 {
+		return DefaultRecentMessageLimit
+	}
+	return limit
+}
+
+// ClampToRecentMessageLimit bounds a caller's desired entry count by the
+// resolved window. It exists so that "0 means unlimited" is decided in one
+// place: every consumer that would otherwise write `if n > limit` has to know
+// that an unlimited window must not clamp to zero, and each one re-deriving
+// that rule is how the two halves of the cap drift apart.
+func ClampToRecentMessageLimit(n int) int {
+	limit := RecentMessageLimit()
+	if limit > 0 && n > limit {
+		return limit
+	}
+	return n
 }
 
 // MailCache tracks already-loaded messages for incremental refresh.
@@ -236,6 +298,179 @@ func (c MailCache) Refresh() MailCache {
 	return out
 }
 
+// RefreshRecent is the bounded refresh used to paint the page. It lists the
+// mailbox directories, keeps only the newest `limit` mailbox ids, and reads
+// message.json only for those — so the cost of a refresh is O(limit) bodies
+// plus one directory listing per folder, never one read per message ever sent.
+//
+// Selecting the window by mailbox id is exact rather than approximate: every
+// producer (TUI, portal, kernel) names a mailbox leaf with the sortable UTC
+// stamp `YYYYMMDDTHHMMSS-xxxx`, so lexical order over directory names is
+// chronological order without opening a single body.
+//
+// Retention matches Refresh: an already-loaded message is reused rather than
+// re-read, and is kept even if its folder no longer lists it. What differs is
+// the bound — anything older than the newest `limit` ids is dropped, so the
+// returned cache holds at most `limit` entries. The cap is therefore observable
+// in the snapshot itself, not applied at render time over a fully loaded set.
+// A limit <= 0 falls back to the unbounded Refresh. As with Refresh, the
+// receiver is not mutated, so this is safe to call from a goroutine.
+func (c MailCache) RefreshRecent(limit int) MailCache {
+	if limit <= 0 {
+		return c.Refresh()
+	}
+	out := MailCache{
+		humanDir:  c.humanDir,
+		inboxDir:  c.inboxDir,
+		sentDir:   c.sentDir,
+		outboxDir: c.outboxDir,
+	}
+
+	retained := make(map[string]MailMessage, len(c.Messages))
+	for _, msg := range c.Messages {
+		id := mailCacheKey(msg)
+		if _, known := retained[id]; !known {
+			retained[id] = msg
+		}
+	}
+
+	// List every mailbox leaf — names only, no bodies. Folder order matches
+	// Refresh's scan order: outbox first, so a message is visible immediately
+	// after send, then inbox and sent, which mark it delivered. The first folder
+	// holding an id owns its body.
+	sources := []struct {
+		folder    string
+		delivered bool
+	}{
+		{out.outboxDir, false},
+		{out.inboxDir, true},
+		{out.sentDir, true},
+	}
+	folderFor := make(map[string]string)
+	delivered := make(map[string]bool)
+	var onDisk []string
+	for _, source := range sources {
+		for _, id := range mailboxIDsIn(source.folder) {
+			if _, known := folderFor[id]; !known {
+				folderFor[id] = source.folder
+				onDisk = append(onDisk, id)
+			}
+			if source.delivered {
+				delivered[id] = true
+			}
+		}
+	}
+
+	// Narrow the on-disk candidates to the newest window BEFORE any body is
+	// read: this is what keeps a refresh independent of total mailbox size, and
+	// it is why a steady-state tick only reads what actually arrived.
+	sort.Strings(onDisk)
+	if len(onDisk) > limit {
+		onDisk = onDisk[len(onDisk)-limit:]
+	}
+
+	messages := make([]MailMessage, 0, len(retained)+len(onDisk))
+	for _, id := range onDisk {
+		if _, loaded := retained[id]; loaded {
+			continue
+		}
+		msg, ok := readMailboxMessage(folderFor[id], id)
+		if !ok {
+			continue
+		}
+		msg.Delivered = delivered[id]
+		messages = append(messages, msg)
+	}
+	for id, msg := range retained {
+		// Already loaded — never re-read. If a delivered folder now holds it and
+		// the retained entry says otherwise, flip in place (outbox→sent).
+		if delivered[id] && !msg.Delivered {
+			msg.Delivered = true
+		}
+		messages = append(messages, msg)
+	}
+
+	// Sort by the parsed instant, exactly like Refresh, then keep the newest
+	// window. Trimming here rather than by id makes "most recent" mean the
+	// timestamp for everything already in hand, while the id ordering above is
+	// only ever used to decide which unread bodies are worth opening.
+	sort.Slice(messages, func(i, j int) bool {
+		return mailMessageBefore(messages[i], messages[j])
+	})
+	if len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+
+	out.Messages = messages
+	out.seen = make(map[string]int, len(messages))
+	for i, m := range messages {
+		out.seen[m.MailboxID] = i
+	}
+	return out
+}
+
+// mailCacheKey is the stable per-message identity used to window and deduplicate
+// a cache: the mailbox directory name, which WriteMail stamps into MailboxID.
+// The ID fallback covers messages assembled in memory rather than read from a
+// mailbox leaf.
+func mailCacheKey(msg MailMessage) string {
+	if msg.MailboxID != "" {
+		return msg.MailboxID
+	}
+	return msg.ID
+}
+
+// mailboxIDsIn lists the mailbox-id directory names in folder. It reads only
+// the directory entry list and never opens a message body, so it stays cheap on
+// mailboxes holding tens of thousands of messages.
+func mailboxIDsIn(folder string) []string {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		ids = append(ids, entry.Name())
+	}
+	return ids
+}
+
+// RecentMailboxIDs returns at most the newest `limit` mailbox-leaf ids in
+// folder, chosen from the directory listing alone — no message body is opened,
+// so the caller decides what to read while still paying only one ReadDir.
+//
+// It is the shared primitive for readers outside this package that need the
+// same window RefreshRecent applies internally: every producer names a mailbox
+// leaf with the sortable UTC stamp `YYYYMMDDTHHMMSS-xxxx`, so lexical order
+// over directory names is chronological order. A limit <= 0 returns every id.
+// The result is sorted oldest-first, matching the order a mailbox is displayed
+// in.
+func RecentMailboxIDs(folder string, limit int) []string {
+	ids := mailboxIDsIn(folder)
+	sort.Strings(ids)
+	if limit > 0 && len(ids) > limit {
+		ids = ids[len(ids)-limit:]
+	}
+	return ids
+}
+
+// readMailboxMessage reads and decodes one mailbox leaf's message.json.
+// A missing or malformed body reports false and is skipped by every caller.
+func readMailboxMessage(folder, id string) (MailMessage, bool) {
+	data, err := os.ReadFile(filepath.Join(folder, id, "message.json"))
+	if err != nil {
+		return MailMessage{}, false
+	}
+	var msg MailMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return MailMessage{}, false
+	}
+	return msg, true
+}
+
 func mailMessageBefore(a, b MailMessage) bool {
 	at, aErr := time.Parse(time.RFC3339Nano, a.ReceivedAt)
 	bt, bErr := time.Parse(time.RFC3339Nano, b.ReceivedAt)
@@ -275,13 +510,8 @@ func (c *MailCache) scanFolder(folder string, delivered bool) {
 			}
 			continue
 		}
-		msgPath := filepath.Join(folder, name, "message.json")
-		data, err := os.ReadFile(msgPath)
-		if err != nil {
-			continue
-		}
-		var msg MailMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
+		msg, ok := readMailboxMessage(folder, name)
+		if !ok {
 			continue
 		}
 		msg.Delivered = delivered
@@ -303,13 +533,8 @@ func readMailFolder(folder string) ([]MailMessage, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		msgPath := filepath.Join(folder, entry.Name(), "message.json")
-		data, err := os.ReadFile(msgPath)
-		if err != nil {
-			continue
-		}
-		var msg MailMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
+		msg, ok := readMailboxMessage(folder, entry.Name())
+		if !ok {
 			continue
 		}
 		messages = append(messages, msg)

@@ -270,14 +270,9 @@ func TestPreparedDirectRefreshCarriesNoMainSessionPayloadAndPreservesLiveMain(t 
 	if liveMain == nil {
 		t.Fatal("fixture has no live Main SessionCache")
 	}
-	wantStats := fs.SessionHistoryStats{Detailed: 7, Insights: 3}
-	liveMain.SetHistoryStats(wantStats)
-	mail.historyStats = wantStats
-	mail.historyCountLoaded = true
 	mainMessages := append([]ChatMessage(nil), mail.messages...)
 	mainAuxiliary := mail.auxiliaryMessages
 	mainLoadedExtra := mail.loadedExtra
-	mainIngestWindow := mail.ingestWindow
 	// The durable Main aggregate is owned solely by the existing serialized
 	// on-loop pipeline. With no new Main content between the baseline and the
 	// probed refresh, acceptance must leave its bytes untouched.
@@ -299,21 +294,15 @@ func TestPreparedDirectRefreshCarriesNoMainSessionPayloadAndPreservesLiveMain(t 
 	if updated.sessionCache != liveMain {
 		t.Errorf("accepting a prepared direct refresh replaced the live Main SessionCache object; Main must continue through its existing serialized on-loop pipeline")
 	}
-	if updated.historyStats != wantStats {
-		t.Errorf("accepting a prepared direct refresh changed Main exact history stats: got %+v, want %+v", updated.historyStats, wantStats)
-	}
-	if !updated.historyCountLoaded {
-		t.Errorf("accepting a prepared direct refresh dropped Main's accepted exact-count state")
-	}
 	if !reflect.DeepEqual(updated.messages, mainMessages) {
 		t.Errorf("accepting a prepared direct refresh changed the visible Main messages: got %d, want %d unchanged entries", len(updated.messages), len(mainMessages))
 	}
 	if updated.auxiliaryMessages != mainAuxiliary {
 		t.Errorf("accepting a prepared direct refresh changed Main auxiliary count: got %d, want %d", updated.auxiliaryMessages, mainAuxiliary)
 	}
-	if updated.loadedExtra != mainLoadedExtra || updated.ingestWindow != mainIngestWindow {
-		t.Errorf("accepting a prepared direct refresh changed Main history window state: loadedExtra %d→%d ingestWindow %d→%d",
-			mainLoadedExtra, updated.loadedExtra, mainIngestWindow, updated.ingestWindow)
+	if updated.loadedExtra != mainLoadedExtra {
+		t.Errorf("accepting a prepared direct refresh changed Main history window state: loadedExtra %d→%d",
+			mainLoadedExtra, updated.loadedExtra)
 	}
 	sessionBytesAfter, _ := os.ReadFile(sessionPath)
 	if !reflect.DeepEqual(sessionBytesBefore, sessionBytesAfter) {

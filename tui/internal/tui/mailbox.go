@@ -107,12 +107,11 @@ func (m MailboxModel) mailboxFooterHint() string {
 	query := strings.TrimSpace(m.searchQuery)
 	shown := truncate(query, 28)
 	matched := len(m.inner.entries)
-	total := len(m.allEntries)
 	if m.searchMode {
-		return fmt.Sprintf(i18n.T("mailbox.search_hint"), shown, matched, total)
+		return fmt.Sprintf(i18n.T("mailbox.search_hint"), shown, matched)
 	}
 	if query != "" {
-		return fmt.Sprintf(i18n.T("mailbox.filter_hint"), shown, matched, total)
+		return fmt.Sprintf(i18n.T("mailbox.filter_hint"), shown, matched)
 	}
 	return i18n.T("hints.mailbox")
 }
@@ -150,7 +149,9 @@ func (m MailboxModel) reloadInner() (MailboxModel, tea.Cmd) {
 }
 
 func (m MailboxModel) loadAgents() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	// Agent discovery only. Mail edges would read every inbox message of every
+	// agent to produce counts this picker never shows, so they stay skipped.
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 	var nodes []fs.AgentNode
 	// Place the human first so it remains the conventional default.
 	for _, n := range net.Nodes {

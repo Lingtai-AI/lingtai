@@ -702,9 +702,11 @@ func libraryTitleFor(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, name)
 }
 
-// loadAgents discovers all agents in baseDir for the Ctrl+T picker.
+// loadAgents discovers all agents in baseDir for the Ctrl+T picker. Mail edges
+// are skipped: they cost a full inbox scan per agent and this picker shows only
+// nodes.
 func (m LibraryModel) loadAgents() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 	var nodes []fs.AgentNode
 	for _, n := range net.Nodes {
 		if n.IsHuman {
