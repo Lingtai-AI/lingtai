@@ -2301,14 +2301,13 @@ func activeElapsedFor(state string, activeSince time.Time) string {
 		return ""
 	}
 	d := time.Since(activeSince)
-	if d < time.Minute {
-		return fmt.Sprintf(" %ds", int(d.Seconds()))
-	}
-	return fmt.Sprintf(" %dm", int(d.Minutes()))
+	return fmt.Sprintf(" %ds", int(d.Seconds()))
 }
 
-// activeElapsed returns a short " 12s" / " 3m" suffix while Main is ACTIVE,
-// or "" otherwise — the "how long has it been working" signal.
+// activeElapsed returns a short " 12s" / " 240s" suffix while Main is ACTIVE,
+// or "" otherwise — the "how long has it been working" signal, always in
+// whole seconds so the value matches the Telegram Task Card footer's
+// ``active (N s)`` (Jason 2026-08-16).
 func (m MailModel) activeElapsed() string {
 	return activeElapsedFor(m.orchState, m.activeSince)
 }

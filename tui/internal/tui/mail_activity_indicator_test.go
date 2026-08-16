@@ -46,8 +46,9 @@ func TestStateGlyphActiveAnimates(t *testing.T) {
 }
 
 // TestActiveElapsed verifies the elapsed suffix renders only while ACTIVE with
-// a non-zero start time, formatted as seconds under a minute and minutes above.
-// Offsets are mid-interval to avoid second/minute boundary flake.
+// a non-zero start time, always formatted as whole seconds so the value matches
+// the Telegram Task Card footer's ``active (N s)``. Offsets are mid-interval to
+// avoid second/minute boundary flake.
 func TestActiveElapsed(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -59,7 +60,7 @@ func TestActiveElapsed(t *testing.T) {
 		{"not active drops timer", "idle", now.Add(-30 * time.Second), ""},
 		{"active but zero start", "active", time.Time{}, ""},
 		{"active seconds", "active", now.Add(-12500 * time.Millisecond), " 12s"},
-		{"active minutes", "active", now.Add(-210 * time.Second), " 3m"},
+		{"active minutes still seconds", "active", now.Add(-210 * time.Second), " 210s"},
 	}
 	for _, c := range cases {
 		m := MailModel{orchState: c.state, activeSince: c.since}
