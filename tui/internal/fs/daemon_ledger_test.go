@@ -629,6 +629,42 @@ func TestCountDaemonsWindowSkipsStaleRunsWithoutReadingState(t *testing.T) {
 	}
 }
 
+// TestDaemonRecentLedgerSummaryReadsOnlyWindow proves the mail async-row token
+// summary aggregates only runs inside daemonListWindow (10 minutes): fresh runs
+// contribute per-call ledger totals (with the cli_tokens fallback for CLI
+// backends that write no ledger), while a stale run's ledger is never opened.
+func TestDaemonRecentLedgerSummaryReadsOnlyWindow(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonLedger(t, agentDir, "fresh-a", []string{
+		`{"input":100,"output":20,"thinking":5,"cached":40}`,
+		`{"input":200,"output":50,"thinking":10,"cached":80}`,
+	})
+	writeDaemonLedger(t, agentDir, "fresh-b", []string{
+		`{"input":300,"output":60,"thinking":15,"cached":120}`,
+	})
+	// In-window CLI-backend run with no per-call ledger: falls back to cli_tokens.
+	writeDaemonState(t, agentDir, "fresh-cli", map[string]interface{}{
+		"cli_tokens": map[string]interface{}{"input": 500, "output": 100, "thinking": 20, "cached": 50, "calls": 3},
+	})
+	// Stale run far outside the window: its ledger must never be read.
+	writeDaemonLedger(t, agentDir, "stale", []string{
+		`{"input":99999,"output":99999,"thinking":99999,"cached":99999}`,
+	})
+	inside := time.Now().Add(-(daemonListWindow - time.Second))
+	for _, runID := range []string{"fresh-a", "fresh-b", "fresh-cli"} {
+		setRunDirMtime(t, agentDir, runID, inside)
+	}
+	setRunDirMtime(t, agentDir, "stale", time.Now().Add(-(daemonListWindow + time.Hour)))
+
+	got := DaemonRecentLedgerSummary(agentDir)
+	// fresh-a: 300/70/15/120 + 2 calls; fresh-b: 300/60/15/120 + 1 call;
+	// fresh-cli fallback: input=cli.Input+Cached=550, output 100, thinking 20,
+	// cached 50, calls 3. The stale run's 99999 totals must not appear.
+	if got.Input != 1150 || got.Output != 230 || got.Thinking != 50 || got.Cached != 290 || got.APICalls != 6 {
+		t.Fatalf("recent ledger summary = %+v, want input:1150 output:230 thinking:50 cached:290 calls:6", got)
+	}
+}
+
 // TestDaemonDetailSnapshotReturnsRecentRuns proves the Ctrl+D detail snapshot
 // still reads only the newest recentRunN run directories in one stateless pass
 // (no cache, no retention) and returns their ledger rows, state counts, and

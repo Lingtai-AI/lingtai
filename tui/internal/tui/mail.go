@@ -284,7 +284,7 @@ type MailModel struct {
 
 	// Home async-work stats resolve exactly like home telemetry: a background
 	// fs.CountDaemons() read, cached snapshot, in-flight debounce, TTL floor.
-	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders no row
+	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders an all-zero row once loaded
 	homeAsyncStatsLoaded    bool           // true once a background fetch has completed at least once
 	homeAsyncStatsInFlight  bool           // true while a fetchHomeAsyncStats command is running (debounce)
 	homeAsyncStatsLastFetch time.Time      // completion time of the last fetch, for the TTL floor

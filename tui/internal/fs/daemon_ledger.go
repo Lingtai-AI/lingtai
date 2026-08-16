@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // DaemonLedgerEntry is a single per-call token_ledger.jsonl line from a
@@ -184,6 +185,59 @@ func DaemonLedgerSummary(agentDir string, recentN int) (map[string]TokenTotals, 
 func DaemonRecentLedger(agentDir string, recentN int) []DaemonLedgerEntry {
 	_, recent := DaemonLedgerSummary(agentDir, recentN)
 	return recent
+}
+
+// DaemonRecentLedgerSummary aggregates token usage and API-call counts across
+// only the daemon runs whose run directory was modified within daemonListWindow
+// (10 minutes), mirroring CountDaemons' recency gate. The mail async-work row
+// and any other per-second consumer call this so token ledgers are never opened
+// for stale historical runs: one ReadDir yields the directory metadata, and only
+// in-window runs get their daemon.json / token_ledger.jsonl read. Per-run totals
+// follow ReadDaemonDetailSnapshot: the per-call ledger when present, else the
+// daemon.json cli_tokens/legacy snapshot (CLI backends write no ledger).
+func DaemonRecentLedgerSummary(agentDir string) TokenTotals {
+	daemonDir := filepath.Join(agentDir, "daemons")
+	entries, err := os.ReadDir(daemonDir)
+	if err != nil {
+		return TokenTotals{}
+	}
+
+	now := time.Now()
+	var totals TokenTotals
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if !withinDaemonListWindow(info.ModTime(), now) {
+			continue
+		}
+		runDir := filepath.Join(daemonDir, entry.Name())
+		card := readDaemonCard(filepath.Join(runDir, "daemon.json"))
+		if ledger := readLedgerEntries(filepath.Join(runDir, "logs", "token_ledger.jsonl")); len(ledger) > 0 {
+			for _, e := range ledger {
+				totals.Input += e.Input
+				totals.Output += e.Output
+				totals.Thinking += e.Thinking
+				totals.Cached += e.Cached
+				totals.APICalls++
+			}
+			continue
+		}
+		byProvider := map[string]TokenTotals{}
+		addDaemonFallbackTotals(byProvider, card)
+		for _, t := range byProvider {
+			totals.Input += t.Input
+			totals.Output += t.Output
+			totals.Thinking += t.Thinking
+			totals.Cached += t.Cached
+			totals.APICalls += t.APICalls
+		}
+	}
+	return totals
 }
 
 // readDaemonCard reads daemon.json; missing or malformed files yield a zero card.
