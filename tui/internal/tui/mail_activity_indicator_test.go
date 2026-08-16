@@ -74,8 +74,8 @@ func TestActiveElapsed(t *testing.T) {
 // ACTIVE, preserved while staying ACTIVE, and cleared on any non-ACTIVE refresh
 // (including the synthesized suspended/refreshing states, which arrive as
 // non-ACTIVE through the same mailRefreshMsg path). When the refresh carries a
-// kernel last_progress_at it is used as the baseline (so "active N sec" measures
-// seconds since the last tool call), falling back to wall-clock when absent.
+// kernel last_api_call_at it is used as the baseline (so "active N sec" measures
+// seconds since the last API call), falling back to wall-clock when absent.
 func TestActiveSinceLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
@@ -96,9 +96,9 @@ func TestActiveSinceLifecycle(t *testing.T) {
 
 	// Stay ACTIVE with fresh kernel progress → baseline advances to it.
 	progress := time.Now().Add(-4 * time.Second)
-	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true, lastProgressAt: progress})
+	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true, lastApiCallAt: progress})
 	if !m.activeSince.Equal(progress) {
-		t.Errorf("activeSince should advance to last_progress_at; was %v, now %v", first, m.activeSince)
+		t.Errorf("activeSince should advance to last_api_call_at; was %v, now %v", first, m.activeSince)
 	}
 
 	// Leave ACTIVE → timer cleared so the badge drops the elapsed suffix.

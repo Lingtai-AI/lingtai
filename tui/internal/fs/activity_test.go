@@ -552,6 +552,72 @@ func TestComputeNetworkActivity_DaemonActiveOnlyWhenSoleSignal(t *testing.T) {
 	}
 }
 
+func TestLastApiCallAtPrefersLastApiCallOverProgress(t *testing.T) {
+	base := t.TempDir()
+	agentDir := writeActivityAgent(t, base, "alice", "ACTIVE", true)
+	now := time.Now()
+	writeStatus(t, agentDir, map[string]interface{}{
+		"runtime": map[string]interface{}{
+			"state":             "ACTIVE",
+			"last_progress_at":  now.Add(-2 * time.Second).Unix(),
+			"last_api_call_at":  now.Add(-10 * time.Second).Unix(),
+			"no_progress_seconds": "",
+		},
+	}, time.Now())
+
+	got, ok := LastApiCallAt(agentDir, now)
+	if !ok {
+		t.Fatal("LastApiCallAt should be ok")
+	}
+	if got.Sub(now) > 0 {
+		t.Fatalf("future timestamp not clamped: %v", got)
+	}
+	want := now.Add(-10 * time.Second)
+	if diff := got.Sub(want); diff < -2*time.Second || diff > 2*time.Second {
+		t.Fatalf("LastApiCallAt = %v, want ~%v", got, want)
+	}
+}
+
+func TestLastApiCallAtFallsBackToProgressWhenApiCallAbsent(t *testing.T) {
+	base := t.TempDir()
+	agentDir := writeActivityAgent(t, base, "alice", "ACTIVE", true)
+	now := time.Now()
+	writeStatus(t, agentDir, map[string]interface{}{
+		"runtime": map[string]interface{}{
+			"state":             "ACTIVE",
+			"last_progress_at":  now.Add(-4 * time.Second).Unix(),
+			"no_progress_seconds": "",
+		},
+	}, time.Now())
+
+	got, ok := LastApiCallAt(agentDir, now)
+	if !ok {
+		t.Fatal("LastApiCallAt should be ok via fallback")
+	}
+	want := now.Add(-4 * time.Second)
+	if diff := got.Sub(want); diff < -2*time.Second || diff > 2*time.Second {
+		t.Fatalf("LastApiCallAt fallback = %v, want ~%v", got, want)
+	}
+}
+
+func TestLastApiCallAtNoneWhenNotActive(t *testing.T) {
+	base := t.TempDir()
+	agentDir := writeActivityAgent(t, base, "alice", "IDLE", true)
+	now := time.Now()
+	writeStatus(t, agentDir, map[string]interface{}{
+		"runtime": map[string]interface{}{
+			"state":             "IDLE",
+			"last_api_call_at":  now.Add(-10 * time.Second).Unix(),
+			"no_progress_seconds": "",
+		},
+	}, time.Now())
+
+	if got, ok := LastApiCallAt(agentDir, now); ok || !got.IsZero() {
+		t.Fatalf("LastApiCallAt for non-active = %v ok=%v, want zero+false", got, ok)
+	}
+}
+
+
 func writeStatus(t *testing.T, agentDir string, status map[string]interface{}, mtime time.Time) {
 	t.Helper()
 	path := filepath.Join(agentDir, ".status.json")

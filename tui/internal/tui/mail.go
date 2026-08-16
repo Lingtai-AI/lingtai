@@ -80,8 +80,8 @@ type mailRefreshMsg struct {
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
 	directStates         map[string]string    // stable direct-thread key -> target lifecycle state
-	lastProgressAt       time.Time            // orchestrator .status.json runtime.last_progress_at (zero when absent)
-	directLastProgress   map[string]time.Time // stable direct-thread key -> target last_progress_at
+	lastApiCallAt       time.Time            // orchestrator .status.json runtime.last_api_call_at (fallback last_progress_at; zero when absent)
+	directLastApiCall   map[string]time.Time // stable direct-thread key -> target last_api_call_at
 	alive                bool
 	state                string // active, idle, stuck, asleep, suspended, or ""
 	activity             fs.NetworkActivity
@@ -712,8 +712,8 @@ func (m MailModel) refreshMail() tea.Msg {
 
 	alive, state, orchestrator := resolveAgentLifecycle(m.orchestrator)
 	directStates := resolveDirectLifecycleStates(selectorRows)
-	lastProgressAt, _ := fs.LastProgressAt(m.orchestrator, time.Now())
-	directLastProgress := make(map[string]time.Time, len(directStates))
+	lastApiCallAt, _ := fs.LastApiCallAt(m.orchestrator, time.Now())
+	directLastApiCall := make(map[string]time.Time, len(directStates))
 	for _, row := range selectorRows {
 		if row.Main {
 			continue
@@ -722,8 +722,8 @@ func (m MailModel) refreshMail() tea.Msg {
 		if key == "" {
 			continue
 		}
-		if lp, ok := fs.LastProgressAt(row.Target.Directory, time.Now()); ok {
-			directLastProgress[key] = lp
+		if lp, ok := fs.LastApiCallAt(row.Target.Directory, time.Now()); ok {
+			directLastApiCall[key] = lp
 		}
 	}
 	var activity fs.NetworkActivity
@@ -747,8 +747,8 @@ func (m MailModel) refreshMail() tea.Msg {
 		selectorRows:         selectorRows,
 		directPublication:    directPublication,
 		directStates:         directStates,
-		lastProgressAt:       lastProgressAt,
-		directLastProgress:   directLastProgress,
+		lastApiCallAt:       lastApiCallAt,
+		directLastApiCall:   directLastApiCall,
 		alive:                alive,
 		state:                state,
 		activity:             activity,
@@ -1192,7 +1192,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.cache = msg.cache
 				m.acceptedSnapshot = msg.acceptedSnapshot
 				m = m.installSelectorRows(msg.selectorRows)
-				m = m.installDirectLifecycleStates(msg.directStates, msg.directLastProgress)
+				m = m.installDirectLifecycleStates(msg.directStates, msg.directLastApiCall)
 				m.directPublication = msg.directPublication
 				m = m.clampAgentRail()
 				m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
@@ -1214,15 +1214,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.quoteIdx++
 				m.pulseTick = 0
 				m.insightPending = false
-				m.activeSince = msg.lastProgressAt
+				m.activeSince = msg.lastApiCallAt
 				if m.activeSince.IsZero() {
 					m.activeSince = time.Now()
 				}
-			} else if isActive && !msg.lastProgressAt.IsZero() && !msg.lastProgressAt.Equal(m.activeSince) {
-				// Still active but the kernel reports a different last progress —
+			} else if isActive && !msg.lastApiCallAt.IsZero() && !msg.lastApiCallAt.Equal(m.activeSince) {
+				// Still active but the kernel reports a different last API call —
 				// adopt it so "active N sec" measures seconds since the last tool
 				// call (matches the kernel taskcard footer semantics).
-				m.activeSince = msg.lastProgressAt
+				m.activeSince = msg.lastApiCallAt
 			} else if !isActive {
 				// Not active — stop the elapsed timer so the badge drops it
 				m.activeSince = time.Time{}
@@ -2240,18 +2240,18 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
-func (m MailModel) installDirectLifecycleStates(states map[string]string, lastProgress map[string]time.Time) MailModel {
+func (m MailModel) installDirectLifecycleStates(states map[string]string, lastApiCall map[string]time.Time) MailModel {
 	now := time.Now()
 	next := make(map[string]directAgentLifecycle, len(states))
 	for key, state := range states {
 		status := m.directLifecycles[key]
 		if strings.EqualFold(state, "ACTIVE") {
 			if !strings.EqualFold(status.state, "ACTIVE") || status.activeSince.IsZero() {
-				status.activeSince = lastProgress[key]
+				status.activeSince = lastApiCall[key]
 				if status.activeSince.IsZero() {
 					status.activeSince = now
 				}
-			} else if lp, ok := lastProgress[key]; ok && !lp.IsZero() && !lp.Equal(status.activeSince) {
+			} else if lp, ok := lastApiCall[key]; ok && !lp.IsZero() && !lp.Equal(status.activeSince) {
 				// Still active but the target reports a different last progress —
 				// adopt it (matches kernel taskcard footer semantics).
 				status.activeSince = lp
