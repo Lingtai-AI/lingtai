@@ -62,23 +62,23 @@ func seedRecentWindowMailbox(t *testing.T, humanDir string, orchAddr string, n i
 func TestMailRecentMessageWindowContract(t *testing.T) {
 	humanDir := t.TempDir()
 	orchDir := t.TempDir()
-	ids := seedRecentWindowMailbox(t, humanDir, orchDir, fs.RecentMessageLimit+recentWindowExtra)
+	ids := seedRecentWindowMailbox(t, humanDir, orchDir, fs.RecentMessageLimit()+recentWindowExtra)
 	newModel := func() MailModel {
 		return NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
 	}
 
-	// The page loads exactly the newest RecentMessageLimit entries, and the cap
+	// The page loads exactly the newest RecentMessageLimit() entries, and the cap
 	// is observable in the loaded snapshot — not applied when rendering over a
 	// fully loaded mailbox.
 	t.Run("loads only the newest window", func(t *testing.T) {
 		m := newModel()
 		m, _ = m.Update(m.initialRebuild())
 
-		if got := len(m.messages); got != fs.RecentMessageLimit {
-			t.Fatalf("loaded %d entries, want exactly the newest %d", got, fs.RecentMessageLimit)
+		if got := len(m.messages); got != fs.RecentMessageLimit() {
+			t.Fatalf("loaded %d entries, want exactly the newest %d", got, fs.RecentMessageLimit())
 		}
-		if got := len(m.acceptedSnapshot.cacheCopy(humanDir).Messages); got != fs.RecentMessageLimit {
-			t.Fatalf("accepted mailbox snapshot holds %d messages, want the cap %d", got, fs.RecentMessageLimit)
+		if got := len(m.acceptedSnapshot.cacheCopy(humanDir).Messages); got != fs.RecentMessageLimit() {
+			t.Fatalf("accepted mailbox snapshot holds %d messages, want the cap %d", got, fs.RecentMessageLimit())
 		}
 		dropped := map[string]bool{}
 		for _, id := range ids[:recentWindowExtra] {
@@ -89,7 +89,7 @@ func TestMailRecentMessageWindowContract(t *testing.T) {
 				t.Fatalf("entry %q older than the window survived into the loaded page", msg.Timestamp)
 			}
 		}
-		wantNewest := fmt.Sprintf("mail body %d", fs.RecentMessageLimit+recentWindowExtra-1)
+		wantNewest := fmt.Sprintf("mail body %d", fs.RecentMessageLimit()+recentWindowExtra-1)
 		if !strings.Contains(m.messages[len(m.messages)-1].Body, wantNewest) {
 			t.Fatalf("newest message missing from the loaded page; last body = %q", m.messages[len(m.messages)-1].Body)
 		}
@@ -101,8 +101,8 @@ func TestMailRecentMessageWindowContract(t *testing.T) {
 		m := newModel()
 		m, _ = m.Update(m.initialRebuild())
 
-		if len(m.messages) != fs.RecentMessageLimit {
-			t.Fatalf("loaded %d entries, want %d", len(m.messages), fs.RecentMessageLimit)
+		if len(m.messages) != fs.RecentMessageLimit() {
+			t.Fatalf("loaded %d entries, want %d", len(m.messages), fs.RecentMessageLimit())
 		}
 		for i := 1; i < len(m.messages); i++ {
 			if chatMessageBefore(m.messages[i], m.messages[i-1]) {
@@ -161,8 +161,8 @@ func TestMailRecentMessageWindowContract(t *testing.T) {
 		}
 		m, _ = m.Update(cmd())
 
-		if len(m.messages) != fs.RecentMessageLimit {
-			t.Fatalf("after refresh the page holds %d entries, want the cap %d", len(m.messages), fs.RecentMessageLimit)
+		if len(m.messages) != fs.RecentMessageLimit() {
+			t.Fatalf("after refresh the page holds %d entries, want the cap %d", len(m.messages), fs.RecentMessageLimit())
 		}
 		if !strings.Contains(m.messages[len(m.messages)-1].Body, "brand new message") {
 			t.Fatalf("new message did not land at the tail of the page; last body = %q", m.messages[len(m.messages)-1].Body)

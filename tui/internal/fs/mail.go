@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,13 +100,65 @@ func ReadSent(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "sent"))
 }
 
-// RecentMessageLimit is the hard cap on how many of the newest message entries
-// the TUI loads and displays. It bounds both the mailbox bodies read to paint
-// the page and the merged entry window the chat view renders, so the first
-// frame never costs a full-mailbox or full-history scan. There is deliberately
-// no exact total-message count anywhere above this cap: this window IS the
-// loaded history.
-const RecentMessageLimit = 1000
+// MessageLimitEnv names the environment variable that overrides the recent
+// message window. It is a performance opt-in, not a preference: it lives in the
+// environment rather than tui_config.json because the only reason to change it
+// is to trade first-frame cost against how much history a session can reach.
+const MessageLimitEnv = "LINGTAI_TUI_MESSAGE_LIMIT"
+
+// DefaultRecentMessageLimit is the window used whenever MessageLimitEnv is
+// unset or does not name a non-negative integer. It is the cap introduced with
+// the bounded page and remains the behavior of an untouched environment.
+const DefaultRecentMessageLimit = 1000
+
+// RecentMessageLimit resolves the cap on how many of the newest message
+// entries the TUI loads and displays. It bounds both the mailbox bodies read to
+// paint the page and the merged entry window the chat view renders, so the
+// first frame never costs a full-mailbox or full-history scan. There is
+// deliberately no exact total-message count anywhere above this cap: this
+// window IS the loaded history.
+//
+// MessageLimitEnv decides the window, and this function is the only parser of
+// it:
+//
+//	unset / not an integer / negative → DefaultRecentMessageLimit (1000)
+//	positive N                        → N
+//	0                                 → unlimited, the full historical load
+//
+// Zero is an explicit opt-in, not a degenerate window: every consumer in this
+// package already reads limit <= 0 as "no bound", so 0 restores the unbounded
+// pre-window behavior for an operator who would rather pay a full-mailbox scan
+// than lose reach into old history. An invalid value resolves to the default
+// rather than failing: the window is a cost knob on a read path, and a typo in
+// the environment must not keep the page from painting.
+//
+// The variable is read on every call rather than latched at startup. The window
+// is consulted per refresh, so a live read costs one getenv on an already
+// I/O-bound path and keeps the value testable without process-global state.
+func RecentMessageLimit() int {
+	raw, ok := os.LookupEnv(MessageLimitEnv)
+	if !ok {
+		return DefaultRecentMessageLimit
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || limit < 0 {
+		return DefaultRecentMessageLimit
+	}
+	return limit
+}
+
+// ClampToRecentMessageLimit bounds a caller's desired entry count by the
+// resolved window. It exists so that "0 means unlimited" is decided in one
+// place: every consumer that would otherwise write `if n > limit` has to know
+// that an unlimited window must not clamp to zero, and each one re-deriving
+// that rule is how the two halves of the cap drift apart.
+func ClampToRecentMessageLimit(n int) int {
+	limit := RecentMessageLimit()
+	if limit > 0 && n > limit {
+		return limit
+	}
+	return n
+}
 
 // MailCache tracks already-loaded messages for incremental refresh.
 // Each Refresh call reads new messages from disk. Messages transitioning

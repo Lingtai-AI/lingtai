@@ -99,11 +99,13 @@ type parsedMail struct {
 // path to a directory containing a mailbox/inbox subdirectory (e.g.
 // .lingtai/human or .lingtai/<agent>).
 //
-// Only the newest fs.RecentMessageLimit messages are loaded. That window is the
-// page: entries outside it are never read, never rendered into markdown, and
-// therefore never searched. No total-message count is computed anywhere.
+// Only the newest fs.RecentMessageLimit() messages are loaded. That window is
+// the page: entries outside it are never read, never rendered into markdown,
+// and therefore never searched. No total-message count is computed anywhere.
+// The resolver is the one owner of the window, so LINGTAI_TUI_MESSAGE_LIMIT=0
+// reaches this page as the same unlimited load every other caller sees.
 func buildMailboxEntries(agentDir string) []MarkdownEntry {
-	return buildMailboxEntriesWindow(agentDir, fs.RecentMessageLimit)
+	return buildMailboxEntriesWindow(agentDir, fs.RecentMessageLimit())
 }
 
 // buildMailboxEntriesWindow is buildMailboxEntries with an explicit window, so

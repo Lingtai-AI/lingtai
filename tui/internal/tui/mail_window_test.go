@@ -155,12 +155,12 @@ func TestInitialContentWindowNeverExceedsRecentMessageLimit(t *testing.T) {
 	if m.pageSize != 2000 {
 		t.Fatalf("fixture page size = %d, want the configured 2000", m.pageSize)
 	}
-	if got := m.contentWindow(); got != fs.RecentMessageLimit {
-		t.Fatalf("content window = %d, want the hard cap %d", got, fs.RecentMessageLimit)
+	if got := m.contentWindow(); got != fs.RecentMessageLimit() {
+		t.Fatalf("content window = %d, want the hard cap %d", got, fs.RecentMessageLimit())
 	}
-	m.messages = make([]ChatMessage, fs.RecentMessageLimit+500)
-	if got := len(m.visibleMessages()); got != fs.RecentMessageLimit {
-		t.Fatalf("visible window = %d, want the hard cap %d", got, fs.RecentMessageLimit)
+	m.messages = make([]ChatMessage, fs.RecentMessageLimit()+500)
+	if got := len(m.visibleMessages()); got != fs.RecentMessageLimit() {
+		t.Fatalf("visible window = %d, want the hard cap %d", got, fs.RecentMessageLimit())
 	}
 }
 

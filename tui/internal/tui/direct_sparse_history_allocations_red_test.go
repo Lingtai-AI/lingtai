@@ -91,8 +91,8 @@ func newReviewSparseFixture(t *testing.T, unrelated int) reviewSparseFixture {
 	// dropped — which is exactly the hidden history the allocation probe cares
 	// about staying independent of.
 	want := len(accepted)
-	if want > fs.RecentMessageLimit {
-		want = fs.RecentMessageLimit
+	if want > fs.RecentMessageLimit() {
+		want = fs.RecentMessageLimit()
 	}
 	if got := len(mail.acceptedSnapshot.cache.Messages); got != want {
 		t.Fatalf("accepted publication messages = %d, want %d", got, want)

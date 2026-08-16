@@ -48,22 +48,22 @@ func writeRecentWindowMessage(t *testing.T, humanDir, folder string, index int) 
 
 // TestRefreshRecentRetainsOnlyNewestLimitInChronologicalOrder pins the hard
 // contract at the fs boundary: a mailbox holding more than the cap loads only
-// the newest RecentMessageLimit entries, the cap is visible in the returned
+// the newest RecentMessageLimit() entries, the cap is visible in the returned
 // snapshot itself (not hidden at render time), and what survives is still in
 // chronological order with the newest entry last.
 func TestRefreshRecentRetainsOnlyNewestLimitInChronologicalOrder(t *testing.T) {
 	humanDir := t.TempDir()
 	const extra = 25
-	total := RecentMessageLimit + extra
+	total := RecentMessageLimit() + extra
 	ids := make([]string, 0, total)
 	for i := range total {
 		ids = append(ids, writeRecentWindowMessage(t, humanDir, "inbox", i))
 	}
 
-	cache := NewMailCache(humanDir).RefreshRecent(RecentMessageLimit)
+	cache := NewMailCache(humanDir).RefreshRecent(RecentMessageLimit())
 
-	if len(cache.Messages) != RecentMessageLimit {
-		t.Fatalf("loaded %d messages, want exactly the newest %d", len(cache.Messages), RecentMessageLimit)
+	if len(cache.Messages) != RecentMessageLimit() {
+		t.Fatalf("loaded %d messages, want exactly the newest %d", len(cache.Messages), RecentMessageLimit())
 	}
 	if got, want := cache.Messages[0].MailboxID, ids[extra]; got != want {
 		t.Errorf("oldest retained message = %q, want %q (the window must start after the %d dropped entries)", got, want, extra)
@@ -83,8 +83,8 @@ func TestRefreshRecentRetainsOnlyNewestLimitInChronologicalOrder(t *testing.T) {
 			t.Fatal("an entry older than the window survived into the loaded snapshot")
 		}
 	}
-	if len(cache.seen) != RecentMessageLimit {
-		t.Errorf("seen index holds %d ids, want %d — the index must track the window, not the mailbox", len(cache.seen), RecentMessageLimit)
+	if len(cache.seen) != RecentMessageLimit() {
+		t.Errorf("seen index holds %d ids, want %d — the index must track the window, not the mailbox", len(cache.seen), RecentMessageLimit())
 	}
 }
 
@@ -124,7 +124,7 @@ func TestRefreshRecentFlipsDeliveredAndDeduplicatesAcrossFolders(t *testing.T) {
 	humanDir := t.TempDir()
 	id := writeRecentWindowMessage(t, humanDir, "outbox", 1)
 
-	cache := NewMailCache(humanDir).RefreshRecent(RecentMessageLimit)
+	cache := NewMailCache(humanDir).RefreshRecent(RecentMessageLimit())
 	if len(cache.Messages) != 1 || cache.Messages[0].Delivered {
 		t.Fatalf("outbox message = %+v, want exactly one undelivered entry", cache.Messages)
 	}
@@ -137,7 +137,7 @@ func TestRefreshRecentFlipsDeliveredAndDeduplicatesAcrossFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache = cache.RefreshRecent(RecentMessageLimit)
+	cache = cache.RefreshRecent(RecentMessageLimit())
 	if len(cache.Messages) != 1 {
 		t.Fatalf("after pickup: %d entries, want 1 (no duplicate across folders)", len(cache.Messages))
 	}

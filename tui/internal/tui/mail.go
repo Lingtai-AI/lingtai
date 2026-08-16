@@ -312,10 +312,12 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 
 // initialRebuild performs the one-time authoritative bounded content rebuild off
 // the synchronous launch path. Every source it touches is bounded before any
-// body is read: the newest fs.RecentMessageLimit mailbox entries, the newest
+// body is read: the newest fs.RecentMessageLimit() mailbox entries, the newest
 // contentWindow() canonical event entries, plus current auxiliary sources,
 // merged chronologically. Nothing scans the full mailbox or full history, and
 // no exact total is computed — the page is painted from the window alone.
+// The one exception is the explicit LINGTAI_TUI_MESSAGE_LIMIT=0 opt-in, which
+// resolves to an unlimited window and asks for exactly that full load.
 // Running this as a tea.Cmd keeps the first frame instant. It returns a
 // mailRefreshMsg carrying command-local mail and session caches; the live model
 // installs and persists them only after accepting the message's generation, so
@@ -325,9 +327,9 @@ func (m MailModel) initialRebuild() tea.Msg {
 		m.beforeRebuild()
 	}
 	// Refresh mail cache before session rebuild so mail entries are included.
-	// The bounded variant reads at most fs.RecentMessageLimit message bodies
+	// The bounded variant reads at most fs.RecentMessageLimit() message bodies
 	// regardless of how much mail the mailbox holds.
-	cache := m.cache.RefreshRecent(fs.RecentMessageLimit)
+	cache := m.cache.RefreshRecent(fs.RecentMessageLimit())
 	// Always rebuild from authoritative sources on launch. Keep both the in-memory
 	// snapshot and its session.jsonl write command-local until Update accepts this
 	// generation; stale work must have no effect on the installed cache.
@@ -347,15 +349,16 @@ func (m MailModel) initialRebuild() tea.Msg {
 	return msg
 }
 
-// contentWindow is the bounded number of newest canonical event entries any
-// rebuild ingests: the configured mail_page_size, never more than the hard
-// fs.RecentMessageLimit cap. There is no larger "older page" window — history
-// beyond this window is never loaded, so no code path can bypass the cap.
+// contentWindow is the number of newest canonical event entries any rebuild
+// ingests. A positive resolved limit bounds the configured mail_page_size; zero
+// is the explicit unlimited sentinel understood by the fs session rebuild API,
+// so Main loads the complete event history while mail_page_size still controls
+// the initial visible batch and each Ctrl+U reveal batch.
 func (m MailModel) contentWindow() int {
-	window := m.pageSize
-	if window > fs.RecentMessageLimit {
-		window = fs.RecentMessageLimit
+	if fs.RecentMessageLimit() == 0 {
+		return 0
 	}
+	window := fs.ClampToRecentMessageLimit(m.pageSize)
 	if window < 1 {
 		window = 1
 	}
@@ -533,14 +536,11 @@ func (m *MailModel) cacheIsWindowed() bool {
 }
 
 // visibleMessages returns the tail of m.messages limited by pageSize plus any
-// Ctrl+U reveal, and never more than the hard fs.RecentMessageLimit cap.
+// Ctrl+U reveal, and never more than the resolved fs.RecentMessageLimit() cap.
 // m.messages is already trimmed to that cap by buildMessages, so this is the
 // second, render-side half of the same invariant.
 func (m *MailModel) visibleMessages() []ChatMessage {
-	limit := m.pageSize + m.loadedExtra
-	if limit > fs.RecentMessageLimit {
-		limit = fs.RecentMessageLimit
-	}
+	limit := fs.ClampToRecentMessageLimit(m.pageSize + m.loadedExtra)
 	if limit >= len(m.messages) {
 		return m.messages
 	}
@@ -614,9 +614,9 @@ func (m MailModel) refreshMail() tea.Msg {
 	//
 	// The refresh is bounded: new mail still lands every tick (that is what keeps
 	// the live conversation current), but the retained snapshot never grows past
-	// the newest fs.RecentMessageLimit entries, so neither the first frame nor a
-	// steady-state tick pays for the whole mailbox.
-	cache := m.cache.RefreshRecent(fs.RecentMessageLimit)
+	// the newest fs.RecentMessageLimit() entries, so neither the first frame nor
+	// a steady-state tick pays for the whole mailbox.
+	cache := m.cache.RefreshRecent(fs.RecentMessageLimit())
 	acceptedSnapshot := newAcceptedMailSnapshot(cache)
 	selectorRows := discoverAgentSelectorRows(m.baseDir)
 	directPublication := fs.NewDirectMailPublication(
@@ -754,11 +754,12 @@ func (m *MailModel) buildMessages() {
 	})
 
 	// The one hard cap, applied to the merged stream: the page holds only the
-	// newest fs.RecentMessageLimit entries. Each source is already bounded before
-	// its bodies are read, so this trim is the single place the combined
-	// mail + event window becomes observable in the loaded snapshot.
-	if len(chatMsgs) > fs.RecentMessageLimit {
-		chatMsgs = chatMsgs[len(chatMsgs)-fs.RecentMessageLimit:]
+	// newest fs.RecentMessageLimit() entries. Each source is already bounded
+	// before its bodies are read, so this trim is the single place the combined
+	// mail + event window becomes observable in the loaded snapshot. An
+	// unlimited window clamps to the length itself and trims nothing.
+	if kept := fs.ClampToRecentMessageLimit(len(chatMsgs)); kept < len(chatMsgs) {
+		chatMsgs = chatMsgs[len(chatMsgs)-kept:]
 	}
 
 	// Restore dismissed state for insights.
@@ -1509,7 +1510,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				// Reveal already-loaded older messages above the render window
 				// (cheap, synchronous, no I/O). There is no disk-backed older page:
 				// the loaded window IS the history, so Ctrl+U can never pull the
-				// view past the fs.RecentMessageLimit entries already in memory.
+				// view past the fs.RecentMessageLimit() entries already in memory.
 				if len(m.visibleMessages()) < len(m.messages) {
 					m.loadedExtra += m.pageSize
 					m.syncViewportHeight()

@@ -109,14 +109,14 @@ func TestMailboxWindowSpansFoldersByRecency(t *testing.T) {
 func TestMailboxDefaultWindowIsRecentMessageLimit(t *testing.T) {
 	agentDir := t.TempDir()
 	const extra = 5
-	for i := range fs.RecentMessageLimit + extra {
+	for i := range fs.RecentMessageLimit() + extra {
 		seedMailboxWindowLeaf(t, agentDir, "inbox", i, fmt.Sprintf("body-%04d", i))
 	}
 
 	entries := buildMailboxEntries(agentDir)
 
-	if len(entries) != fs.RecentMessageLimit {
-		t.Fatalf("loaded %d entries, want the shared cap %d", len(entries), fs.RecentMessageLimit)
+	if len(entries) != fs.RecentMessageLimit() {
+		t.Fatalf("loaded %d entries, want the shared cap %d", len(entries), fs.RecentMessageLimit())
 	}
 	if got := filterMailboxEntries(entries, "body-0000"); len(got) != 0 {
 		t.Errorf("the oldest message is still loaded (%d matches); the cap is not applied before reading", len(got))
