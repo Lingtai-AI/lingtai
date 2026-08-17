@@ -752,77 +752,128 @@ func TestDraftFirstRun_CodexDeleteBlockedForPreExistingAuth(t *testing.T) {
 	}
 }
 
-// TestDraftFirstRun_CodexDeleteAllowedForSessionLogin proves the OTHER half
-// of blocker 5's fix: when the Codex login happened DURING this draft
-// session (draft.DraftCodexTokens non-empty, exactly what
-// CodexOAuthDoneMsg's draftMode branch sets — see firstrun.go), clearing it
-// via Delete remains fully functional and honest. Since the draftMode login
-// now persists immediately to the legacy codex-auth.json (so a preset-first
-// flow keeps the credential even if the wizard is abandoned), the same-session
-// logout must remove that persisted file as well as the in-memory draft. This
-// proves the blocking guard in blocker 5's fix is scoped correctly — it must
-// not also break the legitimate, already-tested "undo a same-session login"
-// path.
-func TestDraftFirstRun_CodexDeleteAllowedForSessionLogin(t *testing.T) {
-	m, home, _ := buildDraftModel(t)
+// TestDraftFirstRun_CodexOAuthDeleteRestoresPreExistingAuth proves a draft
+// re-login can be discarded without changing the pre-existing legacy auth on
+// disk or leaving the credential row falsely logged out. It drives the real
+// OAuth-done message and two-press Delete confirmation, then verifies both
+// isolated filesystem snapshots and the restored original account display.
+func TestDraftFirstRun_CodexOAuthDeleteRestoresPreExistingAuth(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	globalDir := filepath.Join(home, ".lingtai-tui")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir globalDir: %v", err)
+	}
+	authPath := legacyCodexAuthPath(globalDir)
+	seedTokens := CodexTokens{
+		AccessToken:  "original-access-token",
+		RefreshToken: "original-refresh-token",
+		Email:        "original@example.com",
+	}
+	seedData, err := json.Marshal(seedTokens)
+	if err != nil {
+		t.Fatalf("marshal seed tokens: %v", err)
+	}
+	if err := os.WriteFile(authPath, seedData, 0o600); err != nil {
+		t.Fatalf("seed original codex-auth.json: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	draft := NewProjectDraft(projectRoot)
+	m := NewDraftFirstRunModel(filepath.Join(projectRoot, ".lingtai"), globalDir, false, draft)
 	m.step = stepPickPreset
 	m.presets = nil
 	m.cursor = 0
-	globalDir := filepath.Join(home, ".lingtai-tui")
 
-	// Simulate a completed same-session OAuth login via the real message
-	// path (CodexOAuthDoneMsg), not a synthetic direct field assignment.
+	if !m.codexAuth.valid || m.codexAuth.email != seedTokens.Email {
+		t.Fatalf("expected original configured account before draft re-login, got valid=%v email=%q", m.codexAuth.valid, m.codexAuth.email)
+	}
+
+	homeBefore := dirSnapshot(t, home)
+	projectBefore := dirSnapshot(t, projectRoot)
+
+	m, _ = m.Update(CodexOAuthDoneMsg{
+		Tokens: &CodexTokens{AccessToken: "draft-access-token", RefreshToken: "draft-refresh-token", Email: "draft@example.com"},
+	})
+	if m.draft.DraftCodexTokens.Empty() {
+		t.Fatal("expected DraftCodexTokens after the draft re-login")
+	}
+	if !m.codexAuth.valid || m.codexAuth.email != "draft@example.com" {
+		t.Fatalf("expected draft account displayed before deletion, got valid=%v email=%q", m.codexAuth.valid, m.codexAuth.email)
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if !m.codexLogoutArmed {
+		t.Fatal("expected Delete to arm for the same-session draft credentials")
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if !m.draft.DraftCodexTokens.Empty() {
+		t.Fatal("expected DraftCodexTokens cleared after confirmed draft deletion")
+	}
+	assertSnapshotsEqual(t, "draft re-login/delete home", homeBefore, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "draft re-login/delete project", projectBefore, dirSnapshot(t, projectRoot))
+
+	rawAfter, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("original codex-auth.json must remain readable: %v", err)
+	}
+	if string(rawAfter) != string(seedData) {
+		t.Fatal("original codex-auth.json changed during draft re-login/delete")
+	}
+	if !m.codexAuth.valid || m.codexAuth.email != seedTokens.Email {
+		t.Fatalf("expected original account restored after draft deletion, got valid=%v email=%q", m.codexAuth.valid, m.codexAuth.email)
+	}
+	wantLabel := codexAccountName(codexAccount{Email: seedTokens.Email, Legacy: true})
+	if got := m.codexAuthDisplayLabel(); got != wantLabel {
+		t.Fatalf("expected original account display %q after draft deletion, got %q", wantLabel, got)
+	}
+}
+
+// TestDraftFirstRun_CodexOAuthThenCancelDoesNotPersist proves a completed
+// Codex OAuth in a pre-confirmation Create draft is memory-only. The real
+// OAuth completion and Esc cancellation paths must leave both the project root
+// and the isolated home unchanged: no project .lingtai and no global
+// codex-auth.json may appear before explicit Create.
+func TestDraftFirstRun_CodexOAuthThenCancelDoesNotPersist(t *testing.T) {
+	m, home, projectRoot := buildDraftModel(t)
+	m.step = stepPickPreset
+	m.presets = nil
+	m.cursor = 0
+
+	homeBefore := dirSnapshot(t, home)
+	projectBefore := dirSnapshot(t, projectRoot)
+
+	// Drive the real completion message rather than populating the draft
+	// directly; the wizard still displays the in-memory successful login.
 	m, _ = m.Update(CodexOAuthDoneMsg{
 		Tokens: &CodexTokens{AccessToken: "session-token", RefreshToken: "session-refresh", Email: "session@example.com"},
 	})
 	if m.draft.DraftCodexTokens.Empty() {
-		t.Fatal("expected DraftCodexTokens to be populated after a same-session OAuth completion")
+		t.Fatal("expected DraftCodexTokens to be populated after a draft OAuth completion")
 	}
 	if !m.codexAuth.valid {
-		t.Fatal("expected codexAuth.valid=true after the same-session login")
+		t.Fatal("expected codexAuth.valid=true for the in-memory draft login")
+	}
+	assertSnapshotsEqual(t, "draft Codex OAuth before cancellation home", homeBefore, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "draft Codex OAuth before cancellation project", projectBefore, dirSnapshot(t, projectRoot))
+
+	// Esc at the draft entry step is the actual cancellation path.
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("expected draft Esc cancellation command")
+	}
+	if _, ok := runCmd(cmd).(ProjectDraftCancelledMsg); !ok {
+		t.Fatal("expected ProjectDraftCancelledMsg after draft OAuth cancellation")
 	}
 
-	// The draftMode login persists immediately: the legacy codex-auth.json
-	// must exist on disk after the OAuth completion.
-	authPath := legacyCodexAuthPath(globalDir)
-	if raw, err := os.ReadFile(authPath); err != nil {
-		t.Fatalf("expected codex-auth.json persisted by draftMode login: %v", err)
-	} else if !strings.Contains(string(raw), "session-token") {
-		t.Fatalf("expected persisted codex-auth.json to contain the session token, got %q", raw)
+	assertSnapshotsEqual(t, "draft Codex OAuth then cancel home", homeBefore, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "draft Codex OAuth then cancel project", projectBefore, dirSnapshot(t, projectRoot))
+	if _, err := os.Stat(filepath.Join(projectRoot, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("draft cancellation must not create project .lingtai: %v", err)
 	}
-
-	before := dirSnapshot(t, home)
-
-	// Two-press Del: arm, then confirm.
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if !m.codexLogoutArmed {
-		t.Fatal("expected the logout to arm for a same-session login — this path must remain unblocked")
-	}
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-
-	// The only expected filesystem change from this logout is the
-	// persisted codex-auth.json being removed; everything else must be
-	// untouched.
-	after := dirSnapshot(t, home)
-	if len(after) != len(before)-1 {
-		t.Fatalf("expected exactly one file removed by same-session logout: before=%v after=%v", before, after)
-	}
-	if _, ok := after[filepath.Join(".lingtai-tui", "codex-auth.json")]; ok {
-		t.Fatalf("expected codex-auth.json absent after logout, got %v", after)
-	}
-
-	if !m.draft.DraftCodexTokens.Empty() {
-		t.Fatal("expected DraftCodexTokens cleared after confirming the in-memory logout")
-	}
-	if m.codexAuth.valid {
-		t.Fatal("expected codexAuth.valid=false after clearing the same-session login")
-	}
-	if m.message != i18n.T("firstrun.preset_pick.codex_logged_out") {
-		t.Fatalf("expected the normal logged-out message for a same-session login, got %q", m.message)
-	}
-	// The persisted file must be removed too.
-	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
-		t.Fatalf("expected codex-auth.json removed after same-session logout, stat err=%v", err)
+	if _, err := os.Stat(legacyCodexAuthPath(filepath.Join(home, ".lingtai-tui"))); !os.IsNotExist(err) {
+		t.Fatalf("draft cancellation must not persist global codex auth: %v", err)
 	}
 }
 
