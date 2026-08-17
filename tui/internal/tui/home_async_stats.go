@@ -178,16 +178,17 @@ func formatHomeAsyncStats(s homeAsyncStats, width int) string {
 	return appendAsyncDaemonsHint(left, width)
 }
 
-// formatHomeAsyncModelStats renders one eligible LingTai model directly, or
-// deterministic model × count statistics for multiple eligible daemon runs. The
-// model list is already constrained by fs.RecentLingtaiDaemonModels to the same
-// fresh window and backend filter as the row's daemon counts.
+// formatHomeAsyncModelStats renders fresh eligible LingTai models as one compact
+// parenthetical status-tail segment: a single raw model, or deterministic model ×
+// count statistics for multiple runs. The model list is already constrained by
+// fs.RecentLingtaiDaemonModels to the same fresh window and backend filter as the
+// row's daemon counts.
 func formatHomeAsyncModelStats(models []string) string {
 	if len(models) == 0 {
 		return ""
 	}
 	if len(models) == 1 {
-		return i18n.T("taskcard.daemon_model") + " " + models[0]
+		return "(" + models[0] + ")"
 	}
 
 	counts := make(map[string]int, len(models))
@@ -203,7 +204,7 @@ func formatHomeAsyncModelStats(models []string) string {
 	for _, model := range keys {
 		stats = append(stats, fmt.Sprintf("%s × %d", model, counts[model]))
 	}
-	return i18n.T("taskcard.daemon_models") + " " + strings.Join(stats, " · ")
+	return "(" + strings.Join(stats, " · ") + ")"
 }
 
 // appendAsyncDaemonsHint right-aligns a "/daemons for details" affordance
