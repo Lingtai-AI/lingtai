@@ -1876,7 +1876,7 @@ type AgentOpts struct {
 func DefaultAgentOpts() AgentOpts {
 	return AgentOpts{
 		Language:       "en",
-		ContextLimit:   300000,
+		ContextLimit:   500000,
 		SoulDelay:      nil,
 		MaxRpm:         60,
 		MaxAedAttempts: DefaultMaxAedAttempts,

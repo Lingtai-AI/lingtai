@@ -2280,7 +2280,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					// Stash current values for the adaptive-commit finalizer.
 					ctxLimit, _ := strconv.Atoi(m.ctxLimitInput.Value())
 					if ctxLimit <= 0 {
-						ctxLimit = 300000
+						ctxLimit = 500000
 					}
 					soulDelay := resolveSoulDelay(m.soulDelayInput.Value(), m.soulFlowEnabledIdx == 1)
 					maxRpm, _ := strconv.Atoi(m.maxRpmInput.Value())
@@ -2322,7 +2322,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				ctxLimit, err := strconv.Atoi(m.ctxLimitInput.Value())
 				if err != nil || ctxLimit <= 0 {
-					ctxLimit = 300000
+					ctxLimit = 500000
 				}
 				soulDelay := resolveSoulDelay(m.soulDelayInput.Value(), m.soulFlowEnabledIdx == 1)
 				maxRpm, err := strconv.Atoi(m.maxRpmInput.Value())
@@ -3985,7 +3985,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	}
 
 	// Numeric defaults — overridden by saved init.json values in setup mode below.
-	m.ctxLimitInput.SetValue("300000")
+	m.ctxLimitInput.SetValue("500000")
 	m.soulDelayInput.SetValue("")
 	m.maxRpmInput.SetValue("60")
 	m.maxAedInput.SetValue(strconv.Itoa(preset.DefaultMaxAedAttempts))
