@@ -19,6 +19,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,8 +36,9 @@ import (
 const homeAsyncStatsTTL = 1 * time.Second
 
 // homeAsyncStats is the resolved, cached snapshot of the orchestrator agent's
-// async job ledger counts plus recent-window token usage (in/out/cache/calls,
-// mirroring the Telegram Task Card). A zero value means "all counts are zero"
+// async job ledger counts, eligible LingTai model names, and recent-window token
+// usage (in/out/cache/calls, mirroring the Telegram Task Card). A zero value means
+// "all counts are zero"
 // — the row is still rendered once loaded, showing every segment as 0.
 type homeAsyncStats struct {
 	running int
@@ -47,6 +49,7 @@ type homeAsyncStats struct {
 	output  int64
 	cached  int64
 	calls   int64
+	models  []string // eligible backend="lingtai" daemon.json models in the fresh window
 }
 
 // hasHomeAsyncStats reports whether View() will render the additive async row.
@@ -71,6 +74,7 @@ func (m MailModel) fetchHomeAsyncStats() tea.Cmd {
 	return func() tea.Msg {
 		counts := fs.CountDaemons(m.orchestrator)
 		tokens := fs.DaemonRecentLedgerSummary(m.orchestrator)
+		models := fs.RecentLingtaiDaemonModels(m.orchestrator)
 		return homeAsyncStatsMsg{
 			generation: m.generation,
 			t: homeAsyncStats{
@@ -82,6 +86,7 @@ func (m MailModel) fetchHomeAsyncStats() tea.Cmd {
 				output:  tokens.Output,
 				cached:  tokens.Cached,
 				calls:   tokens.APICalls,
+				models:  models,
 			},
 		}
 	}
@@ -145,6 +150,10 @@ func formatHomeAsyncStats(s homeAsyncStats, width int) string {
 		}
 	}
 
+	if models := formatHomeAsyncModelStats(s.models); models != "" {
+		segs = append(segs, models)
+	}
+
 	// Recent-window token usage, mirroring the Telegram Task Card's daemon-stats
 	// line. Always rendered (zeros while idle). Cache pct follows the TUI
 	// convention from props.go: cached/input.
@@ -167,6 +176,34 @@ func formatHomeAsyncStats(s homeAsyncStats, width int) string {
 	// Right-side affordance pointing at the full run browser (/daemons), dropped
 	// on terminals too narrow to right-align it without colliding.
 	return appendAsyncDaemonsHint(left, width)
+}
+
+// formatHomeAsyncModelStats renders one eligible LingTai model directly, or
+// deterministic model × count statistics for multiple eligible daemon runs. The
+// model list is already constrained by fs.RecentLingtaiDaemonModels to the same
+// fresh window and backend filter as the row's daemon counts.
+func formatHomeAsyncModelStats(models []string) string {
+	if len(models) == 0 {
+		return ""
+	}
+	if len(models) == 1 {
+		return i18n.T("taskcard.daemon_model") + " " + models[0]
+	}
+
+	counts := make(map[string]int, len(models))
+	for _, model := range models {
+		counts[model]++
+	}
+	keys := make([]string, 0, len(counts))
+	for model := range counts {
+		keys = append(keys, model)
+	}
+	sort.Strings(keys)
+	stats := make([]string, 0, len(keys))
+	for _, model := range keys {
+		stats = append(stats, fmt.Sprintf("%s × %d", model, counts[model]))
+	}
+	return i18n.T("taskcard.daemon_models") + " " + strings.Join(stats, " · ")
 }
 
 // appendAsyncDaemonsHint right-aligns a "/daemons for details" affordance

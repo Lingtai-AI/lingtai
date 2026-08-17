@@ -52,6 +52,18 @@ func TestFormatHomeAsyncStats(t *testing.T) {
 		}
 	})
 
+	t.Run("lingtai models render directly or as stable model counts", func(t *testing.T) {
+		single := formatHomeAsyncStats(homeAsyncStats{running: 1, models: []string{"gpt-5.6-terra"}}, 220)
+		if want := "Daemon model gpt-5.6-terra"; !strings.Contains(single, want) {
+			t.Fatalf("single-model row missing %q: %q", want, single)
+		}
+
+		multiple := formatHomeAsyncStats(homeAsyncStats{running: 3, models: []string{"beta", "alpha", "beta"}}, 220)
+		if want := "Daemon models alpha × 1 · beta × 2"; !strings.Contains(multiple, want) {
+			t.Fatalf("multi-model row missing stable counts %q: %q", want, multiple)
+		}
+	})
+
 	t.Run("zero count buckets are omitted", func(t *testing.T) {
 		got := formatHomeAsyncStats(homeAsyncStats{running: 1}, 160)
 		if strings.Contains(got, "queued") || strings.Contains(got, "done") || strings.Contains(got, "failed") {
