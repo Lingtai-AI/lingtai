@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	daemonsHeaderLines = 2
-	daemonsFooterLines = 2
-	maxDaemonEvents    = 14
-	maxDaemonChats     = 8
+	daemonsHeaderLines       = 2
+	daemonsFooterLines       = 2
+	maxDaemonEvents          = 14
+	maxDaemonChats           = 8
+	defaultDaemonSummaryDirs = 1000
+	daemonHistoryLimitEnv    = "LINGTAI_DAEMON_HISTORY_LIMIT"
 )
 
 type daemonPane int
@@ -679,6 +681,57 @@ func (m DaemonsModel) renderPicker() string {
 	return strings.Join(lines, "\n")
 }
 
+type daemonRunDir struct {
+	dir          string
+	name         string
+	modifiedTime time.Time
+}
+
+// daemonSummaryDirLimit returns the configured /daemons history window. Invalid,
+// empty, or non-positive values retain the safe default.
+func daemonSummaryDirLimit() int {
+	raw := strings.TrimSpace(os.Getenv(daemonHistoryLimitEnv))
+	if raw == "" {
+		return defaultDaemonSummaryDirs
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 {
+		return defaultDaemonSummaryDirs
+	}
+	return limit
+}
+
+// newestDaemonRunDirs selects the fixed newest-first directory window before
+// reading daemon.json. A malformed or missing record inside that window is
+// skipped by loadDaemonSummaries without backfilling from older directories.
+func newestDaemonRunDirs(daemonsDir string, entries []os.DirEntry) []daemonRunDir {
+	runs := make([]daemonRunDir, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		runs = append(runs, daemonRunDir{
+			dir:          filepath.Join(daemonsDir, entry.Name()),
+			name:         entry.Name(),
+			modifiedTime: info.ModTime(),
+		})
+	}
+	sort.Slice(runs, func(i, j int) bool {
+		if !runs[i].modifiedTime.Equal(runs[j].modifiedTime) {
+			return runs[i].modifiedTime.After(runs[j].modifiedTime)
+		}
+		return runs[i].name > runs[j].name
+	})
+	if limit := daemonSummaryDirLimit(); len(runs) > limit {
+		runs = runs[:limit]
+	}
+	return runs
+}
+
 func loadDaemonSummaries(agentDir string) ([]daemonSummary, error) {
 	daemonsDir := filepath.Join(agentDir, "daemons")
 	entries, err := os.ReadDir(daemonsDir)
@@ -688,21 +741,17 @@ func loadDaemonSummaries(agentDir string) ([]daemonSummary, error) {
 		}
 		return nil, err
 	}
-	var items []daemonSummary
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := filepath.Join(daemonsDir, entry.Name())
-		item, err := readDaemonSummary(dir)
+
+	runs := newestDaemonRunDirs(daemonsDir, entries)
+	items := make([]daemonSummary, 0, len(runs))
+	for _, run := range runs {
+		item, err := readDaemonSummary(run.dir)
 		if err != nil {
 			continue
 		}
+		item.ModifiedTime = run.modifiedTime
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].ModifiedTime.After(items[j].ModifiedTime)
-	})
 	return items, nil
 }
 
