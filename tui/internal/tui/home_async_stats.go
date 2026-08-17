@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -33,7 +34,11 @@ import (
 // homeAsyncStatsTTL is how long a fetched async-stats snapshot is considered
 // fresh, matching the home telemetry TTL so the two additive rows refresh on the
 // same cadence without doubling disk reads.
-const homeAsyncStatsTTL = 1 * time.Second
+const (
+	homeAsyncStatsTTL           = 1 * time.Second
+	homeAsyncModelNameMaxRunes  = 64
+	homeAsyncModelStatsMaxWidth = 96
+)
 
 // homeAsyncStats is the resolved, cached snapshot of the orchestrator agent's
 // async job ledger counts, eligible LingTai model names, and recent-window token
@@ -96,13 +101,14 @@ func (m MailModel) fetchHomeAsyncStats() tea.Cmd {
 // poll loop does not spawn a new read every tick. The first fetch is always
 // allowed; subsequent fetches wait homeAsyncStatsTTL since the last completion.
 // Returns nil when no fetch should start.
-func (m MailModel) maybeScheduleHomeAsyncStats(now time.Time) tea.Cmd {
+func (m *MailModel) maybeScheduleHomeAsyncStats(now time.Time) tea.Cmd {
 	if m.homeAsyncStatsInFlight {
 		return nil
 	}
 	if !m.homeAsyncStatsLastFetch.IsZero() && now.Sub(m.homeAsyncStatsLastFetch) < homeAsyncStatsTTL {
 		return nil
 	}
+	m.homeAsyncStatsInFlight = true
 	return m.fetchHomeAsyncStats()
 }
 
@@ -113,6 +119,7 @@ func (m MailModel) maybeScheduleHomeAsyncStats(now time.Time) tea.Cmd {
 func (m *MailModel) applyHomeAsyncStats(t homeAsyncStats, now time.Time) bool {
 	was := m.hasHomeAsyncStats()
 	m.homeAsyncStats = t
+	m.homeAsyncStatsInFlight = false
 	m.homeAsyncStatsLoaded = true
 	m.homeAsyncStatsLastFetch = now
 	return m.hasHomeAsyncStats() != was
@@ -151,7 +158,13 @@ func formatHomeAsyncStats(s homeAsyncStats, width int) string {
 	}
 
 	if models := formatHomeAsyncModelStats(s.models); models != "" {
-		segs = append(segs, models)
+		candidate := append(append([]string(nil), segs...), models)
+		// The Async footer is deliberately one row. Keep the model tail only when
+		// the localized label + status portion already fits the current width; the
+		// existing token portions retain their independent legacy behavior.
+		if width <= 0 || lipgloss.Width("  "+i18n.T("mail.async_label")+"  "+strings.Join(candidate, "  ")) <= width {
+			segs = candidate
+		}
 	}
 
 	// Recent-window token usage, mirroring the Telegram Task Card's daemon-stats
@@ -178,33 +191,63 @@ func formatHomeAsyncStats(s homeAsyncStats, width int) string {
 	return appendAsyncDaemonsHint(left, width)
 }
 
-// formatHomeAsyncModelStats renders fresh eligible LingTai models as one compact
-// parenthetical status-tail segment: a single raw model, or deterministic model ×
-// count statistics for multiple runs. The model list is already constrained by
-// fs.RecentLingtaiDaemonModels to the same fresh window and backend filter as the
-// row's daemon counts.
+// formatHomeAsyncModelStats returns a bounded, control-free parenthetical
+// status-tail segment. It preserves a single eligible model directly and uses
+// deterministic model × count entries for multiple runs. Inputs still come from
+// the existing fresh-window/backend filter; malformed display strings are merely
+// omitted rather than allowed to affect the one-line footer.
 func formatHomeAsyncModelStats(models []string) string {
-	if len(models) == 0 {
+	counts := make(map[string]int, len(models))
+	for _, raw := range models {
+		if model := safeHomeAsyncModelName(raw); model != "" {
+			counts[model]++
+		}
+	}
+	if len(counts) == 0 {
 		return ""
 	}
-	if len(models) == 1 {
-		return "(" + models[0] + ")"
-	}
 
-	counts := make(map[string]int, len(models))
-	for _, model := range models {
-		counts[model]++
-	}
 	keys := make([]string, 0, len(counts))
 	for model := range counts {
 		keys = append(keys, model)
 	}
 	sort.Strings(keys)
-	stats := make([]string, 0, len(keys))
-	for _, model := range keys {
-		stats = append(stats, fmt.Sprintf("%s × %d", model, counts[model]))
+	if len(keys) == 1 && counts[keys[0]] == 1 {
+		return "(" + keys[0] + ")"
 	}
-	return "(" + strings.Join(stats, " · ") + ")"
+
+	parts := make([]string, 0, len(keys))
+	for index, model := range keys {
+		part := fmt.Sprintf("%s × %d", model, counts[model])
+		candidate := "(" + strings.Join(append(append([]string(nil), parts...), part), " · ") + ")"
+		if lipgloss.Width(candidate) > homeAsyncModelStatsMaxWidth {
+			remaining := len(keys) - index
+			if len(parts) > 0 {
+				parts = append(parts, fmt.Sprintf("+%d", remaining))
+			}
+			break
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(parts, " · ") + ")"
+}
+
+func safeHomeAsyncModelName(raw string) string {
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw)
+	clean = strings.TrimSpace(clean)
+	runes := []rune(clean)
+	if len(runes) > homeAsyncModelNameMaxRunes {
+		clean = string(runes[:homeAsyncModelNameMaxRunes-1]) + "…"
+	}
+	return clean
 }
 
 // appendAsyncDaemonsHint right-aligns a "/daemons for details" affordance
