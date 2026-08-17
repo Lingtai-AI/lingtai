@@ -163,6 +163,200 @@ func TestLoadDaemonSummariesDefersHeavyDetailReads(t *testing.T) {
 	}
 }
 
+func TestDaemonSummaryDirLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "unset", want: defaultDaemonSummaryDirs},
+		{name: "trimmed valid", value: " 42 ", want: 42},
+		{name: "zero falls back", value: "0", want: defaultDaemonSummaryDirs},
+		{name: "negative falls back", value: "-1", want: defaultDaemonSummaryDirs},
+		{name: "invalid falls back", value: "not-a-number", want: defaultDaemonSummaryDirs},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(daemonHistoryLimitEnv, tt.value)
+			if got := daemonSummaryDirLimit(); got != tt.want {
+				t.Fatalf("daemonSummaryDirLimit() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadDaemonSummariesHonorsConfiguredLimit(t *testing.T) {
+	agentDir := t.TempDir()
+	daemonsDir := filepath.Join(agentDir, "daemons")
+	base := time.Date(2026, time.June, 9, 1, 2, 3, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("em-configured-%d", i)
+		dir := filepath.Join(daemonsDir, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(fmt.Sprintf(`{"task":%q,"state":"done"}`, name)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		modified := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(dir, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(daemonHistoryLimitEnv, "2")
+	items, err := loadDaemonSummaries(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(items), 2; got != want {
+		t.Fatalf("configured summary count = %d, want %d", got, want)
+	}
+	if got, want := filepath.Base(items[0].Dir), "em-configured-2"; got != want {
+		t.Fatalf("newest configured item = %q, want %q", got, want)
+	}
+	if got, want := filepath.Base(items[1].Dir), "em-configured-1"; got != want {
+		t.Fatalf("second configured item = %q, want %q", got, want)
+	}
+}
+
+func TestLoadDaemonSummariesBoundsNewestDirectoriesBeforeParsing(t *testing.T) {
+	agentDir := t.TempDir()
+	daemonsDir := filepath.Join(agentDir, "daemons")
+	base := time.Date(2026, time.June, 9, 1, 2, 3, 0, time.UTC)
+
+	writeRun := func(name, body string, modified time.Time) string {
+		t.Helper()
+		dir := filepath.Join(daemonsDir, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	// More than the window's worth of valid records establishes both the bound
+	// and staggered newest-first order. The two extra newest records share an
+	// mtime, so their directory names must break the tie deterministically.
+	validRunCount := defaultDaemonSummaryDirs + 1
+	for i := 0; i < validRunCount; i++ {
+		name := fmt.Sprintf("em-valid-%04d", i)
+		writeRun(name, fmt.Sprintf(`{"task":%q,"state":"done","backend":"lingtai"}`, name), base.Add(time.Duration(i)*time.Second))
+	}
+	tieTime := base.Add(time.Duration(validRunCount+1) * time.Second)
+	writeRun("em-tie-a", `{"task":"tie a","state":"done","backend":"lingtai"}`, tieTime)
+	tieZDir := writeRun("em-tie-z", `{"task":"tie z","state":"done","backend":"lingtai"}`, tieTime)
+	if err := os.WriteFile(filepath.Join(tieZDir, "result.txt"), []byte("selected detail"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(tieZDir, tieTime, tieTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// This old malformed file must never enter the selected directory window,
+	// proving it is excluded before loadDaemonSummaries starts parsing records.
+	oldMalformed := "em-old-malformed"
+	writeRun(oldMalformed, `{`, base.Add(-time.Second))
+
+	entries, err := os.ReadDir(daemonsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := newestDaemonRunDirs(daemonsDir, entries)
+	if len(runs) != defaultDaemonSummaryDirs {
+		t.Fatalf("selected directory window = %d, want %d", len(runs), defaultDaemonSummaryDirs)
+	}
+	for _, run := range runs {
+		if run.name == oldMalformed {
+			t.Fatalf("old malformed record entered pre-parse window: %q", run.dir)
+		}
+	}
+	if got, want := runs[0].name, "em-tie-z"; got != want {
+		t.Fatalf("first equal-mtime run = %q, want %q", got, want)
+	}
+	if got, want := runs[1].name, "em-tie-a"; got != want {
+		t.Fatalf("second equal-mtime run = %q, want %q", got, want)
+	}
+	for i, run := range runs[2:] {
+		want := fmt.Sprintf("em-valid-%04d", validRunCount-1-i)
+		if run.name != want {
+			t.Fatalf("run[%d] = %q, want newest-first %q", i+2, run.name, want)
+		}
+	}
+
+	items, err := loadDaemonSummaries(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != defaultDaemonSummaryDirs {
+		t.Fatalf("loaded summaries = %d, want %d", len(items), defaultDaemonSummaryDirs)
+	}
+	for i, item := range items {
+		if got, want := item.Dir, runs[i].dir; got != want {
+			t.Fatalf("summary[%d] = %q, want selected directory %q", i, got, want)
+		}
+		if item.DetailLoaded || item.Result != "" || len(item.Events) != 0 || len(item.Chats) != 0 {
+			t.Fatalf("summary[%d] read detail eagerly: %#v", i, item)
+		}
+	}
+
+	selected := loadDaemonDetail(items[0])
+	if !selected.DetailLoaded || selected.Result != "selected detail" {
+		t.Fatalf("selected detail did not remain lazy/loadable: %#v", selected)
+	}
+	if items[1].DetailLoaded {
+		t.Fatalf("unselected summary detail loaded eagerly: %#v", items[1])
+	}
+}
+
+func TestLoadDaemonSummariesDoesNotBackfillAfterInvalidSelectedRecords(t *testing.T) {
+	agentDir := t.TempDir()
+	daemonsDir := filepath.Join(agentDir, "daemons")
+	base := time.Date(2026, time.June, 9, 1, 2, 3, 0, time.UTC)
+
+	writeDir := func(name, body string, modified time.Time) {
+		t.Helper()
+		dir := filepath.Join(daemonsDir, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chtimes(dir, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 0; i < defaultDaemonSummaryDirs-2; i++ {
+		name := fmt.Sprintf("em-selected-%04d", i)
+		writeDir(name, fmt.Sprintf(`{"task":%q,"state":"done"}`, name), base.Add(time.Duration(i)*time.Second))
+	}
+	writeDir("em-selected-malformed", `{`, base.Add(time.Duration(defaultDaemonSummaryDirs)*time.Second))
+	writeDir("em-selected-missing", "", base.Add(time.Duration(defaultDaemonSummaryDirs-1)*time.Second))
+	writeDir("em-older-fallback-a", `{"task":"older fallback a","state":"done"}`, base.Add(-time.Second))
+	writeDir("em-older-fallback-b", `{"task":"older fallback b","state":"done"}`, base.Add(-2*time.Second))
+
+	items, err := loadDaemonSummaries(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(items), defaultDaemonSummaryDirs-2; got != want {
+		t.Fatalf("summaries after invalid selected records = %d, want %d without backfill", got, want)
+	}
+	for _, item := range items {
+		if strings.Contains(filepath.Base(item.Dir), "older-fallback") {
+			t.Fatalf("older record backfilled after selected parse failure: %q", item.Dir)
+		}
+	}
+}
+
 func TestDaemonsSelectionLoadsDetailLazily(t *testing.T) {
 	agentDir := t.TempDir()
 	mk := func(name, task string) {
