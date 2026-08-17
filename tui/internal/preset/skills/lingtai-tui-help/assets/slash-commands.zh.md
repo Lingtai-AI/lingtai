@@ -188,9 +188,11 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 **用法：** `/taskcard`
 
 显示当前智能体的声明式 Task Card——即其工作目录下的 `taskcard/taskcard.md`——前提是
-`taskcard/status` 精确读作 `active`。这与 Telegram 投射到常驻卡片上的是同一份
-agent-local 产物；TUI 只是把它显示出来，是某一时刻的快照，渲染在 markdown 查看器中。
-重新执行 `/taskcard` 即可刷新。若没有活跃的卡片，会显示一条简短的状态提示。
+`taskcard/status` 精确读作 `active`。其正文仍是此刻 markdown 视图的主体。构建视图时，
+TUI 还可能从新近的 daemon card 只读附加模型注记：仅 `backend` 精确为 `lingtai` 的记录
+参与；一个记录显示原始模型名，多个记录显示稳定排序的 `model × count` 统计。此操作不改写
+Task Card 文件、不纳入历史或其他 backend 的模型；Telegram 的自动 Task Card/进度投影是另一
+个 reader。重新执行 `/taskcard` 即可刷新；若没有活跃卡片，会显示简短状态提示。
 
 ### `/presets` — 打开预设库
 **用法：** `/presets`

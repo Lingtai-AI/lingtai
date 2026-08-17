@@ -143,6 +143,47 @@ func TestCountDaemons(t *testing.T) {
 	}
 }
 
+func TestRecentLingtaiDaemonModelsUsesHomeWindowAndExactBackend(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "fresh-running", map[string]interface{}{
+		"state": "running", "backend": "lingtai", "model": " raw-model ",
+	})
+	writeDaemonState(t, agentDir, "fresh-terminal", map[string]interface{}{
+		"state": "done", "backend": "lingtai", "model": "glm-5.2",
+	})
+	writeDaemonState(t, agentDir, "other-backend", map[string]interface{}{
+		"state": "done", "backend": "claude-p", "model": "must-not-leak",
+	})
+	writeDaemonState(t, agentDir, "wrong-backend-case", map[string]interface{}{
+		"state": "done", "backend": "Lingtai", "model": "must-not-leak",
+	})
+	writeDaemonState(t, agentDir, "no-model", map[string]interface{}{
+		"state": "done", "backend": "lingtai",
+	})
+	writeDaemonState(t, agentDir, "stale-terminal", map[string]interface{}{
+		"state": "done", "backend": "lingtai", "model": "stale-model",
+	})
+	staleDir := filepath.Join(agentDir, "daemons", "stale-terminal")
+	staleAt := time.Now().Add(-daemonListWindow - time.Second)
+	if err := os.Chtimes(staleDir, staleAt, staleAt); err != nil {
+		t.Fatal(err)
+	}
+
+	got := RecentLingtaiDaemonModels(agentDir)
+	want := map[string]int{" raw-model ": 1, "glm-5.2": 1}
+	if len(got) != 2 {
+		t.Fatalf("RecentLingtaiDaemonModels() = %#v, want exactly %#v", got, want)
+	}
+	for _, model := range got {
+		want[model]--
+	}
+	for model, remaining := range want {
+		if remaining != 0 {
+			t.Fatalf("RecentLingtaiDaemonModels() = %#v, want exactly %#v (model %q remaining %d)", got, want, model, remaining)
+		}
+	}
+}
+
 func TestComputeNetworkActivity_AllIdle(t *testing.T) {
 	base := t.TempDir()
 	writeActivityAgent(t, base, "alice", "IDLE", true)
@@ -558,9 +599,9 @@ func TestLastApiCallAtPrefersLastApiCallOverProgress(t *testing.T) {
 	now := time.Now()
 	writeStatus(t, agentDir, map[string]interface{}{
 		"runtime": map[string]interface{}{
-			"state":             "ACTIVE",
-			"last_progress_at":  now.Add(-2 * time.Second).Unix(),
-			"last_api_call_at":  now.Add(-10 * time.Second).Unix(),
+			"state":               "ACTIVE",
+			"last_progress_at":    now.Add(-2 * time.Second).Unix(),
+			"last_api_call_at":    now.Add(-10 * time.Second).Unix(),
 			"no_progress_seconds": "",
 		},
 	}, time.Now())
@@ -584,8 +625,8 @@ func TestLastApiCallAtFallsBackToProgressWhenApiCallAbsent(t *testing.T) {
 	now := time.Now()
 	writeStatus(t, agentDir, map[string]interface{}{
 		"runtime": map[string]interface{}{
-			"state":             "ACTIVE",
-			"last_progress_at":  now.Add(-4 * time.Second).Unix(),
+			"state":               "ACTIVE",
+			"last_progress_at":    now.Add(-4 * time.Second).Unix(),
 			"no_progress_seconds": "",
 		},
 	}, time.Now())
@@ -606,8 +647,8 @@ func TestLastApiCallAtNoneWhenNotActive(t *testing.T) {
 	now := time.Now()
 	writeStatus(t, agentDir, map[string]interface{}{
 		"runtime": map[string]interface{}{
-			"state":             "IDLE",
-			"last_api_call_at":  now.Add(-10 * time.Second).Unix(),
+			"state":               "IDLE",
+			"last_api_call_at":    now.Add(-10 * time.Second).Unix(),
 			"no_progress_seconds": "",
 		},
 	}, time.Now())
@@ -616,7 +657,6 @@ func TestLastApiCallAtNoneWhenNotActive(t *testing.T) {
 		t.Fatalf("LastApiCallAt for non-active = %v ok=%v, want zero+false", got, ok)
 	}
 }
-
 
 func writeStatus(t *testing.T, agentDir string, status map[string]interface{}, mtime time.Time) {
 	t.Helper()

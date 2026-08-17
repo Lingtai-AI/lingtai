@@ -41,6 +41,19 @@ func TestGatherHomeTelemetryUsesOneStatusSnapshotForEconomyAndContext(t *testing
 	}
 }
 
+func TestGatherHomeTelemetryReadsActiveConfiguredPairFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	init := `{"manifest":{"llm":{"provider":"zhipu","model":"glm-5.2"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "init.json"), []byte(init), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := (MailModel{orchestrator: dir}).gatherHomeTelemetry()
+	if got.provider != "zhipu" || got.model != "glm-5.2" {
+		t.Fatalf("configured pair = %q/%q, want zhipu/glm-5.2", got.provider, got.model)
+	}
+}
+
 func TestGatherHomeTelemetryDoesNotUseSQLiteOrLedgerFallback(t *testing.T) {
 	dir := t.TempDir()
 	logsDir := filepath.Join(dir, "logs")

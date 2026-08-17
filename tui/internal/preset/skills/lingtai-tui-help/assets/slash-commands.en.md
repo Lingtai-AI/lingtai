@@ -220,10 +220,14 @@ Shows the focused agent's latest agent-visible notification blocks reconstructed
 **Usage:** `/taskcard`
 
 Shows the current agent's declarative Task Card — `taskcard/taskcard.md` under
-its working directory — when `taskcard/status` reads exactly `active`. This is
-the same agent-local artifact Telegram projects onto its resident card; the TUI
-only displays it, point-in-time, in the markdown viewer. Re-run `/taskcard` to
-refresh. When no active card is available, it shows a short status message
+its working directory — when `taskcard/status` reads exactly `active`. The body
+remains the primary point-in-time markdown content. At view construction only,
+the TUI may append a read-only daemon-model annotation from fresh daemon cards
+whose backend is exactly `lingtai`: one eligible run names its raw model, while
+several show deterministic `model × count` statistics. This does not edit the
+Task Card artifacts or include historical/other-backend models; Telegram's
+automatic Task Card/progress projection is a separate reader. Re-run `/taskcard`
+to refresh. When no active card is available, it shows a short status message
 instead.
 
 ### `/presets` — open the preset library

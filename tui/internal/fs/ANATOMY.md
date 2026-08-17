@@ -101,6 +101,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | **daemon_ledger.go** | | |
 | `DaemonLedgerSummary(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:70` | single traversal returning both provider/backend totals (`map[string]TokenTotals`) and most-recent tagged per-call rows (`[]DaemonLedgerEntry`); one daemon.json read per run (typed `daemonCard` includes `backend` plus `cli_tokens`/`tokens` sub-structs), valid ledger rows retain backend in memory, CLI/legacy snapshots remain totals-only and use `daemonFallbackProvider` attribution |
 | `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:165` | convenience wrapper — returns only the recent-rows half of `DaemonLedgerSummary` |
+| `RecentLingtaiDaemonModels(agentDir)` | `tui/internal/fs/daemon_ledger.go:243` | scans only daemon cards in the existing fresh daemon-list window; returns raw nonblank models only for exact `backend: "lingtai"`, for the point-in-time `/taskcard` annotation rather than ledger/preset derivation |
 | `daemonFallbackProvider` | `tui/internal/fs/daemon_ledger.go:207` | derives a provider/backend label for runs with no per-call ledger: preset_provider → non-lingtai backend → model derivation → raw backend/model → "daemon" |
 | `DeriveLedgerProvider` | `tui/internal/fs/agent.go:1064` | maps endpoint host / model prefix → canonical provider name |
 | **heartbeat.go** | | |

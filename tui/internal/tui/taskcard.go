@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // readTaskCardBody reads the current agent's declarative Task Card — the
@@ -48,8 +50,9 @@ func readTaskCardBody(agentDir string) (body, status string, ok bool) {
 
 // taskCardEntries builds the /taskcard markdown-viewer content: the card body
 // verbatim when active and non-blank, otherwise one small localized fallback
-// message. This is the entire view — no renderer, no polling, no second
-// state store.
+// message. An active card may receive one point-in-time display-only daemon-model
+// annotation from the existing fresh daemon window; this never changes the card
+// files or starts polling.
 func taskCardEntries(agentDir string) []MarkdownEntry {
 	title := i18n.T("taskcard.title")
 	body, status, ok := readTaskCardBody(agentDir)
@@ -59,8 +62,40 @@ func taskCardEntries(agentDir string) []MarkdownEntry {
 			reason = i18n.T("taskcard.inactive")
 		}
 		body = fmt.Sprintf("# %s\n\n%s", title, reason)
+	} else if models := taskCardDaemonModelSummary(agentDir); models != "" {
+		body += "\n\n" + models
 	}
 	return []MarkdownEntry{{Label: title, Group: title, Content: body}}
+}
+
+// taskCardDaemonModelSummary returns a compact task-card annotation for current
+// backend="lingtai" daemon runs. RecentLingtaiDaemonModels already applies the
+// same 10-minute active/recent-terminal window as the Telegram-aligned home row.
+// A single eligible run shows its raw daemon.json model; several runs aggregate
+// deterministically as model × count without deriving a model for other backends.
+func taskCardDaemonModelSummary(agentDir string) string {
+	models := fs.RecentLingtaiDaemonModels(agentDir)
+	if len(models) == 0 {
+		return ""
+	}
+	if len(models) == 1 {
+		return i18n.T("taskcard.daemon_model") + ": " + models[0]
+	}
+
+	counts := make(map[string]int, len(models))
+	for _, model := range models {
+		counts[model]++
+	}
+	keys := make([]string, 0, len(counts))
+	for model := range counts {
+		keys = append(keys, model)
+	}
+	sort.Strings(keys)
+	stats := make([]string, 0, len(keys))
+	for _, model := range keys {
+		stats = append(stats, fmt.Sprintf("%s × %d", model, counts[model]))
+	}
+	return i18n.T("taskcard.daemon_models") + ": " + strings.Join(stats, " · ")
 }
 
 // TaskCardModel is the /taskcard view: a thin MarkdownViewerModel wrapper

@@ -3,11 +3,13 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-// The home telemetry row condenses the CURRENT SESSION's token economy
-// (api · tok · cache · tok/api) plus the live context pressure gauge into one
-// muted line: "api 42  tok 181.6k  cache 88%  tok/api 4.3k  ctx 146.0k/200.0k ▓▓▓░░ 73%". It
+// The home telemetry row condenses the active configured provider/model plus
+// CURRENT SESSION token economy (api · tok · cache) and the live context gauge
+// into one muted line: "llm zhipu/glm-5.2  api 42  tok 181.6k  cache 88%  ctx 146.0k/200.0k ▓▓▓░░ 73%". It
 // is scalar-only (never the _meta block hidden by PR #440), scoped to the
 // current molt session (never the global lifetime total), and hides gracefully
 // when no data is available.
@@ -38,7 +40,7 @@ func TestFormatHomeTelemetry(t *testing.T) {
 			// api count, humanized token total, cache-miss in parens right after
 			// tok (181,585 input - 180,224 cached = 1,361 → 1.4k), cache rate,
 			// tok/api, then the ctx scope label, used/limit, bar, and percentage.
-			want: []string{"api", "42", "tok", "181.6k", "(miss", "1.4k)", "cache", "%", "tok/api", "ctx", "146.0k/200.0k", "▓", "░", "73%"},
+			want: []string{"api", "42", "tok", "181.6k", "(miss", "1.4k)", "cache", "%", "ctx", "146.0k/200.0k", "▓", "░", "73%"},
 		},
 		{
 			name: "cache miss placed immediately after tok, before cache rate",
@@ -84,7 +86,7 @@ func TestFormatHomeTelemetry(t *testing.T) {
 			width: 120,
 			want:  []string{"tok", "5.0k"},
 			// no api count, no per-call average, no context segment, no bar
-			notWant: []string{"api", "tok/api", "ctx", "▓"},
+			notWant: []string{"api", "ctx", "▓"},
 		},
 		{
 			name: "context only — no session ledger yet",
@@ -140,6 +142,40 @@ func TestFormatHomeTelemetry(t *testing.T) {
 				t.Errorf("telemetry %q: (miss …) must appear before the cache rate, got miss@%d cache@%d", got, mi, ci)
 			}
 		})
+	}
+}
+
+func TestFormatHomeTelemetryShowsOnlyCompleteConfiguredModelPair(t *testing.T) {
+	label := i18n.T("mail.telemetry_model")
+	full := formatHomeTelemetry(homeTelemetry{
+		provider: "zhipu", model: "glm-5.2", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1,
+	}, 120)
+	if !strings.Contains(full, label+" zhipu/glm-5.2") {
+		t.Fatalf("complete configured pair missing from Home telemetry: %q", full)
+	}
+	if strings.Contains(full, i18n.T("mail.telemetry_tok_per_api")) {
+		t.Fatalf("Home telemetry retained moved average tokens/call: %q", full)
+	}
+
+	for _, tel := range []homeTelemetry{
+		{provider: "zhipu", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1},
+		{model: "glm-5.2", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1},
+	} {
+		if got := formatHomeTelemetry(tel, 120); strings.Contains(got, label) {
+			t.Fatalf("incomplete configured pair must be omitted, got %q", got)
+		}
+	}
+}
+
+func TestFormatHomeTelemetryShowsCompleteConfiguredPairWithoutCounters(t *testing.T) {
+	label := i18n.T("mail.telemetry_model")
+	got := formatHomeTelemetry(homeTelemetry{
+		provider:     "zhipu",
+		model:        "glm-5.2",
+		contextUsage: -1,
+	}, 120)
+	if !strings.Contains(got, label+" zhipu/glm-5.2") {
+		t.Fatalf("configuration-only Home telemetry = %q, want complete configured pair", got)
 	}
 }
 
