@@ -4259,7 +4259,20 @@ func (m FirstRunModel) presetAuthState() preset.AuthState {
 
 func (m FirstRunModel) presetCredentialState(p preset.Preset) (preset.CredentialFamily, bool) {
 	rr := preset.ResolvePresetWithAuth(p, m.existingKeys, m.presetAuthState())
-	return rr.Family, rr.ManifestValid && rr.HasKey
+	authValid := rr.HasKey
+	// A brand-new draft keeps its OAuth bundle in memory until explicit
+	// Create. The unbound legacy Codex preset is exactly the preset whose
+	// finalizer writes that bundle to codex-auth.json, so allow its picker
+	// gate to consume the draft bundle without restoring an eager global write.
+	// Explicit (including whitespace-only) codex_auth_path bindings stay
+	// fail-closed and must have their own on-disk credential.
+	if rr.ManifestValid && !authValid &&
+		rr.Family == preset.CredentialFamilyCodexSingle &&
+		m.draftMode && m.draft != nil && !m.draft.DraftCodexTokens.Empty() &&
+		rr.CodexAuthRef == "" {
+		authValid = true
+	}
+	return rr.Family, rr.ManifestValid && authValid
 }
 
 func (m FirstRunModel) presetCredentialHintKey(family preset.CredentialFamily) string {

@@ -830,6 +830,61 @@ func TestDraftFirstRun_CodexOAuthDeleteRestoresPreExistingAuth(t *testing.T) {
 	}
 }
 
+// TestDraftFirstRun_CodexOAuthUnlocksUnboundCodexPreset proves the actual
+// first-time draft path stays reachable without restoring an eager write: a
+// completed in-memory OAuth bundle must let the user open, save, and carry an
+// unbound legacy Codex preset into Review, where explicit Create will persist
+// the same bundle. Explicit/bound Codex refs remain covered by the resolver's
+// normal fail-closed path.
+func TestDraftFirstRun_CodexOAuthUnlocksUnboundCodexPreset(t *testing.T) {
+	m, home, _ := buildDraftModel(t)
+	m.step = stepPickPreset
+	p := preset.Preset{
+		Name:        "draft-codex",
+		Description: preset.PresetDescription{Summary: "draft Codex preset"},
+		Source:      preset.SourceTemplate,
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{"provider": "codex", "model": "gpt-5.6-sol"},
+		},
+	}
+	m.presets = []preset.Preset{p}
+	m.cursor = 0
+	before := dirSnapshot(t, home)
+
+	m, _ = m.Update(CodexOAuthDoneMsg{
+		Tokens: &CodexTokens{AccessToken: "session-access", RefreshToken: "session-refresh", Email: "fresh@example.com"},
+	})
+	if m.draft == nil || m.draft.DraftCodexTokens.Empty() {
+		t.Fatal("expected first-time draft OAuth bundle to remain in memory")
+	}
+	if _, err := os.Stat(legacyCodexAuthPath(m.globalDir)); !os.IsNotExist(err) {
+		t.Fatalf("first-time draft OAuth must not eagerly persist codex auth: %v", err)
+	}
+
+	// Drive the same Enter handler a user uses on the Codex preset row. Before
+	// the fix, its disk-only gate stayed at stepPickPreset with a login hint.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.step != stepEditPreset {
+		t.Fatalf("fresh draft Codex OAuth did not open the unbound preset editor: step=%v message=%q", m.step, m.message)
+	}
+	if m.message != "" {
+		t.Fatalf("fresh draft Codex OAuth unexpectedly left picker warning %q", m.message)
+	}
+
+	// Save through the host's actual editor-completion message, then resolve
+	// the saved draft preset into Review. This proves the repaired route reaches
+	// the explicit-Create handoff without any pre-confirmation filesystem write.
+	m, _ = m.Update(PresetEditorCommitMsg{Preset: p})
+	if m.draft == nil || m.draft.DraftPreset == nil || m.draft.DraftPreset.Name != p.Name {
+		t.Fatalf("draft editor save did not capture Codex preset: %+v", m.draft)
+	}
+	m, _ = m.enterReviewStep("")
+	if m.step != stepReview || m.draft.DraftPreset == nil || m.draft.DraftPreset.Name != p.Name {
+		t.Fatalf("saved first-time Codex preset did not reach Review: step=%v draft=%+v", m.step, m.draft)
+	}
+	assertSnapshotsEqual(t, "first-time draft Codex preset flow", before, dirSnapshot(t, home))
+}
+
 // TestDraftFirstRun_CodexOAuthThenCancelDoesNotPersist proves a completed
 // Codex OAuth in a pre-confirmation Create draft is memory-only. The real
 // OAuth completion and Esc cancellation paths must leave both the project root
