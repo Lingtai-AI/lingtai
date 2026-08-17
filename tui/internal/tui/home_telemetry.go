@@ -17,15 +17,15 @@ import (
 // the bottom path/shortcut status bar. It condenses the CURRENT SESSION's token
 // economy and the live context-window pressure into one high-density line:
 //
-//	Session:  api 42  tok 181.6k (miss 1.4k)  cache 88%  tok/api 4.3k    ctx 186.5k/250.0k ▓▓▓▓░░ 73%
+//	Session:  llm zhipu/glm-5.2  api 42  tok 181.6k (miss 1.4k)  cache 88%    ctx 186.5k/250.0k ▓▓▓▓░░ 73%
 //
 // All numbers are scoped to the current molt session (since the latest
 // psyche_molt), NOT the whole-ledger lifetime total and NOT a single round:
+//   - llm:     active configured provider/model, when both manifest fields exist
 //   - api:     LLM API calls this session
 //   - tok:     total session tokens (input + output + thinking)
 //   - (miss):  cache-miss tokens (input not served from cache), glued to tok
 //   - cache:   cache-hit rate (cached / input)
-//   - tok/api: average tokens per API call
 // and, separately, the live context-window pressure with the gauge Jason liked:
 //   - ctx used/limit ▓▓░░ N%: tokens in use over the model's limit,
 //     the gauge, then the fill percentage on the right of the bar.
@@ -48,6 +48,8 @@ import (
 // homeTelemetry holds the already-resolved scalars for the home row. Keeping the
 // data plain (no rendering) makes formatHomeTelemetry trivially testable.
 type homeTelemetry struct {
+	provider      string  // active configured provider from the resolved manifest
+	model         string  // active configured model from the resolved manifest
 	apiCalls      int64   // current-session LLM API calls; 0 = none/unknown
 	sessionTokens int64   // current-session tokens (input+output+thinking); 0 = unknown
 	cached        int64   // current-session cached input tokens
@@ -178,10 +180,14 @@ func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 			t.contextUsed = int64(ctx.TotalTokens)
 		}
 
-		// Context-only fallback for agents with no usable live status window.
-		// Economy intentionally has no ledger/history fallback.
-		if t.contextLimit == 0 {
-			if manifest, err := fs.ReadInitManifest(m.orchestrator); err == nil {
+		// The resolved manifest is the active configuration source. Keep the
+		// provider/model pair only when both raw fields are present, so Home
+		// never fabricates a partial configured identity. It also supplies the
+		// existing context-only fallback when live status has no window.
+		if manifest, err := fs.ReadInitManifest(m.orchestrator); err == nil {
+			t.provider, _ = manifest["provider"].(string)
+			t.model, _ = manifest["model"].(string)
+			if t.contextLimit == 0 {
 				t.contextLimit = manifestContextLimit(manifest)
 			}
 		}
@@ -238,7 +244,7 @@ func manifestContextLimit(manifest map[string]interface{}) int64 {
 // hasData reports whether any fragment is renderable. With nothing to show the
 // caller omits the whole row.
 func (t homeTelemetry) hasData() bool {
-	return t.apiCalls > 0 || t.sessionTokens > 0 || t.contextUsage >= 0
+	return t.apiCalls > 0 || t.sessionTokens > 0 || t.contextUsage >= 0 || (t.provider != "" && t.model != "")
 }
 
 // hasHomeTelemetry reports whether View() will render the additive telemetry row.
@@ -284,8 +290,13 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 
 	var segs []string
 
-	// Current-session token economy: api · tok · cache · tok/api. Each fragment
-	// is dropped when its source is unknown so a missing piece never shows a 0.
+	// Active configured LLM and current-session token economy. The manifest
+	// identity is omitted as a pair when either field is absent; every token
+	// fragment is likewise dropped when its source is unknown so Home never shows
+	// a fabricated zero.
+	if t.provider != "" && t.model != "" {
+		segs = append(segs, i18n.T("mail.telemetry_model")+" "+t.provider+"/"+t.model)
+	}
 	if t.apiCalls > 0 {
 		segs = append(segs, fmt.Sprintf("%s %d", i18n.T("mail.telemetry_api"), t.apiCalls))
 	}
@@ -304,9 +315,6 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 	}
 	if t.inputTokens > 0 {
 		segs = append(segs, i18n.T("mail.telemetry_cache")+" "+formatCacheRate(t.cached, t.inputTokens))
-	}
-	if t.apiCalls > 0 && t.sessionTokens > 0 {
-		segs = append(segs, i18n.T("mail.telemetry_tok_per_api")+" "+humanizeTokenCount(avgPerCall(t.sessionTokens, t.apiCalls)))
 	}
 
 	// ctx  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure

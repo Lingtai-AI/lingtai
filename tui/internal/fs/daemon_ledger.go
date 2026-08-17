@@ -240,6 +240,41 @@ func DaemonRecentLedgerSummary(agentDir string) TokenTotals {
 	return totals
 }
 
+// RecentLingtaiDaemonModels returns the raw daemon.json model strings for
+// backend="lingtai" runs in the same fresh daemonListWindow as CountDaemons and
+// the Telegram-aligned home async row. It deliberately reads only daemon cards:
+// historical run directories are skipped before opening their files, non-lingtai
+// backends are excluded, and no model is derived from presets or token ledgers.
+func RecentLingtaiDaemonModels(agentDir string) []string {
+	daemonDir := filepath.Join(agentDir, "daemons")
+	entries, err := os.ReadDir(daemonDir)
+	if err != nil {
+		return nil
+	}
+
+	now := time.Now()
+	var models []string
+	for _, entry := range entries {
+		var cardPath string
+		if entry.IsDir() {
+			cardPath = filepath.Join(daemonDir, entry.Name(), "daemon.json")
+		} else if entry.Name() == "daemon.json" {
+			cardPath = filepath.Join(daemonDir, entry.Name())
+		} else {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !withinDaemonListWindow(info.ModTime(), now) {
+			continue
+		}
+		card := readDaemonCard(cardPath)
+		if card.Backend == "lingtai" && card.Model != "" {
+			models = append(models, card.Model)
+		}
+	}
+	return models
+}
+
 // readDaemonCard reads daemon.json; missing or malformed files yield a zero card.
 func readDaemonCard(path string) daemonCard {
 	var card daemonCard

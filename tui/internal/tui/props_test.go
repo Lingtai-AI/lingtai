@@ -91,6 +91,45 @@ func TestPropsRenderLeftShowsStartedAtLocalOffset(t *testing.T) {
 	}
 }
 
+func TestPropsRenderLeftShowsCurrentSessionTokensPerAPICallSeparately(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".agent.json"), []byte(`{"agent_name":"mimo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status := fs.AgentStatus{}
+	status.Tokens.InputTokens = 100
+	status.Tokens.OutputTokens = 20
+	status.Tokens.ThinkingTokens = 10
+	status.Tokens.APICalls = 2
+	m := PropsModel{
+		selectedDir: dir,
+		globalDir:   t.TempDir(),
+		selectedTokens: fs.TokenTotals{
+			Input: 1_000, Output: 200, Thinking: 100, APICalls: 20,
+		},
+		selectedStatus: status,
+	}
+
+	out := ansi.Strip(m.renderLeft(80))
+	lifetime := "input: 1,000"
+	sessionTitle := i18n.T("props.section_current_session")
+	sessionAverage := i18n.T("props.session_tokens_per_api_call") + ": 65"
+	for _, want := range []string{lifetime, sessionTitle, sessionAverage} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("normal kanban missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, lifetime) >= strings.Index(out, sessionTitle) {
+		t.Fatalf("current-session average must stay visually distinct after lifetime totals:\n%s", out)
+	}
+
+	m.selectedStatus.Tokens.APICalls = 0
+	out = ansi.Strip(m.renderLeft(80))
+	if strings.Contains(out, sessionTitle) || strings.Contains(out, i18n.T("props.session_tokens_per_api_call")) {
+		t.Fatalf("zero-call current session must not render an average:\n%s", out)
+	}
+}
+
 func TestPropsRenderRightShowsNetworkCreatedLocalOffset(t *testing.T) {
 	origLocal := time.Local
 	t.Cleanup(func() { time.Local = origLocal })

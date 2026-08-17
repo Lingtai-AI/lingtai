@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 )
@@ -29,6 +30,18 @@ func writeTaskCardBody(t *testing.T, agentDir, raw string) {
 	if err := os.WriteFile(filepath.Join(dir, "taskcard.md"), []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeTaskCardDaemon(t *testing.T, agentDir, runID, raw string) string {
+	t.Helper()
+	dir := filepath.Join(agentDir, "daemons", runID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // /taskcard must be registered like every other command, and both view
@@ -85,6 +98,51 @@ func TestReadTaskCardBodyActiveFidelity(t *testing.T) {
 	entries := taskCardEntries(agentDir)
 	if len(entries) != 1 || entries[0].Content != body {
 		t.Fatalf("taskCardEntries() content = %q, want unchanged %q", entries[0].Content, body)
+	}
+}
+
+func TestTaskCardDaemonModelSummarySingleUsesRawLingtaiModel(t *testing.T) {
+	agentDir := t.TempDir()
+	writeTaskCardDaemon(t, agentDir, "em-1", `{"backend":"lingtai","model":" raw-model "}`)
+	writeTaskCardDaemon(t, agentDir, "em-2", `{"backend":"claude-p","model":"must-not-leak"}`)
+
+	want := i18n.T("taskcard.daemon_model") + ":  raw-model "
+	if got := taskCardDaemonModelSummary(agentDir); got != want {
+		t.Fatalf("taskCardDaemonModelSummary() = %q, want raw eligible model %q", got, want)
+	}
+}
+
+func TestTaskCardEntriesAppendDeterministicFreshDaemonModelStats(t *testing.T) {
+	agentDir := t.TempDir()
+	const body = "# Sprint\n\n- [ ] ship it\n"
+	writeTaskCardStatus(t, agentDir, "active")
+	writeTaskCardBody(t, agentDir, body)
+	writeTaskCardDaemon(t, agentDir, "em-b", `{"backend":"lingtai","model":"beta"}`)
+	writeTaskCardDaemon(t, agentDir, "em-a", `{"backend":"lingtai","model":"alpha"}`)
+	writeTaskCardDaemon(t, agentDir, "em-b-2", `{"backend":"lingtai","model":"beta"}`)
+	writeTaskCardDaemon(t, agentDir, "em-other", `{"backend":"codex","model":"must-not-leak"}`)
+	staleDir := writeTaskCardDaemon(t, agentDir, "em-stale", `{"backend":"lingtai","model":"stale-model"}`)
+	staleAt := time.Now().Add(-11 * time.Minute)
+	if err := os.Chtimes(staleDir, staleAt, staleAt); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := taskCardEntries(agentDir)
+	if len(entries) != 1 {
+		t.Fatalf("taskCardEntries() len = %d, want 1", len(entries))
+	}
+	content := entries[0].Content
+	if !strings.HasPrefix(content, body) {
+		t.Fatalf("task-card body prefix = %q, want unchanged body %q", content, body)
+	}
+	want := i18n.T("taskcard.daemon_models") + ": alpha × 1 · beta × 2"
+	if !strings.Contains(content, want) {
+		t.Fatalf("task card missing deterministic model stats %q:\n%s", want, content)
+	}
+	for _, forbidden := range []string{"must-not-leak", "stale-model"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("task card leaked ineligible daemon model %q:\n%s", forbidden, content)
+		}
 	}
 }
 

@@ -703,6 +703,20 @@ func (m PropsModel) renderLeft(maxW int) string {
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", m.selectedTokens.APICalls)))
 	}
 
+	// Current-session average is sourced from the same live .status.json
+	// counters as Home, rather than the lifetime selectedTokens ledger above.
+	// Keep it in its own section so the unit and scope cannot be read as a
+	// lifetime average; older/incomplete snapshots with zero calls omit it.
+	session := m.selectedStatus.Tokens
+	if session.APICalls > 0 {
+		tokens := session.InputTokens + session.OutputTokens + session.ThinkingTokens
+		lines = append(lines, "")
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_current_session")))
+		lines = append(lines, "")
+		lines = append(lines, "    "+labelStyle.Render(i18n.T("props.session_tokens_per_api_call")+": ")+
+			valueStyle.Render(formatComma(avgPerCall(tokens, session.APICalls))))
+	}
+
 	// Admin
 	if admin, ok := raw["admin"]; ok && admin != nil {
 		if adminMap, ok := admin.(map[string]interface{}); ok && len(adminMap) > 0 {

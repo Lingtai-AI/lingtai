@@ -52,6 +52,28 @@ func TestFormatHomeAsyncStats(t *testing.T) {
 		}
 	})
 
+	t.Run("lingtai models render directly or as stable model counts", func(t *testing.T) {
+		single := formatHomeAsyncStats(homeAsyncStats{running: 1, models: []string{"gpt-5.6-terra"}}, 220)
+		if want := "(gpt-5.6-terra)"; !strings.Contains(single, want) {
+			t.Fatalf("single-model row missing %q: %q", want, single)
+		}
+
+		multiple := formatHomeAsyncStats(homeAsyncStats{running: 3, models: []string{"beta", "alpha", "beta"}}, 220)
+		if want := "(alpha × 1 · beta × 2)"; !strings.Contains(multiple, want) {
+			t.Fatalf("multi-model row missing stable counts %q: %q", want, multiple)
+		}
+	})
+
+	t.Run("model tail is bounded and control-free", func(t *testing.T) {
+		got := formatHomeAsyncModelStats([]string{" alpha\n\t", strings.Repeat("b", 200), "\x00ignored"})
+		if strings.ContainsAny(got, "\n\r\t\x00") {
+			t.Fatalf("model tail retained a control character: %q", got)
+		}
+		if len([]rune(got)) > homeAsyncModelStatsMaxWidth+2 {
+			t.Fatalf("model tail exceeded its hard display budget: %q", got)
+		}
+	})
+
 	t.Run("zero count buckets are omitted", func(t *testing.T) {
 		got := formatHomeAsyncStats(homeAsyncStats{running: 1}, 160)
 		if strings.Contains(got, "queued") || strings.Contains(got, "done") || strings.Contains(got, "failed") {
@@ -91,5 +113,22 @@ func TestHomeAsyncStatsRowVisibilityAfterLoad(t *testing.T) {
 	m.applyHomeAsyncStats(homeAsyncStats{}, time.Now())
 	if !m.hasHomeAsyncStats() {
 		t.Fatal("row must stay visible when counts drop back to zero")
+	}
+}
+
+func TestHomeAsyncStatsSchedulingStateTransitions(t *testing.T) {
+	var m MailModel
+	if cmd := m.maybeScheduleHomeAsyncStats(time.Unix(1000, 0)); cmd == nil {
+		t.Fatal("first async schedule must return a fetch command")
+	}
+	if !m.homeAsyncStatsInFlight {
+		t.Fatal("scheduling must mark async fetch in-flight")
+	}
+	if cmd := m.maybeScheduleHomeAsyncStats(time.Unix(1001, 0)); cmd != nil {
+		t.Fatal("in-flight async fetch must suppress overlap")
+	}
+	m.applyHomeAsyncStats(homeAsyncStats{}, time.Unix(1002, 0))
+	if m.homeAsyncStatsInFlight {
+		t.Fatal("accepted async completion must clear in-flight")
 	}
 }

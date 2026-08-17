@@ -181,9 +181,10 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 **用：** `/taskcard`
 
 显当下器灵之 Task Card——即其工作之境下 `taskcard/taskcard.md`——唯 `taskcard/status`
-恰读作 `active` 时乃显。此与 Telegram 所投于常驻卡者，同一 agent-local 之物也；TUI
-唯示之，一时之影，绘于 markdown 阅器中。欲新之，重行 `/taskcard` 即可。若无活卡，
-则示一简状之语。
+恰读作 `active` 时乃显；其正文仍为此刻 markdown 阅器之主体。开视图时，TUI 可从新近
+守护 card 只读附模型注：唯 `backend` 恰为 `lingtai` 者计；一守护则示其原模型，众守护则
+依序示 `model × count` 统计。此不改 Task Card 文件，亦不纳旧录或他 backend 之模型；Telegram
+自动 Task Card/进程投影乃别一 reader。欲新之，重行 `/taskcard` 即可；若无活卡，则示一简状之语。
 
 ### `/presets` — 启预设之库
 **用：** `/presets`
