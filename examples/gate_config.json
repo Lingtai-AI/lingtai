@@ -1,0 +1,8 @@
+{
+  "local_write_roots": ["/path/to/approved-work"],
+  "remote_write_roots": ["/remote/sandbox"],
+  "ssh_hosts": ["cluster"],
+  "trusted_scripts": ["/path/to/approved-work/scripts/backup.py"],
+  "pending_dir": ".security/pending",
+  "ttl_seconds": 86400
+}
