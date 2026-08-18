@@ -1,0 +1,6 @@
+{
+  "local_write_roots": ["/path/to/shared-approved"],
+  "remote_write_roots": [],
+  "ssh_hosts": ["cluster"],
+  "trusted_scripts": ["/path/to/shared/infra/backup.py"]
+}
