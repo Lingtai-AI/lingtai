@@ -49,6 +49,7 @@ type ChatMessage struct {
 	Source      string               // for Type=="aed": subtype ("attempt" | "exhausted" | "timeout")
 	Meta        *fs.NotificationMeta // for Type=="notification": kernel vital signs at injection time (issue #40)
 	ApiCallID   string               // for text_output/tool_call/tool_result: LLM API round-trip grouping id
+	Reasoning   string               // for Type=="tool_call": its own LTP _reasoning, rendered immediately above the call
 	TokenUsage  *fs.TokenUsage       // for Type=="llm_response": per-round token scalars; rendered as a footer at the bottom of the api_call group
 	Summary     *fs.AprioriSummary   // for Type=="apriori_summary" (and tool_result carrying the artifact): the model-visible summary=true result
 }
@@ -889,6 +890,7 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		Source:      e.Source,
 		Meta:        e.Meta,
 		ApiCallID:   e.ApiCallID,
+		Reasoning:   e.Reasoning,
 		TokenUsage:  e.TokenUsage,
 		Summary:     e.Summary,
 	}
@@ -1741,6 +1743,12 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 					}
 				} else {
 					body = truncateToolBody(body, m.toolCallTruncate)
+				}
+			}
+			if msg.Type == "tool_call" && msg.Reasoning != "" {
+				reasoning := lipgloss.NewStyle().Width(wrapWidth).Render("[Reasoning] " + msg.Reasoning)
+				for _, line := range strings.Split(reasoning, "\n") {
+					b.WriteString(thinkingStyle.Render("  "+RuneBullet+" "+line) + "\n")
 				}
 			}
 			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(tsPrefix + "[" + msg.Type + "] " + body)

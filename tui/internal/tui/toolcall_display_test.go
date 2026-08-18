@@ -450,3 +450,49 @@ func TestRenderMessages_ShowsFullToolEntriesAtVerboseExtended(t *testing.T) {
 		t.Fatalf("Ctrl+O level 2 should render full tool_call/tool_result bodies, got %q", out)
 	}
 }
+
+func TestSessionEntryToChatMessageCarriesToolCallReasoning(t *testing.T) {
+	got := sessionEntryToChatMessage(fs.SessionEntry{
+		Type:      "tool_call",
+		Body:      "file.read({})",
+		Reasoning: "inspect the source",
+	}, "human")
+	if got.Reasoning != "inspect the source" {
+		t.Fatalf("Reasoning = %q, want tool call's own reasoning", got.Reasoning)
+	}
+}
+
+func TestRenderMessages_PlacesEachToolCallReasoningImmediatelyBeforeItsOwnCall(t *testing.T) {
+	m := MailModel{width: 100, verbose: verboseThinking}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "tool_call", Body: "file.read({})", Reasoning: "inspect the source", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
+		{Type: "tool_call", Body: "shell.run({})", Reasoning: "run focused tests", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
+	})
+
+	firstReasoning := strings.Index(out, "[Reasoning] inspect the source")
+	firstCall := strings.Index(out, "[tool_call] file.read({})")
+	secondReasoning := strings.Index(out, "[Reasoning] run focused tests")
+	secondCall := strings.Index(out, "[tool_call] shell.run({})")
+	if firstReasoning < 0 || firstCall < 0 || secondReasoning < 0 || secondCall < 0 {
+		t.Fatalf("rendered output missing reasoning/call pair: %q", out)
+	}
+	if !(firstReasoning < firstCall && firstCall < secondReasoning && secondReasoning < secondCall) {
+		t.Fatalf("reasoning must directly precede its own call rather than follow API grouping: %q", out)
+	}
+}
+
+func TestRenderMessages_OmitsMissingToolCallReasoning(t *testing.T) {
+	m := MailModel{width: 100, verbose: verboseThinking}
+	out := m.renderMessages([]ChatMessage{{
+		Type:      "tool_call",
+		Body:      "file.read({})",
+		ApiCallID: "api_one",
+		Timestamp: "2026-06-08T07:08:26Z",
+	}})
+	if strings.Contains(out, "[Reasoning]") {
+		t.Fatalf("tool call with no logged reasoning must not render a synthetic reasoning line: %q", out)
+	}
+	if !strings.Contains(out, "[tool_call] file.read({})") {
+		t.Fatalf("tool call should otherwise render unchanged: %q", out)
+	}
+}
