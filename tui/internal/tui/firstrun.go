@@ -2288,9 +2288,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						MaxAedAttempts:  maxAedAttempts,
 						Karma:           m.karmaIdx == 0,
 						Nirvana:         m.nirvanaIdx == 0,
-						CovenantFile:    m.covenantInput.Value(),
-						SoulFile:        m.soulFlowInput.Value(),
-						CommentFile:     m.commentInput.Value(),
+						CovenantFile:    normalizePromptPathValue(m.covenantInput.Value()),
+						SoulFile:        normalizePromptPathValue(m.soulFlowInput.Value()),
+						CommentFile:     normalizePromptPathValue(m.commentInput.Value()),
 						AllowedPresets:  m.allowedPresetRefs(),
 					}
 					var selectedAddons []string
@@ -2333,9 +2333,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					MaxAedAttempts:  maxAedAttempts,
 					Karma:           m.karmaIdx == 0,
 					Nirvana:         m.nirvanaIdx == 0,
-					CovenantFile:    m.covenantInput.Value(),
-					SoulFile:        m.soulFlowInput.Value(),
-					CommentFile:     m.commentInput.Value(),
+					CovenantFile:    normalizePromptPathValue(m.covenantInput.Value()),
+					SoulFile:        normalizePromptPathValue(m.soulFlowInput.Value()),
+					CommentFile:     normalizePromptPathValue(m.commentInput.Value()),
 					AllowedPresets:  m.allowedPresetRefs(),
 					// CommentFile is resolved from the staged .recipe/ in the finalizer
 				}
@@ -3987,9 +3987,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	// Pre-fill prompt paths based on language — also overridden below in setup mode.
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
-	m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
-	m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
-	m.commentInput.SetValue("")
+	setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
+	setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
+	setPromptPathInputValue(&m.commentInput, "")
 	m.covenantDirty = false
 	m.soulFlowDirty = false
 	m.karmaIdx = 0   // true
@@ -4051,17 +4051,17 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		}
 		// Behavioral-layer paths live at the top level of init.json, not under manifest.
 		if s, ok := m.setupKeepInitJSON["covenant_file"].(string); ok && s != "" {
-			m.covenantInput.SetValue(s)
+			setPromptPathInputValue(&m.covenantInput, s)
 			m.covenantDirty = true
 		}
 		if s, ok := m.setupKeepInitJSON["soul_file"].(string); ok && s != "" {
-			m.soulFlowInput.SetValue(s)
+			setPromptPathInputValue(&m.soulFlowInput, s)
 			m.soulFlowDirty = true
 		}
 		if s, ok := m.setupKeepInitJSON["comment_file"].(string); ok && s != "" {
-			m.commentInput.SetValue(s)
+			setPromptPathInputValue(&m.commentInput, s)
 		} else if s, ok := m.setupKeepInitJSON["comment"].(string); ok {
-			m.commentInput.SetValue(s)
+			setPromptPathInputValue(&m.commentInput, s)
 		}
 	}
 
@@ -4185,11 +4185,49 @@ func (m *FirstRunModel) updatePromptPaths() {
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
 	if !m.covenantDirty {
-		m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
+		setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
 	}
 	if !m.soulFlowDirty {
-		m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
+		setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
 	}
+}
+
+// setPromptPathInputValue assigns a value to one of the Step 3 prompt-path
+// textinputs (covenant / soul-flow / comment fields), normalizing away
+// repeated newline-separated copies of the same value first. Bubble Tea's
+// textinput renders the raw value, so a value that accumulated duplicate lines
+// (an older runtime writing init.json, manual edits, or a paste) would
+// otherwise render the same path dozens of times — and the field would be
+// persisted back verbatim on save.
+func setPromptPathInputValue(input *textinput.Model, value string) {
+	input.SetValue(normalizePromptPathValue(value))
+}
+
+// normalizePromptPathValue collapses newline-separated copies of a prompt-path
+// value into a single trimmed, order-preserving, de-duplicated line. A
+// single-line value is returned unchanged (modulo surrounding whitespace);
+// blank lines are dropped.
+func normalizePromptPathValue(value string) string {
+	lines := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	})
+	if len(lines) <= 1 {
+		return strings.TrimSpace(value)
+	}
+	seen := make(map[string]struct{}, len(lines))
+	collapsed := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, dup := seen[line]; dup {
+			continue
+		}
+		seen[line] = struct{}{}
+		collapsed = append(collapsed, line)
+	}
+	return strings.Join(collapsed, " ")
 }
 
 // getPresetProvider extracts provider name from a preset
