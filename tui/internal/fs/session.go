@@ -34,6 +34,7 @@ type SessionEntry struct {
 	Sources     []string          `json:"sources,omitempty"`     // notification entries — list of source keys (email, soul, system, ...)
 	Meta        *NotificationMeta `json:"meta,omitempty"`        // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
 	ApiCallID   string            `json:"api_call_id,omitempty"` // llm/tool entries — one LLM API round-trip grouping id
+	Reasoning   string            `json:"reasoning,omitempty"`   // tool_call entries — own LTP _reasoning, rendered directly above the call
 	TokenUsage  *TokenUsage       `json:"token_usage,omitempty"` // llm_response entries — per-round token scalars (input/output/cached)
 	Summary     *AprioriSummary   `json:"summary,omitempty"`     // apriori_summary entries — the model-visible summary=true result that replaced the raw payload
 
@@ -1712,6 +1713,11 @@ func parseEventMap(raw map[string]interface{}) *SessionEntry {
 	if apiCallID, ok := raw["api_call_id"].(string); ok {
 		e.ApiCallID = apiCallID
 	}
+	if eventType == "tool_call" {
+		if args, ok := raw["tool_args"].(map[string]interface{}); ok {
+			e.Reasoning, _ = args["_reasoning"].(string)
+		}
+	}
 
 	if eventType == "insight" {
 		if q, ok := raw["question"].(string); ok {
@@ -2002,7 +2008,7 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 					}
 					return fmt.Sprintf("%s.%s", name, action)
 				}
-				data, _ := json.Marshal(argsMap)
+				data, _ := json.Marshal(toolCallArgsWithoutReasoning(argsMap))
 				args = string(data)
 			}
 		}
@@ -2014,6 +2020,19 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 		return formatToolResultEvent(entry)
 	}
 	return ""
+}
+
+// toolCallArgsWithoutReasoning returns a copy of argsMap without the private
+// reasoning field. It protects every structured tool-call display path,
+// including legacy/non-LTP maps that do not carry an action selector.
+func toolCallArgsWithoutReasoning(argsMap map[string]interface{}) map[string]interface{} {
+	rest := make(map[string]interface{}, len(argsMap))
+	for k, v := range argsMap {
+		if k != "_reasoning" {
+			rest[k] = v
+		}
+	}
+	return rest
 }
 
 // renderLTPToolParams renders the parameter portion of an LTP v2 tool_call

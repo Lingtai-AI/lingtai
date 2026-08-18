@@ -46,6 +46,17 @@ func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
 			want: `web({"query":"hello"})`,
 		},
 		{
+			name: "non-ltp-map-args-reasoning-dropped",
+			raw: map[string]interface{}{
+				"tool_name": "web",
+				"tool_args": map[string]interface{}{
+					"query":      "hello",
+					"_reasoning": "private diary text",
+				},
+			},
+			want: `web({"query":"hello"})`,
+		},
+		{
 			name: "string-args-pass-through",
 			raw: map[string]interface{}{
 				"tool_name": "bash",
@@ -110,5 +121,27 @@ func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
 				t.Errorf("extractSessionEventText(tool_call) = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseEventMapToolCallCarriesReasoningSeparately(t *testing.T) {
+	e := parseEventMap(map[string]interface{}{
+		"type":      "tool_call",
+		"ts":        float64(1787010000),
+		"tool_name": "file",
+		"tool_args": map[string]interface{}{
+			"action":     "read",
+			"input":      map[string]interface{}{"file_path": "/tmp/x"},
+			"_reasoning": "inspect the source",
+		},
+	})
+	if e == nil {
+		t.Fatal("parseEventMap returned nil")
+	}
+	if e.Reasoning != "inspect the source" {
+		t.Fatalf("Reasoning = %q, want tool call's own _reasoning", e.Reasoning)
+	}
+	if e.Body != `file.read({"file_path":"/tmp/x"})` {
+		t.Fatalf("Body = %q, want rendered params without private _reasoning", e.Body)
 	}
 }
