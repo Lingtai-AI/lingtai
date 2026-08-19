@@ -58,13 +58,12 @@ func normalizeAgentLiveness(nodes []AgentNode) {
 			nodes[i].Alive = true
 			continue
 		}
+		// Heartbeat freshness is liveness evidence, not a lifecycle state.
+		// A stale/missing heartbeat surfaces through Alive=false; it must
+		// not fabricate a manifest state transition into SUSPENDED (issue
+		// false-suspended, 2026-08-18). A manifest that is genuinely
+		// SUSPENDED stays SUSPENDED because this leaves State untouched.
 		nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec)
-		// Heartbeat is ground truth — no heartbeat means SUSPENDED. Malformed
-		// manifests keep their explicit repair state instead of being
-		// relabeled as suspended (issue #846).
-		if !nodes[i].Alive && nodes[i].State != "" && nodes[i].State != "MALFORMED" {
-			nodes[i].State = "SUSPENDED"
-		}
 	}
 }
 
@@ -81,7 +80,7 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 
 		state := strings.ToUpper(node.State)
 		live := node.Alive
-		if state == "ACTIVE" {
+		if state == "ACTIVE" && live {
 			activity.ActiveAgents++
 			hasNonDaemonActive = true
 		}
@@ -94,9 +93,16 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 			}
 		}
 
+		// Every branch below requires live: state alone is manifest lifecycle,
+		// not liveness, and a stale/missing heartbeat no longer rewrites State
+		// to SUSPENDED (see normalizeAgentLiveness), so this aggregate must
+		// gate on Alive itself to keep a heartbeat-dead agent out of the
+		// active/idle/asleep buckets.
 		switch state {
 		case "IDLE":
-			hasIdle = true
+			if live {
+				hasIdle = true
+			}
 		case "STUCK":
 			// STUCK stays an individual agent state. At network level we fold a
 			// heartbeat-fresh STUCK agent into idle so a live but errored agent
@@ -105,7 +111,9 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 				hasIdle = true
 			}
 		case "ASLEEP":
-			hasAsleep = true
+			if live {
+				hasAsleep = true
+			}
 		}
 	}
 

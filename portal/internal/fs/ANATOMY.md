@@ -59,7 +59,7 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `SumTokenLedger(path)` (`portal/internal/fs/agent.go:277-305`) — reads and sums a single `token_ledger.jsonl`.
 
 ### Heartbeat (`heartbeat.go`)
-- `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (2.0s for the portal).
+- `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (5.0s, shared with the kernel liveness contract).
 - `IsAliveHuman()` (`portal/internal/fs/heartbeat.go:24-26`) — always true.
 
 ### Mail (`mail.go`)
@@ -75,7 +75,7 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `UpdateHumanLocation(humanDir)` (`portal/internal/fs/location.go:63-103`) — resolves location if stale (>1h), writes atomically via temp+rename.
 
 ### Network (`network.go`)
-- `NetworkOptions` / `BuildNetwork(baseDir)` / `BuildNetworkWithOptions` (`portal/internal/fs/network.go:8-82`) — typed full topology by default; `SkipMailEdges` keeps nodes/avatar/contact shape while omitting the historical inbox/archive scan and its total. Heartbeat overrides state to SUSPENDED when an agent isn't alive.
+- `NetworkOptions` / `BuildNetwork(baseDir)` / `BuildNetworkWithOptions` (`portal/internal/fs/network.go:8-84`) — typed full topology by default; `SkipMailEdges` keeps nodes/avatar/contact shape while omitting the historical inbox/archive scan and its total. Heartbeat liveness only sets `AgentNode.Alive`; it never rewrites the manifest `State` (a stale/missing heartbeat does not fabricate SUSPENDED). A genuine manifest SUSPENDED state is the only path to a SUSPENDED node.
 - `buildMailEdges(nodes, baseDir)` (`portal/internal/fs/network.go:84-140`) — aggregates inbox+archive into `MailEdge` counts (direct/cc/bcc) when the full shape is selected.
 - `computeStats(nodes, mailEdges)` (`portal/internal/fs/network.go:157-177`) — counts agents by state; sums total mails from the selected edge set.
 
@@ -122,6 +122,6 @@ All state is read from the project's `.lingtai/` directory. The portal only writ
 
 - **`reconstruct.go` is the portal-specific addition.** The TUI shows live topology; the portal reconstructs historical topology tapes from `events.jsonl` + mailbox data. The reconstruction replays agent states chronologically using activity-driven sampling on a 3s grid (a frame per `agent_state` event, per mail message, per agent's first-seen time, plus one heartbeat per 60s during quiet stretches) — not a dense uniform grid, so reconstruction stays O(events) rather than O(duration/3s). Agents appear when their first event fires and mail accumulates cumulatively. This is the data source for the `/replay` endpoint.
 - **Mailbox id shape.** `newMailboxID` preserves the short `YYYYMMDDTHHMMSS-xxxx` (20 chars, UTC, 4 hex chars of UUID4 entropy) compatibility shape shared with the kernel and TUI (`tui/internal/fs/mail.go`). The portal reads existing directory names and message `id`/`_mailbox_id` records without rewriting them.
-- **`IsAlive`** uses a 2-second threshold. A stale heartbeat forces state to `SUSPENDED` in `BuildNetwork`.
+- **`IsAlive`** uses a 5-second threshold (`AgentAliveThresholdSec`, shared with the kernel's heartbeat liveness contract). A stale or missing heartbeat only clears `AgentNode.Alive` in `BuildNetwork`; it does not rewrite the manifest `State`.
 - **Atomic writes** (location, signals) use temp-file + rename, matching the kernel's filesystem contract.
 - **Capability parsing** handles both `[]string` (from TUI-generated presets) and tuple format (from live agents), so the portal works with projects the TUI hasn't touched.
