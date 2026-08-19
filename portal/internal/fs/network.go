@@ -32,7 +32,7 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 			// SUSPENDED (issue false-suspended, 2026-08-18). A manifest that
 			// is genuinely SUSPENDED stays SUSPENDED because this leaves
 			// State untouched.
-			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec)
+			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec())
 		}
 	}
 

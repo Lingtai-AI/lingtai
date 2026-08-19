@@ -916,7 +916,7 @@ func cleanProject(lingtaiDir string, force bool, waitTimeout time.Duration) erro
 		if err := os.WriteFile(suspendFile, []byte(""), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to signal %s: %v\n", agent.WorkingDir, err)
 		}
-		if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) {
+		if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
 			alive = append(alive, agent.WorkingDir)
 		}
 	}
@@ -927,7 +927,7 @@ func cleanProject(lingtaiDir string, force bool, waitTimeout time.Duration) erro
 		for time.Now().Before(deadline) {
 			allDead := true
 			for _, dir := range alive {
-				if fs.IsAlive(dir, fs.AgentAliveThresholdSec) {
+				if fs.IsAlive(dir, fs.AgentAliveThresholdSec()) {
 					allDead = false
 					break
 				}
@@ -958,7 +958,7 @@ func cleanProject(lingtaiDir string, force bool, waitTimeout time.Duration) erro
 	}
 	var survivors []string
 	for _, dir := range guarded {
-		if fs.IsAlive(dir, fs.AgentAliveThresholdSec) {
+		if fs.IsAlive(dir, fs.AgentAliveThresholdSec()) {
 			survivors = append(survivors, dir)
 		}
 	}

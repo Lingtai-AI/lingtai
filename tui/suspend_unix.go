@@ -64,7 +64,7 @@ func suspendMain() {
 
 		// Wait for the agent to actually stop before reporting success
 		fs.SuspendAndWait(agentDir, 5*time.Second)
-		if fs.IsAlive(agentDir, fs.AgentAliveThresholdSec) {
+		if fs.IsAlive(agentDir, fs.AgentAliveThresholdSec()) {
 			fmt.Printf("Warning: %s did not stop (still alive after 5s)\n", entry.Name())
 			failed++
 		} else {

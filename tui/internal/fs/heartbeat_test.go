@@ -8,14 +8,32 @@ import (
 	"time"
 )
 
-// TestAgentAliveThresholdSec_MatchesKernelContract pins the Go consumer's
-// liveness window to the kernel contract: one-second heartbeat tick and
-// five-second liveness (src/lingtai/kernel/config.py:132-133), applied with a
-// strict age < threshold comparison (src/lingtai/kernel/agent_presence/__init__.py).
-// Drift back to 2s (issue #845) fails here so the disagreement stays visible.
-func TestAgentAliveThresholdSec_MatchesKernelContract(t *testing.T) {
-	if AgentAliveThresholdSec != 5.0 {
-		t.Fatalf("AgentAliveThresholdSec = %v, want 5.0 (kernel heartbeat liveness, issue #845)", AgentAliveThresholdSec)
+// TestAgentAliveThresholdSec_Default pins the fallback heartbeat-liveness
+// window to 10s. This window is a TUI-side presentation/operational setting,
+// intentionally independent of the kernel's own heartbeat liveness config.
+func TestAgentAliveThresholdSec_Default(t *testing.T) {
+	t.Setenv(AgentAliveThresholdEnvVar, "")
+	if got := AgentAliveThresholdSec(); got != 10.0 {
+		t.Fatalf("AgentAliveThresholdSec() = %v, want default 10.0", got)
+	}
+}
+
+func TestAgentAliveThresholdSec_ValidOverride(t *testing.T) {
+	t.Setenv(AgentAliveThresholdEnvVar, "7.5")
+	if got := AgentAliveThresholdSec(); got != 7.5 {
+		t.Fatalf("AgentAliveThresholdSec() = %v, want overridden 7.5", got)
+	}
+}
+
+func TestAgentAliveThresholdSec_InvalidFallsBackToDefault(t *testing.T) {
+	cases := []string{"", "   ", "not-a-number", "0", "-1", "NaN", "Inf", "-Inf"}
+	for _, raw := range cases {
+		t.Run(fmt.Sprintf("%q", raw), func(t *testing.T) {
+			t.Setenv(AgentAliveThresholdEnvVar, raw)
+			if got := AgentAliveThresholdSec(); got != DefaultAgentAliveThresholdSec {
+				t.Errorf("AgentAliveThresholdSec() with env=%q = %v, want default %v", raw, got, DefaultAgentAliveThresholdSec)
+			}
+		})
 	}
 }
 
@@ -23,45 +41,43 @@ func TestIsAlive_FreshHeartbeat(t *testing.T) {
 	dir := t.TempDir()
 	ts := fmt.Sprintf("%f", float64(time.Now().Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if !IsAlive(dir, AgentAliveThresholdSec) {
+	if !IsAlive(dir, AgentAliveThresholdSec()) {
 		t.Error("expected alive for fresh heartbeat")
 	}
 }
 
 func TestIsAlive_ThreeSecondOldHeartbeat_Alive(t *testing.T) {
-	// Regression for issue #845: a heartbeat ~3s old is alive to the kernel
-	// (3 < 5) and must be alive to the TUI too, never dead or suspended.
 	dir := t.TempDir()
 	ts := fmt.Sprintf("%f", float64(time.Now().Add(-3*time.Second).Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if !IsAlive(dir, AgentAliveThresholdSec) {
-		t.Error("expected alive for 3s-old heartbeat under the kernel 5s contract")
+	if !IsAlive(dir, AgentAliveThresholdSec()) {
+		t.Error("expected alive for 3s-old heartbeat under the default 10s threshold")
 	}
 }
 
-func TestIsAlive_FiveSecondOldHeartbeat_Stale(t *testing.T) {
-	// Strict boundary: an age at or beyond the 5s threshold is stale
-	// (kernel compares age < threshold, not age <= threshold).
+func TestIsAlive_TenSecondOldHeartbeat_Stale(t *testing.T) {
+	// Strict boundary: an age at or beyond the threshold is stale
+	// (age < threshold, not age <= threshold).
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-5*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-10*time.Second).Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if IsAlive(dir, AgentAliveThresholdSec) {
-		t.Error("expected stale for 5s-old heartbeat (strict age < threshold boundary)")
+	if IsAlive(dir, AgentAliveThresholdSec()) {
+		t.Error("expected stale for 10s-old heartbeat (strict age < threshold boundary)")
 	}
 }
 
-func TestIsAlive_SixSecondOldHeartbeat_Stale(t *testing.T) {
+func TestIsAlive_ElevenSecondOldHeartbeat_Stale(t *testing.T) {
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-6*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-11*time.Second).Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if IsAlive(dir, AgentAliveThresholdSec) {
-		t.Error("expected dead for 6s-old heartbeat")
+	if IsAlive(dir, AgentAliveThresholdSec()) {
+		t.Error("expected dead for 11s-old heartbeat")
 	}
 }
 
 func TestIsAlive_MissingFile(t *testing.T) {
 	dir := t.TempDir()
-	if IsAlive(dir, AgentAliveThresholdSec) {
+	if IsAlive(dir, AgentAliveThresholdSec()) {
 		t.Error("expected dead when heartbeat file missing")
 	}
 }

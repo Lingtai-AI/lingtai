@@ -129,7 +129,7 @@ func (m NirvanaModel) doClean() tea.Cmd {
 			if agent.IsHuman {
 				continue
 			}
-			if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) {
+			if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
 				fs.SuspendAndWait(agent.WorkingDir, 5*time.Second)
 			}
 		}

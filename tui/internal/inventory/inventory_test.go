@@ -51,7 +51,7 @@ func TestFromProcessesEnrichesSortsGroupsAndFilters(t *testing.T) {
 	writeAgentJSON(t, humanDir, "human", "IDLE", `null`)
 	writeAgentJSON(t, otherDir, "other", "IDLE", `{}`)
 	writeHeartbeat(t, mainDir, 100*time.Millisecond)
-	writeHeartbeat(t, workerDir, 5*time.Second)
+	writeHeartbeat(t, workerDir, 15*time.Second)
 
 	identityDir := filepath.Join(workerDir, "system", "mcp_identities")
 	if err := os.MkdirAll(identityDir, 0o755); err != nil {
