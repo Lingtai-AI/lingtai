@@ -1754,7 +1754,7 @@ var reviveAgentDir = reviveDir
 // Launch heartbeat watchdog tuning. Overridable in tests to keep the poll fast.
 var (
 	launchHeartbeatPoll      = 200 * time.Millisecond
-	launchHeartbeatCap       = 60 * time.Second
+	launchHeartbeatCap       = 120 * time.Second
 	launchHeartbeatIsAlive   = fs.IsAlive
 	launchHeartbeatIsRunning = process.IsAgentRunning
 )
