@@ -9,6 +9,8 @@ related_files:
   - tui/internal/fs/types.go
   - tui/internal/fs/agent.go
   - tui/internal/fs/agent_test.go
+  - tui/internal/fs/agent_record.go
+  - tui/internal/fs/agent_record_test.go
   - tui/internal/fs/activity.go
   - tui/internal/fs/activity_test.go
   - tui/internal/fs/daemon_ledger.go
@@ -85,7 +87,9 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `WriteInquiry` | `tui/internal/fs/agent.go:220` | writes `.inquiry` signal file; no-op if `.inquiry` or `.inquiry.taken` exists |
 | `IsOrchestratorManifest(manifest)` | `tui/internal/fs/agent.go:249` | lower-level orchestrator role detector shared by TUI display logic and running-agent inventory |
 | `DiscoverAgents(baseDir)` | `tui/internal/fs/agent.go:267` | scans for all subdirectories with `.agent.json` |
-| `ReadStatus(dir)` | `tui/internal/fs/agent.go:395` | reads `.status.json` → `AgentStatus` (optional since-molt input/output/thinking/cached/api counters, context, runtime); syntax errors return zero, while type-error snapshots preserve safe fields and omit an incomplete economy tuple |
+| `ReadStatus(dir)` | `tui/internal/fs/agent.go:395` | reads `.status.json` → `AgentStatus` (optional since-molt input/output/thinking/cached/api counters, context, runtime); syntax errors return zero, while type-error snapshots preserve safe fields and omit an incomplete economy tuple; kept for `/kanban`/props.go detail, which is not yet migrated to the Agent record |
+| **agent_record.go** | | |
+| `ReadAgentRecord(dir)` | `tui/internal/fs/agent_record.go:65` | reads `system/agent_record.json` (kernel-published, schema `lingtai.agent_record/v1`, see lingtai-kernel `src/lingtai/kernel/session_stats/CONTRACT.md`) → `(AgentRecord, ok)`; missing file, malformed JSON, or an unrecognized `schema` all return `ok=false` (all-or-nothing — never a partial parse), matching that module's direct-migration contract. `tui/internal/tui/home_telemetry.go`'s Home telemetry row is the sole current consumer |
 | `ReadContextStats(dir)` | `tui/internal/fs/agent.go:416` | summarizes retained `history/chat_history.jsonl`: entries, role counts, text input/output, tool calls/results, and per-tool distribution |
 | `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:543` | sums `TokenTotals` across multiple agent ledgers |
 | `SumTokenLedger(path)` | `tui/internal/fs/agent.go:560` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |

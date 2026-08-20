@@ -32,48 +32,49 @@ import (
 //
 // It is scalar-only — never the noisy `_meta` block hidden by PR #440.
 //
-// Why this differs from the original #441 row ("数据有点怪", msg 3198): that row
-// showed `tok <global> / <limit>` where <global> was fs.SumTokenLedger over the
-// ENTIRE ledger — every molt the agent has ever lived (163 molts / 20k+ rows for
-// a long-lived agent) — so the number only grew and bore no relation to the
-// session in view. And <limit> was read from manifest["llm"]["context_limit"],
-// a key that does not exist (context_limit sits at the manifest TOP LEVEL), so
-// the "/ limit" half silently never rendered. This version reads the complete
-// current-session economy and context pair from one live `.status.json` snapshot
-// (fs.ReadStatus), the same snapshot /kanban's context section uses. The
-// ledger/SQLite path remains the detail path in props.go; Home does not
-// reconstruct its economy from history. When no data is available the row is
-// omitted entirely.
+// Direct migration to the kernel's Agent Record (kernel #1423,
+// lingtai-kernel src/lingtai/kernel/session_stats): the row now reads the
+// ONE versioned, redacted `system/agent_record.json` (fs.ReadAgentRecord)
+// instead of `.status.json` + `init.json`/`manifest.resolved.json`. That
+// record is the kernel's sole source for normal live status — this consumer
+// curates and renders it, it does not independently re-collect or reconstruct
+// it from any other file. There is no old-consumer fallback: a missing,
+// malformed, or unrecognized-schema record is treated as an explicit bounded
+// unavailable state (the row hides, exactly like the pre-existing "no data"
+// case), never reconstructed from `.status.json`, heartbeat files, raw
+// `logs/events.jsonl` notifications, or the manifest. The ledger/SQLite path
+// remains the detail path in props.go; Home does not reconstruct its economy
+// from history.
 
 // homeTelemetry holds the already-resolved scalars for the home row. Keeping the
 // data plain (no rendering) makes formatHomeTelemetry trivially testable.
 type homeTelemetry struct {
-	provider      string  // active configured provider from the resolved manifest
-	model         string  // active configured model from the resolved manifest
+	provider      string  // active configured provider from the Agent record's model block
+	model         string  // active configured model from the Agent record's model block
 	apiCalls      int64   // current-session LLM API calls; 0 = none/unknown
 	sessionTokens int64   // current-session tokens (input+output+thinking); 0 = unknown
 	cached        int64   // current-session cached input tokens
 	inputTokens   int64   // current-session input tokens (cache-rate denominator)
 	contextLimit  int64   // model context window; 0 = unknown
-	contextUsed   int64   // context tokens in use (.status.json TotalTokens); 0 = unknown
+	contextUsed   int64   // context tokens in use (Agent record usage.context_used_tokens); 0 = unknown
 	contextUsage  float64 // latest context-usage fraction 0..1; <0 = unknown
 }
 
 // --- Async scheduling ------------------------------------------------------
 //
-// gatherHomeTelemetry reads one `.status.json` snapshot and may read the manifest
-// or cached notification context for context-only fallbacks. It deliberately does
-// not invoke the ledger/SQLite/history path: Home must use the kernel-owned
-// current-session counters and leave `/kanban` detail as the ledger consumer.
-// It therefore still MUST NOT run on the Bubble Tea render (View) or input
-// (Update/syncViewportHeight) paths — even a small filesystem read can stall the
-// whole TUI.
+// gatherHomeTelemetry reads one `system/agent_record.json` snapshot (fs.ReadAgentRecord)
+// and nothing else. It deliberately does not invoke the ledger/SQLite/history
+// path: Home must use the kernel-owned current-session counters and leave
+// `/kanban` detail as the ledger consumer. It therefore still MUST NOT run on
+// the Bubble Tea render (View) or input (Update/syncViewportHeight) paths —
+// even a small filesystem read can stall the whole TUI.
 //
 // Instead the UI paths read a last-known snapshot cached on the model
 // (m.homeTelemetry), and the I/O runs in the background as a tea.Cmd
 // (fetchHomeTelemetry) that returns a homeTelemetryMsg to refresh the snapshot.
-// The snapshot only moves when the kernel rewrites `.status.json` (seconds to
-// minutes apart), so a sub-second staleness on the boundary is invisible.
+// The snapshot only moves when the kernel rewrites `system/agent_record.json`
+// (throttled to session_stats_refresh_seconds(), default 5s), so a sub-second
+// staleness on the boundary is invisible.
 //
 // Fetches are debounced by two model flags checked in maybeScheduleHomeTelemetry:
 //   - homeTelemetryInFlight: at most one background fetch runs at a time, so a
@@ -83,10 +84,10 @@ type homeTelemetry struct {
 
 // homeTelemetryTTL is the minimum wall-clock interval between two completed
 // background telemetry fetches. It is deliberately close to the mail poll cadence
-// (m.pollRate, ~1s): the underlying .status.json snapshot or context-only
-// fallback is refreshed on a similar cadence, so fetching faster only burns I/O
-// without showing newer numbers. Repeated render/keypress within the TTL reuses the cached
-// snapshot with no I/O at all.
+// (m.pollRate, ~1s): the underlying agent_record.json snapshot is refreshed on a
+// similar cadence, so fetching faster only burns I/O without showing newer
+// numbers. Repeated render/keypress within the TTL reuses the cached snapshot
+// with no I/O at all.
 const homeTelemetryTTL = 1 * time.Second
 
 // homeTelemetryMsg carries a freshly-gathered telemetry snapshot from the
@@ -101,8 +102,8 @@ type homeAsyncStatsMsg struct {
 	t          homeAsyncStats
 }
 
-// fetchHomeTelemetry is the background worker: it performs status/context-fallback
-// I/O off the UI thread and returns a homeTelemetryMsg.
+// fetchHomeTelemetry is the background worker: it performs the Agent record
+// read off the UI thread and returns a homeTelemetryMsg.
 // It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
 // path + session cache) exactly like refreshMail/initialRebuild — the running
 // command never touches live model state.
@@ -148,97 +149,46 @@ func (m *MailModel) applyHomeTelemetry(t homeTelemetry, now time.Time) (visibili
 	return m.hasHomeTelemetry() != was
 }
 
-// gatherHomeTelemetry resolves Home from one canonical `.status.json` read:
-//   - the five since-molt economy counters come from AgentStatus.Tokens;
-//   - context usage, used tokens, and window come from that same snapshot.
+// gatherHomeTelemetry resolves Home from one canonical Agent record read
+// (fs.ReadAgentRecord, `system/agent_record.json`):
+//   - the four since-molt economy counters come from record.Usage;
+//   - context usage, used tokens, and window come from the same record's
+//     Usage block;
+//   - the active configured provider/model pair comes from record.Model.
 //
-// The WindowSize > 0 gate matches /kanban's context section. Missing, legacy, or
-// malformed status leaves economy at zero and never falls back to ledger/history.
-// Context-only manifest and unfiltered notification fallbacks remain unchanged,
-// so stopped/legacy agents retain the existing context degradation behavior.
+// The ContextLimitTokens > 0 gate mirrors the previous `.status.json`
+// WindowSize > 0 gate: the kernel publishes a null/zero context_limit_tokens
+// when no context window is known yet, and Home must not fabricate a used/limit
+// pair from that. A missing, malformed, or unrecognized-schema record (ok ==
+// false) leaves every field at its zero/-1 sentinel — an explicit bounded
+// unavailable state, never a fallback to `.status.json`, heartbeat files, the
+// manifest, or raw notification logs.
 func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 	t := homeTelemetry{contextUsage: -1}
-	if m.orchestrator != "" {
-		// One read supplies both halves of the row. The kernel publishes these
-		// counters atomically with Context and resets them at a successful molt.
-		status := fs.ReadStatus(m.orchestrator)
-		tok := status.Tokens
-		t.apiCalls = tok.APICalls
-		// Cached tokens are a subset of input and are reported separately.
-		t.sessionTokens = tok.InputTokens + tok.OutputTokens + tok.ThinkingTokens
-		t.cached = tok.CachedTokens
-		t.inputTokens = tok.InputTokens
-
-		// Primary, /kanban-identical context source. Gate on WindowSize > 0
-		// exactly as props.go does so the home row shows context whenever — and
-		// only when — /kanban would.
-		ctx := tok.Context
-		if ctx.WindowSize > 0 {
-			t.contextUsage = ctx.UsagePct / 100
-			t.contextLimit = int64(ctx.WindowSize)
-			// TotalTokens is the same absolute numerator /kanban renders.
-			t.contextUsed = int64(ctx.TotalTokens)
-		}
-
-		// The resolved manifest is the active configuration source. Keep the
-		// provider/model pair only when both raw fields are present, so Home
-		// never fabricates a partial configured identity. It also supplies the
-		// existing context-only fallback when live status has no window.
-		if manifest, err := fs.ReadInitManifest(m.orchestrator); err == nil {
-			t.provider, _ = manifest["provider"].(string)
-			t.model, _ = manifest["model"].(string)
-			if t.contextLimit == 0 {
-				t.contextLimit = manifestContextLimit(manifest)
-			}
-		}
+	if m.orchestrator == "" {
+		return t
 	}
-	// Context usage fallback stays independent of economy: when status has no
-	// usable WindowSize, use the freshest unfiltered notification context.
-	if t.contextUsage < 0 && m.sessionCache != nil {
-		t.contextUsage = latestContextUsage(m.sessionCache.Entries())
+	record, ok := fs.ReadAgentRecord(m.orchestrator)
+	if !ok {
+		return t
+	}
+
+	t.provider = record.Model.Provider
+	t.model = record.Model.Model
+
+	usage := record.Usage
+	t.apiCalls = usage.APICalls
+	// Cached tokens are a subset of input and are reported separately.
+	t.sessionTokens = usage.InputTokens + usage.OutputTokens + usage.ThinkingTokens
+	t.cached = usage.CachedTokens
+	t.inputTokens = usage.InputTokens
+
+	if usage.ContextLimitTokens > 0 {
+		t.contextUsage = usage.ContextUsagePct / 100
+		t.contextLimit = usage.ContextLimitTokens
+		t.contextUsed = usage.ContextUsedTokens
 	}
 	return t
-}
-
-// latestContextUsage scans session entries from newest to oldest and returns the
-// freshest notification's context-usage fraction (0..1), or -1 when no
-// notification carries a usable context block. Entries are assumed
-// chronologically ordered (the session cache sorts by timestamp), so the last
-// matching entry is the freshest.
-func latestContextUsage(entries []fs.SessionEntry) float64 {
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		if e.Type == "notification" && e.Meta != nil && e.Meta.Context != nil && e.Meta.Context.Usage >= 0 {
-			return e.Meta.Context.Usage
-		}
-	}
-	return -1
-}
-
-// manifestContextLimit resolves the model context window from a manifest read by
-// fs.ReadInitManifest, returning 0 when unknown. It checks BOTH nestings because
-// the two artifacts ReadInitManifest can return disagree on where the value sits
-// (the em-1 "do not assume wrong nesting" trap):
-//   - the kernel-resolved system/manifest.resolved.json carries it at the
-//     TOP LEVEL (`manifest.context_limit`); `llm.context_limit` is absent there —
-//     verified empirically across every live agent on this machine. The original
-//     PR #441 read only `llm.context_limit` and so always missed it.
-//   - the raw init.json fallback (stopped / never-booted agents) keeps the
-//     saved-preset canonical shape `llm.context_limit` (see
-//     internal/preset/preset.go NormalizeLegacyContextLimit). flattenInitManifest
-//     does NOT hoist context_limit to top level, so that case needs the llm path.
-//
-// Top level wins when both are present.
-func manifestContextLimit(manifest map[string]interface{}) int64 {
-	if cl, ok := manifest["context_limit"].(float64); ok && cl > 0 {
-		return int64(cl)
-	}
-	if llm, ok := manifest["llm"].(map[string]interface{}); ok {
-		if cl, ok := llm["context_limit"].(float64); ok && cl > 0 {
-			return int64(cl)
-		}
-	}
-	return 0
 }
 
 // hasData reports whether any fragment is renderable. With nothing to show the
@@ -290,10 +240,10 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 
 	var segs []string
 
-	// Active configured LLM and current-session token economy. The manifest
-	// identity is omitted as a pair when either field is absent; every token
-	// fragment is likewise dropped when its source is unknown so Home never shows
-	// a fabricated zero.
+	// Active configured LLM and current-session token economy. The Agent
+	// record's model identity is omitted as a pair when either field is absent;
+	// every token fragment is likewise dropped when its source is unknown so
+	// Home never shows a fabricated zero.
 	if t.provider != "" && t.model != "" {
 		segs = append(segs, i18n.T("mail.telemetry_model")+" "+t.provider+"/"+t.model)
 	}
@@ -333,8 +283,9 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 		if t.contextUsed > 0 && t.contextLimit > 0 {
 			ctx += " " + humanizeTokenCount(t.contextUsed) + "/" + humanizeTokenCount(t.contextLimit)
 		} else if t.contextLimit > 0 {
-			// No absolute "used" (notification fallback path): derive it from the
-			// usage fraction so used/limit still renders rather than vanishing.
+			// No absolute "used" recorded yet (e.g. a fresh session with a known
+			// window but zero context tokens so far): derive it from the usage
+			// fraction so used/limit still renders rather than vanishing.
 			ctx += " " + humanizeTokenCount(int64(t.contextUsage*float64(t.contextLimit))) + "/" + humanizeTokenCount(t.contextLimit)
 		}
 		if barW := homeTelemetryBarWidth(width); barW > 0 {
