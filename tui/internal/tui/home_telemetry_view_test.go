@@ -33,21 +33,12 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 	// for the right-aligned "ctrl+o to expand" hint (a long temp path would push
 	// the hint out by width budget — unrelated to the height-clipping regression).
 	//
-	// Force the telemetry row to have data by seeding a notification carrying a
-	// context-usage fraction into the orchestrator's events.jsonl, then driving
-	// the normal initialRebuild so it lands in the UNFILTERED session cache —
-	// gatherHomeTelemetry reads the freshest notification context usage from
-	// there (NOT the verbose-filtered m.messages), so this exercises the real
-	// home-view path at verboseOff (no Ctrl+O).
+	// Force the telemetry row to have data by seeding the orchestrator's
+	// `system/agent_record.json` with a context-usage fraction, then driving the
+	// normal initialRebuild/fetch round-trip — this exercises the real home-view
+	// path at verboseOff (no Ctrl+O), matching the kernel Agent Record migration.
 	orchDir := filepath.Join(dir, "orch")
-	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.73}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(event), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeHomeAgentRecord(t, orchDir, `{"schema": "lingtai.agent_record/v1", "usage": {"context_used_tokens": 182500, "context_limit_tokens": 250000, "context_usage_pct": 73}}`)
 	humanDir := filepath.Join(dir, "human")
 	if err := os.MkdirAll(humanDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -55,8 +46,7 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	// Drive the deferred initial rebuild (the normal launch path) so the
-	// notification populates the session cache. No Ctrl+O, verbose stays off.
+	// Drive the deferred initial rebuild (the normal launch path).
 	m, _ = m.Update(m.initialRebuild())
 	// Home telemetry is now resolved asynchronously: gathering it does I/O off the
 	// UI path via the fetchHomeTelemetry command, and the model only shows the row
