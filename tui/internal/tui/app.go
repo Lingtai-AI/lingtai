@@ -925,9 +925,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				if agent.IsHuman {
 					continue
 				}
-				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) && a.lingtaiCmd != "" {
+				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec) {
 					count++
-					if err := reviveDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
+					if err := reviveAgentDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
 						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
 					}
 				}
@@ -937,9 +937,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			} else {
 				addMsg(i18n.TF("mail.cpr_all", count))
 			}
-		} else if targetDir != "" && a.lingtaiCmd != "" {
+		} else if targetDir != "" {
 			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec) {
-				if err := reviveDir(a.lingtaiCmd, targetDir); err != nil {
+				if err := reviveAgentDir(a.lingtaiCmd, targetDir); err != nil {
 					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
 				} else {
 					addMsg(i18n.TF("mail.cpr", targetName))
@@ -1749,10 +1749,12 @@ func reviveDir(lingtaiCmd, dir string) error {
 	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
+var reviveAgentDir = reviveDir
+
 // Launch heartbeat watchdog tuning. Overridable in tests to keep the poll fast.
 var (
 	launchHeartbeatPoll      = 200 * time.Millisecond
-	launchHeartbeatCap       = 60 * time.Second
+	launchHeartbeatCap       = 120 * time.Second
 	launchHeartbeatIsAlive   = fs.IsAlive
 	launchHeartbeatIsRunning = process.IsAgentRunning
 )
