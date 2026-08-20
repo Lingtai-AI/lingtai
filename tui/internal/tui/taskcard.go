@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,11 +49,36 @@ func readTaskCardBody(agentDir string) (body, status string, ok bool) {
 	return body, status, true
 }
 
+// taskCardServiceTierSummary reads only the kernel's public Codex/Responses
+// service-tier identity from .agent.json. Missing, malformed, or oversized
+// values are intentionally omitted rather than inferred from presets.
+func taskCardServiceTierSummary(agentDir string) string {
+	if agentDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(agentDir, ".agent.json"))
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		LLM struct {
+			ServiceTier string `json:"service_tier"`
+		} `json:"llm"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return ""
+	}
+	tier := strings.TrimSpace(manifest.LLM.ServiceTier)
+	if tier == "" || len(tier) > 48 {
+		return ""
+	}
+	return i18n.T("preset_editor.field_service_tier") + ": " + tier
+}
+
 // taskCardEntries builds the /taskcard markdown-viewer content: the card body
 // verbatim when active and non-blank, otherwise one small localized fallback
-// message. An active card may receive one point-in-time display-only daemon-model
-// annotation from the existing fresh daemon window; this never changes the card
-// files or starts polling.
+// message. An active card may receive point-in-time display-only service-tier
+// and daemon-model annotations; this never changes the card files or starts polling.
 func taskCardEntries(agentDir string) []MarkdownEntry {
 	title := i18n.T("taskcard.title")
 	body, status, ok := readTaskCardBody(agentDir)
@@ -62,8 +88,17 @@ func taskCardEntries(agentDir string) []MarkdownEntry {
 			reason = i18n.T("taskcard.inactive")
 		}
 		body = fmt.Sprintf("# %s\n\n%s", title, reason)
-	} else if models := taskCardDaemonModelSummary(agentDir); models != "" {
-		body += "\n\n" + models
+	} else {
+		var annotations []string
+		if tier := taskCardServiceTierSummary(agentDir); tier != "" {
+			annotations = append(annotations, tier)
+		}
+		if models := taskCardDaemonModelSummary(agentDir); models != "" {
+			annotations = append(annotations, models)
+		}
+		if len(annotations) > 0 {
+			body += "\n\n" + strings.Join(annotations, "\n")
+		}
 	}
 	return []MarkdownEntry{{Label: title, Group: title, Content: body}}
 }
