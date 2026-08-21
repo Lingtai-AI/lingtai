@@ -17,7 +17,7 @@ const AgentAliveThresholdEnvVar = "LINGTAI_AGENT_ALIVE_THRESHOLD_SEC"
 // when AgentAliveThresholdEnvVar is unset or invalid. This window is a
 // TUI-side presentation/operational setting, intentionally independent of
 // the kernel's own heartbeat liveness config (src/lingtai/kernel/config.py).
-const DefaultAgentAliveThresholdSec = 10.0
+const DefaultAgentAliveThresholdSec = 5.0
 
 // AgentAliveThresholdSec resolves the heartbeat-liveness window from
 // AgentAliveThresholdEnvVar, falling back to DefaultAgentAliveThresholdSec
