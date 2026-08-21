@@ -139,6 +139,11 @@ func (a *App) installMailModel(m MailModel) {
 	m.directUnreadOpInFlight = false
 	m.directUnreadSyncPending = false
 	m.directUnreadOpSerial = nextAcceptedSnapshotSerial(m.directUnreadOpSerial)
+	// The Home telemetry row's display expression is an app-owned TUI preference,
+	// not a property of the mail context being installed. Validating it here — the
+	// one boundary every real construction and restore path goes through — keeps
+	// it off NewMailModel's signature and out of every unrelated caller.
+	m.homeTelemetryDisplay = homeTelemetryDisplayFromConfig(a.tuiConfig.HomeTelemetryDisplay)
 	a.mail = m
 }
 
@@ -1952,6 +1957,18 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
+		// Re-validate the Home telemetry expression from the reloaded config, the
+		// same way the other presentation preferences above are re-applied to the
+		// preserved model rather than reconstructing it. A changed expression can
+		// change whether the telemetry row occupies a footer line, and the
+		// preserved model's reserved height has to follow it now rather than
+		// whenever some later event happens to resync — an unreserved row clips
+		// the status bar, a reserved-but-unrendered one leaves a blank line.
+		telemetryRowWas := a.mail.hasHomeTelemetry()
+		a.mail.homeTelemetryDisplay = homeTelemetryDisplayFromConfig(a.tuiConfig.HomeTelemetryDisplay)
+		if a.mail.hasHomeTelemetry() != telemetryRowWas {
+			a.mail.syncViewportHeight()
+		}
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
 		mailCmd := a.issueMailRefresh()

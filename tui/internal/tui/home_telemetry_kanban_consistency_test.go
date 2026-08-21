@@ -88,7 +88,7 @@ func TestFormatHomeTelemetryContextLayout(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
 	}
-	got := formatHomeTelemetry(tel, 160)
+	got := formatHomeTelemetry(tel, 160, nil)
 
 	label := i18n.T("mail.telemetry_context")
 	if label == "mail.telemetry_context" {
@@ -129,7 +129,7 @@ func TestFormatHomeTelemetryContextLayoutNarrow(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
 	}
-	got := formatHomeTelemetry(tel, 30) // below homeTelemetryBarMinWidth → bar hidden
+	got := formatHomeTelemetry(tel, 30, nil) // below homeTelemetryBarMinWidth → bar hidden
 
 	if strings.ContainsRune(got, '▓') || strings.ContainsRune(got, '░') {
 		t.Errorf("narrow row %q must drop the bar", got)
@@ -149,7 +149,7 @@ func TestFormatHomeTelemetryShowsKanbanHint(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
-	got := formatHomeTelemetry(tel, 160)
+	got := formatHomeTelemetry(tel, 160, nil)
 
 	hint := i18n.T("mail.telemetry_kanban_hint")
 	if hint == "mail.telemetry_kanban_hint" {
@@ -173,7 +173,7 @@ func TestFormatHomeTelemetryDropsKanbanHintWhenNarrow(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
-	got := formatHomeTelemetry(tel, 30) // narrow
+	got := formatHomeTelemetry(tel, 30, nil) // narrow
 
 	if strings.Contains(got, i18n.T("mail.telemetry_kanban_hint")) {
 		t.Errorf("narrow row %q must drop the /kanban hint rather than collide with the metrics", got)

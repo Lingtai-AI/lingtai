@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -482,5 +483,66 @@ func TestHasAPIKeys(t *testing.T) {
 		if got := HasAPIKeys(tc.keys); got != tc.want {
 			t.Errorf("%s: HasAPIKeys(%v) = %v, want %v", tc.name, tc.keys, got, tc.want)
 		}
+	}
+}
+
+// home_telemetry_display is an optional presentation preference the user hand-
+// edits, so an invalid value must fail closed on its OWN key: discarded on
+// load, never re-written as durable config on save, and never costing the user
+// their unrelated preferences. A valid expression round trips.
+func TestTUIConfigHomeTelemetryDisplayFailsClosedOnItsOwnKey(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string   // the JSON value written for home_telemetry_display
+		want []string // nil = discarded, and no key left behind on save
+	}{
+		// A hand-edited string where a list belongs. Decoding this field as a
+		// plain []string would fail json.Unmarshal for the WHOLE file, silently
+		// resetting language, theme, and mail_page_size to defaults; the custom
+		// per-key decode is what keeps the damage to this one preference.
+		{name: "wrong type", raw: `"context"`},
+		// These decode fine, so only NormalizeHomeTelemetryDisplay rejects them —
+		// wholesale, on both load and save. A partially honored expression would
+		// silently drop the fragment the user misspelled, and a re-saved one would
+		// make the typo durable the next time /settings writes the file.
+		{name: "unknown name", raw: `["context", "ctx"]`}, // near-miss of "context"
+		{name: "duplicate", raw: `["context", "context"]`},
+		{name: "empty", raw: `[]`},
+		{name: "longer than the vocabulary", raw: `["session", "llm", "api", "tokens", "cache", "context", "session"]`},
+		{name: "valid selection", raw: `["context", "session"]`, want: []string{"context", "session"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := fmt.Sprintf(`{"language": "zh", "theme": "ink-light", "mail_page_size": 500, "tool_call_truncate": 400, "home_telemetry_display": %s}`, tt.raw)
+			path := filepath.Join(dir, "tui_config.json")
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			tc := LoadTUIConfig(dir)
+			if strings.Join(tc.HomeTelemetryDisplay, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("home_telemetry_display %s loaded as %v, want %v", tt.raw, tc.HomeTelemetryDisplay, tt.want)
+			}
+			if tc.Language != "zh" || tc.Theme != "ink-light" || tc.MailPageSize != 500 || tc.ToolCallTruncate != 400 {
+				t.Fatalf("one malformed presentation preference reset the others: %+v", tc)
+			}
+
+			if err := SaveTUIConfig(dir, tc); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved := strings.Contains(string(data), "home_telemetry_display"); saved != (tt.want != nil) {
+				t.Errorf("saved key present = %v, want %v:\n%s", saved, tt.want != nil, data)
+			}
+			if !strings.Contains(string(data), `"language": "zh"`) || !strings.Contains(string(data), `"mail_page_size": 500`) {
+				t.Errorf("save dropped the surviving preferences:\n%s", data)
+			}
+			if reloaded := LoadTUIConfig(dir); strings.Join(reloaded.HomeTelemetryDisplay, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("after the load/save round trip home_telemetry_display = %v, want %v", reloaded.HomeTelemetryDisplay, tt.want)
+			}
+		})
 	}
 }

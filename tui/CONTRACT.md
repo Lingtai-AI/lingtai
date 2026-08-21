@@ -74,7 +74,7 @@ examined by the doctor.
 | ID | Item | Location | Default | Degradation when missing |
 |---|---|---|---|---|
 | R3.1 | `keys` mirror | `~/.lingtai-tui/config.json` `keys` | none (derived from `.env`) | Keys still resolve from `.env` (R2) and every TUI key consumer reads through `ResolveKeys`, so the mirror is a cache, not a gate. Mirror is regenerable — self-heal rewrites it from `.env` on demand. |
-| R3.2 | TUI preferences | `~/.lingtai-tui/tui_config.json` | `language: en`, `theme: ink-dark`, `mail_page_size: 200`, `insights: false`, `tool_call_truncate: 0` (no truncation), `auto_refresh: on` | Loaded defaults replace the file silently; no banner (fable F9). |
+| R3.2 | TUI preferences | `~/.lingtai-tui/tui_config.json` | `language: en`, `theme: ink-dark`, `mail_page_size: 200`, `insights: false`, `tool_call_truncate: 0` (no truncation), `auto_refresh: on`, `home_telemetry_display: absent` (the Home telemetry row's built-in default expression) | Loaded defaults replace the file silently; no banner (fable F9). `home_telemetry_display` additionally fails closed per key: any invalid value (empty, over-long, repeated, unknown name, wrong type) is discarded on load — the row renders its built-in default expression, the other preferences in the file are untouched — and is omitted on save, so an invalid value is never re-written as durable config. |
 | R3.3 | Legacy `language` | `~/.lingtai-tui/config.json` `language` | n/a (deprecated) | Migrated to `tui_config.json` by `MigrateLegacyLanguage`; ignored once migrated. |
 
 Other files under `~/.lingtai-tui/` (`utilities/`, `registry.jsonl`) are
@@ -102,7 +102,12 @@ appears as the degraded state below.
    condition, not a setup event — the TUI launches with a banner and offers
    self-heal for the regenerable mirror (R3.1). Losing `tui_config.json`
    (R3.2) is the same class but degrades silently: defaults are loaded with
-   no banner (fable F9).
+   no banner (fable F9). Within R3.2, `home_telemetry_display` is the one key
+   whose own loss is scoped to itself: it is an optional, hand-editable ordered
+   selection of the Home telemetry row's existing fragments (`session`, `llm`,
+   `api`, `tokens`, `cache`, `context` — nothing else, and no template, format,
+   color, or width), so an invalid value falls back to the row's built-in
+   default expression without disturbing the neighbouring preferences.
 3. The doctor validates the startup decision table programmatically
    (fable F8, D1-D5 below): check agents present (R1), `config.json`
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
