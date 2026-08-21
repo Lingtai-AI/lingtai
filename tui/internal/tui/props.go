@@ -31,7 +31,6 @@ type PropsModel struct {
 	selectedDir    string         // working dir of the agent shown on left (defaults to orchDir)
 	selectedTokens fs.TokenTotals // cached token ledger for selected agent
 	selectedStatus fs.AgentStatus // cached .status.json for selected agent
-	agentDirs      []string       // all discovered agent dirs (for picker)
 	agentNodes     []fs.AgentNode // discovered agents (for picker display)
 
 	// Right panel: dashboard snapshot
@@ -108,7 +107,6 @@ type propsLoadMsg struct {
 	selectedTokens     fs.TokenTotals
 	selectedStatus     fs.AgentStatus
 	adminStart         string
-	agentDirs          []string
 	agentNodes         []fs.AgentNode
 }
 
@@ -134,11 +132,6 @@ func (m PropsModel) loadData() tea.Msg {
 		}
 	}
 
-	var allDirs []string
-	for _, n := range net.Nodes {
-		allDirs = append(allDirs, n.WorkingDir)
-	}
-
 	return propsLoadMsg{
 		network:            net,
 		mailStatsAvailable: false,
@@ -146,7 +139,6 @@ func (m PropsModel) loadData() tea.Msg {
 		selectedTokens:     selectedTokens,
 		selectedStatus:     selectedStatus,
 		adminStart:         adminStart,
-		agentDirs:          allDirs,
 		agentNodes:         net.Nodes,
 	}
 }
@@ -203,7 +195,6 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.selectedTokens = msg.selectedTokens
 		m.selectedStatus = msg.selectedStatus
 		m.adminStart = msg.adminStart
-		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
 		m.syncViewportContent()
 
@@ -1153,17 +1144,6 @@ func addLedgerSeparatorLabel(out map[int][]string, idx int, labelKey string) {
 		}
 	}
 	out[idx] = append(out[idx], labelKey)
-}
-
-// rebuildSeparatorIndexes is kept as a small test/helper compatibility wrapper
-// for callers that only care whether any separator exists after a row.
-func rebuildSeparatorIndexes(entries []fs.LedgerEntry, rebuilds []time.Time) map[int]bool {
-	labels := ledgerSeparatorLabelKeys(entries, rebuilds, nil)
-	out := make(map[int]bool, len(labels))
-	for idx := range labels {
-		out[idx] = true
-	}
-	return out
 }
 
 func isReconstructLedgerEntry(entry fs.LedgerEntry) bool {
