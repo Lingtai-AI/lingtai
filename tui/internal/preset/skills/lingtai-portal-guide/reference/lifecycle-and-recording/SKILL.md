@@ -20,7 +20,7 @@ This is a nested `lingtai-portal-guide` reference. It covers how the portal inte
 | `ASLEEP` | Agent is in sleep mode (`.sleep` signal or explicit lifecycle transition) |
 | `SUSPENDED` | Agent process is not running (kernel/manifest reports it as such) |
 
-Heartbeat is the portal's liveness ground truth, but it is observed independently from the manifest lifecycle state. `BuildNetwork()` calls `IsAlive(..., AgentAliveThresholdSec())`, which resolves the liveness window from the `LINGTAI_AGENT_ALIVE_THRESHOLD_SEC` env var (default 5 seconds; missing, blank, malformed, non-finite, zero, or negative values fall back to the default). A stale or missing heartbeat only clears `AgentNode.Alive` — it does not rewrite `.agent.json`'s stored `state`, so a genuinely `SUSPENDED` manifest stays `SUSPENDED` while an `ACTIVE`/`IDLE`/etc. agent with a stale heartbeat keeps its real state and is simply reported not alive.
+Heartbeat is the portal's liveness ground truth, but it is observed independently from the manifest lifecycle state. `BuildNetwork()` calls `IsAlive(..., AgentAliveThresholdSec())`, which resolves the shared TUI/Portal/kernel liveness window from the `LINGTAI_AGENT_ALIVE_THRESHOLD_SEC` env var (default 10 seconds; missing, blank, malformed, non-finite, zero, or negative values fall back to the default). A stale or missing heartbeat only clears `AgentNode.Alive` — it does not rewrite `.agent.json`'s stored `state`, so a genuinely `SUSPENDED` manifest stays `SUSPENDED` while an `ACTIVE`/`IDLE`/etc. agent with a stale heartbeat keeps its real state and is simply reported not alive.
 
 ## Recording
 

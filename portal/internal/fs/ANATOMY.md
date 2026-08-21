@@ -59,7 +59,7 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `SumTokenLedger(path)` (`portal/internal/fs/agent.go:277-305`) — reads and sums a single `token_ledger.jsonl`.
 
 ### Heartbeat (`heartbeat.go`)
-- `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (5.0s, shared with the kernel liveness contract).
+- `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go`) — reads `.agent.heartbeat`, returns true only for a strict age-below-threshold comparison; its default threshold comes from the shared environment setting.
 - `IsAliveHuman()` (`portal/internal/fs/heartbeat.go:24-26`) — always true.
 
 ### Mail (`mail.go`)
@@ -122,6 +122,6 @@ All state is read from the project's `.lingtai/` directory. The portal only writ
 
 - **`reconstruct.go` is the portal-specific addition.** The TUI shows live topology; the portal reconstructs historical topology tapes from `events.jsonl` + mailbox data. The reconstruction replays agent states chronologically using activity-driven sampling on a 3s grid (a frame per `agent_state` event, per mail message, per agent's first-seen time, plus one heartbeat per 60s during quiet stretches) — not a dense uniform grid, so reconstruction stays O(events) rather than O(duration/3s). Agents appear when their first event fires and mail accumulates cumulatively. This is the data source for the `/replay` endpoint.
 - **Mailbox id shape.** `newMailboxID` preserves the short `YYYYMMDDTHHMMSS-xxxx` (20 chars, UTC, 4 hex chars of UUID4 entropy) compatibility shape shared with the kernel and TUI (`tui/internal/fs/mail.go`). The portal reads existing directory names and message `id`/`_mailbox_id` records without rewriting them.
-- **`IsAlive`** uses a threshold resolved by `AgentAliveThresholdSec()`, which defaults to 5 seconds and can be overridden via the `LINGTAI_AGENT_ALIVE_THRESHOLD_SEC` env var (missing/blank/malformed/non-finite/zero/negative values fall back to the default). This window is a Portal-side presentation/operational setting, independent of the kernel's own heartbeat liveness config. A stale or missing heartbeat only clears `AgentNode.Alive` in `BuildNetwork`; it does not rewrite the manifest `State`.
+- **`IsAlive`** uses a threshold resolved by `AgentAliveThresholdSec()`, which defaults to 10 seconds and can be overridden via the shared `LINGTAI_AGENT_ALIVE_THRESHOLD_SEC` env var (missing/blank/malformed/non-finite/zero/negative values fall back to the default). The TUI, Portal, and kernel use this same liveness setting. A stale or missing heartbeat only clears `AgentNode.Alive` in `BuildNetwork`; it does not rewrite the manifest `State`.
 - **Atomic writes** (location, signals) use temp-file + rename, matching the kernel's filesystem contract.
 - **Capability parsing** handles both `[]string` (from TUI-generated presets) and tuple format (from live agents), so the portal works with projects the TUI hasn't touched.

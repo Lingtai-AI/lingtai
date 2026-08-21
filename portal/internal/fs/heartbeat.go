@@ -14,17 +14,16 @@ import (
 const AgentAliveThresholdEnvVar = "LINGTAI_AGENT_ALIVE_THRESHOLD_SEC"
 
 // DefaultAgentAliveThresholdSec is the fallback heartbeat-liveness window
-// when AgentAliveThresholdEnvVar is unset or invalid. This window is a
-// Portal-side presentation/operational setting, intentionally independent of
-// the kernel's own heartbeat liveness config (src/lingtai/kernel/config.py).
-const DefaultAgentAliveThresholdSec = 5.0
+// when AgentAliveThresholdEnvVar is unset or invalid. It is shared with the
+// TUI and kernel heartbeat-liveness contract.
+const DefaultAgentAliveThresholdSec = 10.0
 
 // AgentAliveThresholdSec resolves the heartbeat-liveness window from
 // AgentAliveThresholdEnvVar, falling back to DefaultAgentAliveThresholdSec
 // when the variable is missing, blank, malformed, non-finite, zero, or
 // negative. Callers apply the result with a strict age < threshold
-// comparison (see IsAlive below) so a live agent is never reported dead or
-// suspended.
+// comparison (see IsAlive below). Liveness observation never rewrites the
+// manifest lifecycle state.
 func AgentAliveThresholdSec() float64 {
 	raw := strings.TrimSpace(os.Getenv(AgentAliveThresholdEnvVar))
 	if raw == "" {

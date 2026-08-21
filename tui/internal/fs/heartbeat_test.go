@@ -8,13 +8,12 @@ import (
 	"time"
 )
 
-// TestAgentAliveThresholdSec_Default pins the fallback heartbeat-liveness
-// window to 5s. This window is a TUI-side presentation/operational setting,
-// intentionally independent of the kernel's own heartbeat liveness config.
+// TestAgentAliveThresholdSec_Default pins the shared fallback
+// heartbeat-liveness window to 10s.
 func TestAgentAliveThresholdSec_Default(t *testing.T) {
 	t.Setenv(AgentAliveThresholdEnvVar, "")
-	if got := AgentAliveThresholdSec(); got != 5.0 {
-		t.Fatalf("AgentAliveThresholdSec() = %v, want default 5.0", got)
+	if got := AgentAliveThresholdSec(); got != 10.0 {
+		t.Fatalf("AgentAliveThresholdSec() = %v, want default 10.0", got)
 	}
 }
 
@@ -46,32 +45,32 @@ func TestIsAlive_FreshHeartbeat(t *testing.T) {
 	}
 }
 
-func TestIsAlive_TwoSecondOldHeartbeat_Alive(t *testing.T) {
+func TestIsAlive_NineSecondOldHeartbeat_Alive(t *testing.T) {
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-2*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-9*time.Second).UnixNano())/1e9)
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
 	if !IsAlive(dir, AgentAliveThresholdSec()) {
-		t.Error("expected alive for 2s-old heartbeat under the default 5s threshold")
+		t.Error("expected alive for 9s-old heartbeat under the default 10s threshold")
 	}
 }
 
-func TestIsAlive_FiveSecondOldHeartbeat_Stale(t *testing.T) {
+func TestIsAlive_TenSecondOldHeartbeat_Stale(t *testing.T) {
 	// Strict boundary: an age at or beyond the threshold is stale
 	// (age < threshold, not age <= threshold).
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-5*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-10*time.Second).UnixNano())/1e9)
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
 	if IsAlive(dir, AgentAliveThresholdSec()) {
-		t.Error("expected stale for 5s-old heartbeat (strict age < threshold boundary)")
+		t.Error("expected stale for 10s-old heartbeat (strict age < threshold boundary)")
 	}
 }
 
-func TestIsAlive_SixSecondOldHeartbeat_Stale(t *testing.T) {
+func TestIsAlive_ElevenSecondOldHeartbeat_Stale(t *testing.T) {
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-6*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-11*time.Second).UnixNano())/1e9)
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
 	if IsAlive(dir, AgentAliveThresholdSec()) {
-		t.Error("expected dead for 6s-old heartbeat")
+		t.Error("expected dead for 11s-old heartbeat")
 	}
 }
 
