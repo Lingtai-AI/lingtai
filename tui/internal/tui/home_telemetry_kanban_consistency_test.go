@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,126 +9,69 @@ import (
 )
 
 // Regression guard for Jason's "home context bar disagrees with /kanban" report
-// (follow-up to PR #443).
-//
-// Root cause: gatherHomeTelemetry sourced context usage from the freshest
-// notification Meta.Context.Usage in the session cache, which the kernel only
-// refreshes when a notification is injected (per molt round). /kanban
-// (props.go:518-535) reads the live `.status.json` Tokens.Context snapshot, which
-// the kernel rewrites on a tight cadence. Between notifications the two diverge —
-// observed live as 80% (stale notification) vs 74.6% (fresh .status.json).
-//
-// The fix makes the home row read the SAME `.status.json` snapshot /kanban does
-// (gated identically on WindowSize > 0), with the notification value kept only as
-// a fallback for agents that have no live status.
+// (follow-up to PR #443), now re-anchored on the kernel Agent Record migration
+// (kernel #1423): gatherHomeTelemetry's context usage/window/used tokens come
+// from ONE canonical `system/agent_record.json` snapshot — the SAME
+// lingtai.agent_record/v1 record schema the kernel's session_stats module
+// throttles and rewrites live (default every 5s, session_stats_refresh_seconds).
+// There is no independent notification/events.jsonl fallback any more: a
+// missing or context-less record means the row has no context segment,
+// exactly like /kanban's own WindowSize > 0 gate degrades to no context
+// section for a stopped/never-booted agent.
 
-// writeStatusJSON writes a minimal .status.json into an agent dir with the given
-// context window snapshot, matching the shape fs.ReadStatus parses.
-func writeStatusJSON(t *testing.T, dir string, usagePct float64, total, window int) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	doc := fmt.Sprintf(`{"tokens":{"context":{"system_tokens":1000,"tools_tokens":2000,`+
-		`"history_tokens":3000,"total_tokens":%d,"window_size":%d,"usage_pct":%g}}}`, total, window, usagePct)
-	if err := os.WriteFile(filepath.Join(dir, ".status.json"), []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// newTelemetryModel builds a MailModel rooted at dir/orch and drives the deferred
-// initial rebuild so the session cache is populated — the normal launch path.
-func newTelemetryModel(t *testing.T, dir, orchDir string) MailModel {
-	t.Helper()
-	humanDir := filepath.Join(dir, "human")
-	if err := os.MkdirAll(humanDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
-	m, _ = m.Update(m.initialRebuild())
-	return m
-}
-
-// When a live `.status.json` is present, the home row must read its usage_pct and
-// window_size — exactly what /kanban shows — and must NOT use the stale
-// notification value even when one is newer in the log.
-func TestHomeTelemetryPrefersStatusJSONOverNotification(t *testing.T) {
+// When a live Agent record is present, the home row must read its context
+// usage/window/used-tokens exactly as published.
+func TestHomeTelemetryReadsContextFromAgentRecord(t *testing.T) {
 	dir := t.TempDir()
 	orchDir := filepath.Join(dir, "orch")
-	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A notification carrying a STALE usage (80%) — the value the old code used.
-	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.80}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(event), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// The FRESH live snapshot /kanban reads: 74.6% of a 250k window.
-	writeStatusJSON(t, orchDir, 74.6, 186500, 250000)
+	writeHomeAgentRecord(t, orchDir, `{
+  "schema": "lingtai.agent_record/v1",
+  "usage": {"context_used_tokens": 186500, "context_limit_tokens": 250000, "context_usage_pct": 74.6}
+}`)
 
 	m := newTelemetryModel(t, dir, orchDir)
 	tel := m.gatherHomeTelemetry()
 
-	// 74.6% from .status.json, not 80% from the stale notification.
 	if got := tel.contextUsage * 100; got < 74.5 || got > 74.7 {
-		t.Fatalf("contextUsage = %.2f%%, want 74.6%% (the live .status.json value /kanban shows, not the stale notification's 80%%)", got)
+		t.Fatalf("contextUsage = %.2f%%, want 74.6%% (the live Agent record value)", got)
 	}
-	// The window must match /kanban's WindowSize, not the manifest.
 	if tel.contextLimit != 250000 {
-		t.Fatalf("contextLimit = %d, want 250000 (the .status.json window_size /kanban shows)", tel.contextLimit)
+		t.Fatalf("contextLimit = %d, want 250000 (the Agent record context_limit_tokens)", tel.contextLimit)
 	}
-	// "used" must come straight from .status.json TotalTokens — the same field
-	// /kanban renders as the numerator — so "used/limit" matches /kanban exactly.
 	if tel.contextUsed != 186500 {
-		t.Fatalf("contextUsed = %d, want 186500 (the .status.json total_tokens /kanban shows)", tel.contextUsed)
+		t.Fatalf("contextUsed = %d, want 186500 (the Agent record context_used_tokens)", tel.contextUsed)
 	}
 }
 
-// With no `.status.json` (stopped / never-booted — /kanban shows no context
-// section either), the home row falls back to the notification value so the bar
-// degrades gracefully instead of vanishing, and stays independent of Ctrl+O.
-func TestHomeTelemetryFallsBackToNotificationWithoutStatus(t *testing.T) {
+// With no Agent record at all (stopped / never-booted — /kanban shows no
+// context section either), the home row has no context segment. There is no
+// notification-log fallback: the direct-migration contract treats an absent
+// record as a bounded unavailable state, not a second source of truth.
+func TestHomeTelemetryNoContextWithoutAgentRecord(t *testing.T) {
 	dir := t.TempDir()
 	orchDir := filepath.Join(dir, "orch")
-	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.55}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(event), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// No .status.json written.
 
 	m := newTelemetryModel(t, dir, orchDir)
 	tel := m.gatherHomeTelemetry()
 
-	if got := tel.contextUsage * 100; got < 54.9 || got > 55.1 {
-		t.Fatalf("contextUsage = %.2f%%, want 55%% (notification fallback when no .status.json)", got)
+	if tel.contextUsage != -1 || tel.contextUsed != 0 || tel.contextLimit != 0 {
+		t.Fatalf("context = %+v, want the unavailable sentinel with no Agent record present", tel)
 	}
 }
 
-// A `.status.json` with WindowSize == 0 is treated as "no live snapshot" (matching
-// /kanban's WindowSize > 0 gate) and must fall back to the notification value.
-func TestHomeTelemetryStatusZeroWindowFallsBack(t *testing.T) {
+// An Agent record with context_limit_tokens == 0 (no context window known yet)
+// is treated as "no live context snapshot", mirroring /kanban's WindowSize > 0
+// gate — never a fabricated used/limit pair.
+func TestHomeTelemetryZeroContextLimitOmitsContext(t *testing.T) {
 	dir := t.TempDir()
 	orchDir := filepath.Join(dir, "orch")
-	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.33}}}` + "\n"
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(event), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	writeStatusJSON(t, orchDir, 0, 0, 0) // window_size 0 → not a usable snapshot
+	writeHomeAgentRecord(t, orchDir, `{"schema": "lingtai.agent_record/v1", "usage": {"context_used_tokens": 0, "context_limit_tokens": 0, "context_usage_pct": 0}}`)
 
 	m := newTelemetryModel(t, dir, orchDir)
 	tel := m.gatherHomeTelemetry()
 
-	if got := tel.contextUsage * 100; got < 32.9 || got > 33.1 {
-		t.Fatalf("contextUsage = %.2f%%, want 33%% (fallback when .status.json has no window)", got)
+	if tel.contextUsage != -1 || tel.contextUsed != 0 || tel.contextLimit != 0 {
+		t.Fatalf("context = %+v, want the unavailable sentinel when context_limit_tokens is 0", tel)
 	}
 }
 
@@ -140,13 +81,14 @@ func TestHomeTelemetryStatusZeroWindowFallsBack(t *testing.T) {
 //
 // — an explicit scope label, then used/limit, then the bar, then the percentage
 // on the RIGHT of the bar. It must NOT render the confusing "75% / 250.0k"
-// percentage-first form.
+// percentage-first form. This is a pure format test over the already-resolved
+// homeTelemetry struct, independent of the Agent Record migration.
 func TestFormatHomeTelemetryContextLayout(t *testing.T) {
 	tel := homeTelemetry{
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
 	}
-	got := formatHomeTelemetry(tel, 160)
+	got := formatHomeTelemetry(tel, 160, nil)
 
 	label := i18n.T("mail.telemetry_context")
 	if label == "mail.telemetry_context" {
@@ -187,7 +129,7 @@ func TestFormatHomeTelemetryContextLayoutNarrow(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
 	}
-	got := formatHomeTelemetry(tel, 30) // below homeTelemetryBarMinWidth → bar hidden
+	got := formatHomeTelemetry(tel, 30, nil) // below homeTelemetryBarMinWidth → bar hidden
 
 	if strings.ContainsRune(got, '▓') || strings.ContainsRune(got, '░') {
 		t.Errorf("narrow row %q must drop the bar", got)
@@ -207,7 +149,7 @@ func TestFormatHomeTelemetryShowsKanbanHint(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
-	got := formatHomeTelemetry(tel, 160)
+	got := formatHomeTelemetry(tel, 160, nil)
 
 	hint := i18n.T("mail.telemetry_kanban_hint")
 	if hint == "mail.telemetry_kanban_hint" {
@@ -231,7 +173,7 @@ func TestFormatHomeTelemetryDropsKanbanHintWhenNarrow(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
-	got := formatHomeTelemetry(tel, 30) // narrow
+	got := formatHomeTelemetry(tel, 30, nil) // narrow
 
 	if strings.Contains(got, i18n.T("mail.telemetry_kanban_hint")) {
 		t.Errorf("narrow row %q must drop the /kanban hint rather than collide with the metrics", got)

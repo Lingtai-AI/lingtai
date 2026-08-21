@@ -139,6 +139,11 @@ func (a *App) installMailModel(m MailModel) {
 	m.directUnreadOpInFlight = false
 	m.directUnreadSyncPending = false
 	m.directUnreadOpSerial = nextAcceptedSnapshotSerial(m.directUnreadOpSerial)
+	// The Home telemetry row's display expression is an app-owned TUI preference,
+	// not a property of the mail context being installed. Validating it here — the
+	// one boundary every real construction and restore path goes through — keeps
+	// it off NewMailModel's signature and out of every unrelated caller.
+	m.homeTelemetryDisplay = homeTelemetryDisplayFromConfig(a.tuiConfig.HomeTelemetryDisplay)
 	a.mail = m
 }
 
@@ -925,9 +930,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				if agent.IsHuman {
 					continue
 				}
-				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) && a.lingtaiCmd != "" {
+				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
 					count++
-					if err := reviveDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
+					if err := reviveAgentDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
 						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
 					}
 				}
@@ -937,9 +942,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			} else {
 				addMsg(i18n.TF("mail.cpr_all", count))
 			}
-		} else if targetDir != "" && a.lingtaiCmd != "" {
+		} else if targetDir != "" {
 			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-				if err := reviveDir(a.lingtaiCmd, targetDir); err != nil {
+				if err := reviveAgentDir(a.lingtaiCmd, targetDir); err != nil {
 					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
 				} else {
 					addMsg(i18n.TF("mail.cpr", targetName))
@@ -1749,10 +1754,12 @@ func reviveDir(lingtaiCmd, dir string) error {
 	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
+var reviveAgentDir = reviveDir
+
 // Launch heartbeat watchdog tuning. Overridable in tests to keep the poll fast.
 var (
 	launchHeartbeatPoll      = 200 * time.Millisecond
-	launchHeartbeatCap       = 60 * time.Second
+	launchHeartbeatCap       = 120 * time.Second
 	launchHeartbeatIsAlive   = fs.IsAlive
 	launchHeartbeatIsRunning = process.IsAgentRunning
 )
@@ -1950,6 +1957,18 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
+		// Re-validate the Home telemetry expression from the reloaded config, the
+		// same way the other presentation preferences above are re-applied to the
+		// preserved model rather than reconstructing it. A changed expression can
+		// change whether the telemetry row occupies a footer line, and the
+		// preserved model's reserved height has to follow it now rather than
+		// whenever some later event happens to resync — an unreserved row clips
+		// the status bar, a reserved-but-unrendered one leaves a blank line.
+		telemetryRowWas := a.mail.hasHomeTelemetry()
+		a.mail.homeTelemetryDisplay = homeTelemetryDisplayFromConfig(a.tuiConfig.HomeTelemetryDisplay)
+		if a.mail.hasHomeTelemetry() != telemetryRowWas {
+			a.mail.syncViewportHeight()
+		}
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
 		mailCmd := a.issueMailRefresh()

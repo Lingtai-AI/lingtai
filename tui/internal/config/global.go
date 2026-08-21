@@ -93,6 +93,42 @@ type TUIConfig struct {
 	// only an explicit opt-out writes "auto_refresh_off": true. Read via
 	// AutoRefreshEnabled() rather than this field directly.
 	AutoRefreshOff bool `json:"auto_refresh_off,omitempty"`
+	// HomeTelemetryDisplay optionally replaces the Home telemetry row's built-in
+	// default expression with an ordered selection of that row's OWN existing
+	// named fragments (AllowedHomeTelemetryDisplay). It is a selection/reordering
+	// only — never a template, format string, or a request for a metric the row
+	// does not already compute. Absent (the default) leaves no key in
+	// tui_config.json and the row renders exactly what it renders today.
+	// Normalized by NormalizeHomeTelemetryDisplay on both load and save, exactly
+	// like MailPageSize, so an invalid value never survives as durable config.
+	HomeTelemetryDisplay HomeTelemetryDisplay `json:"home_telemetry_display,omitempty"`
+}
+
+// HomeTelemetryDisplay is the ordered fragment selection persisted under
+// `home_telemetry_display`.
+//
+// It is a named []string purely so that a wrong-typed value fails closed on its
+// own key. A plain []string field would make `"home_telemetry_display": 5` fail
+// json.Unmarshal for the WHOLE file, and LoadTUIConfig would then throw away
+// every other valid preference (language, theme, mail_page_size, …) to load
+// defaults. One malformed presentation preference must not reset the user's
+// unrelated preferences, so an un-decodable value degrades to absent — which
+// the renderer reads as "use the built-in default expression".
+type HomeTelemetryDisplay []string
+
+// UnmarshalJSON decodes an ordered list of fragment names, treating any other
+// JSON shape as absent rather than as a file-level parse error. The names it
+// decodes are still unvalidated at this point; LoadTUIConfig runs them through
+// NormalizeHomeTelemetryDisplay, which is where an invalid expression becomes
+// absent.
+func (d *HomeTelemetryDisplay) UnmarshalJSON(data []byte) error {
+	var raw []string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		*d = nil
+		return nil
+	}
+	*d = raw
+	return nil
 }
 
 // AutoRefreshEnabled reports whether reloadable views should auto-refresh on
@@ -115,6 +151,48 @@ func NormalizeMailPageSize(size int) int {
 		}
 	}
 	return DefaultMailPageSize
+}
+
+// AllowedHomeTelemetryDisplay is the complete finite vocabulary accepted by
+// `home_telemetry_display`, listed in the Home telemetry row's default render
+// order. The renderer that owns those fragments derives BOTH its built-in
+// default expression and its fragment allowlist from this one declaration
+// (`tui.defaultHomeTelemetryDisplay`, `tui/internal/tui/home_telemetry.go`), so
+// the persisted contract and the rendered row cannot drift apart.
+var AllowedHomeTelemetryDisplay = [...]string{"session", "llm", "api", "tokens", "cache", "context"}
+
+// NormalizeHomeTelemetryDisplay returns the configured Home telemetry
+// expression, or nil for an absent or invalid one — the same finite-domain
+// normalization NormalizeMailPageSize applies to `mail_page_size`, and applied
+// at the same two points (LoadTUIConfig, SaveTUIConfig).
+//
+// Fail-closed and WHOLESALE: empty, longer than the vocabulary, repeating a
+// fragment, or naming anything outside AllowedHomeTelemetryDisplay all yield
+// nil, which the renderer reads as "render the built-in default". A partially
+// honored expression would silently drop the fragment the user misspelled.
+// Returning nil is also what keeps an invalid value from being re-saved: the
+// field is `omitempty`, so a normalized-away expression leaves no key behind
+// rather than being re-written as durable config the next time the user changes
+// an unrelated preference in /settings.
+func NormalizeHomeTelemetryDisplay(raw []string) []string {
+	if len(raw) == 0 || len(raw) > len(AllowedHomeTelemetryDisplay) {
+		return nil
+	}
+	seen := make(map[string]bool, len(raw))
+	for _, name := range raw {
+		allowed := false
+		for _, candidate := range AllowedHomeTelemetryDisplay {
+			if name == candidate {
+				allowed = true
+				break
+			}
+		}
+		if !allowed || seen[name] {
+			return nil
+		}
+		seen[name] = true
+	}
+	return raw
 }
 
 // DefaultTUIConfig returns sensible defaults.
@@ -140,6 +218,7 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 		tc.Language = "en"
 	}
 	tc.MailPageSize = NormalizeMailPageSize(tc.MailPageSize)
+	tc.HomeTelemetryDisplay = NormalizeHomeTelemetryDisplay(tc.HomeTelemetryDisplay)
 	// Insights defaults to false when absent from JSON.
 	// No override needed — zero value of bool is false.
 	return tc
@@ -148,6 +227,7 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 // SaveTUIConfig writes ~/.lingtai-tui/tui_config.json.
 func SaveTUIConfig(globalDir string, tc TUIConfig) error {
 	tc.MailPageSize = NormalizeMailPageSize(tc.MailPageSize)
+	tc.HomeTelemetryDisplay = NormalizeHomeTelemetryDisplay(tc.HomeTelemetryDisplay)
 	data, err := json.MarshalIndent(tc, "", "  ")
 	if err != nil {
 		return err

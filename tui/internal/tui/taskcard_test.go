@@ -101,6 +101,26 @@ func TestReadTaskCardBodyActiveFidelity(t *testing.T) {
 	}
 }
 
+func TestTaskCardEntriesAppendAdvertisedServiceTier(t *testing.T) {
+	agentDir := t.TempDir()
+	const body = "# Sprint\n\n- [ ] ship it\n"
+	writeTaskCardStatus(t, agentDir, "active")
+	writeTaskCardBody(t, agentDir, body)
+	if err := os.WriteFile(
+		filepath.Join(agentDir, ".agent.json"),
+		[]byte(`{"llm":{"service_tier":"fast"}}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := taskCardEntries(agentDir)
+	want := i18n.T("preset_editor.field_service_tier") + ": fast"
+	if len(entries) != 1 || !strings.Contains(entries[0].Content, want) {
+		t.Fatalf("taskCardEntries() missing service tier %q: %#v", want, entries)
+	}
+}
+
 func TestTaskCardDaemonModelSummarySingleUsesRawLingtaiModel(t *testing.T) {
 	agentDir := t.TempDir()
 	writeTaskCardDaemon(t, agentDir, "em-1", `{"backend":"lingtai","model":" raw-model "}`)

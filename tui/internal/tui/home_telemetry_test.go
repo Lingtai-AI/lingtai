@@ -113,7 +113,7 @@ func TestFormatHomeTelemetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatHomeTelemetry(tt.tel, tt.width)
+			got := formatHomeTelemetry(tt.tel, tt.width, nil)
 			if tt.exact != "" || !tt.tel.hasData() {
 				if got != tt.exact {
 					t.Fatalf("got %q, want exact %q", got, tt.exact)
@@ -149,7 +149,7 @@ func TestFormatHomeTelemetryShowsOnlyCompleteConfiguredModelPair(t *testing.T) {
 	label := i18n.T("mail.telemetry_model")
 	full := formatHomeTelemetry(homeTelemetry{
 		provider: "zhipu", model: "glm-5.2", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1,
-	}, 120)
+	}, 120, nil)
 	if !strings.Contains(full, label+" zhipu/glm-5.2") {
 		t.Fatalf("complete configured pair missing from Home telemetry: %q", full)
 	}
@@ -161,7 +161,7 @@ func TestFormatHomeTelemetryShowsOnlyCompleteConfiguredModelPair(t *testing.T) {
 		{provider: "zhipu", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1},
 		{model: "glm-5.2", sessionTokens: 10, inputTokens: 10, apiCalls: 2, contextUsage: -1},
 	} {
-		if got := formatHomeTelemetry(tel, 120); strings.Contains(got, label) {
+		if got := formatHomeTelemetry(tel, 120, nil); strings.Contains(got, label) {
 			t.Fatalf("incomplete configured pair must be omitted, got %q", got)
 		}
 	}
@@ -173,9 +173,37 @@ func TestFormatHomeTelemetryShowsCompleteConfiguredPairWithoutCounters(t *testin
 		provider:     "zhipu",
 		model:        "glm-5.2",
 		contextUsage: -1,
-	}, 120)
+	}, 120, nil)
 	if !strings.Contains(got, label+" zhipu/glm-5.2") {
 		t.Fatalf("configuration-only Home telemetry = %q, want complete configured pair", got)
+	}
+}
+
+// Jason (msg 3217): the row must make its scope explicit with a localized label
+// (the compact "Session:", Jason's final follow-up trimming the verbose "Current
+// Session"), via the i18n system — never hard-coded. The label leads the row so
+// the user knows the metrics are session-scoped.
+func TestFormatHomeTelemetryShowsLocalizedSessionLabel(t *testing.T) {
+	tel := homeTelemetry{
+		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
+		cached: 180224, contextLimit: 200000, contextUsage: 0.73,
+	}
+	got := formatHomeTelemetry(tel, 120, nil)
+
+	// The localized label must be present and must not leak the raw i18n key.
+	label := i18n.T("mail.telemetry_session")
+	if label == "mail.telemetry_session" {
+		t.Fatal("i18n key mail.telemetry_session is missing a translation")
+	}
+	if !strings.Contains(got, label) {
+		t.Errorf("telemetry row %q is missing the session-scope label %q", got, label)
+	}
+	if strings.Contains(got, "mail.telemetry_session") {
+		t.Errorf("telemetry row %q leaked the raw i18n key", got)
+	}
+	// The label must lead the row (before the metrics) so the scope is read first.
+	if li, ti := strings.Index(got, label), strings.Index(got, i18n.T("mail.telemetry_api")); li < 0 || (ti >= 0 && li > ti) {
+		t.Errorf("session label must precede the metrics in %q (label@%d api@%d)", got, li, ti)
 	}
 }
 

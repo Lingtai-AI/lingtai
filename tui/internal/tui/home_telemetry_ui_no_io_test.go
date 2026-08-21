@@ -11,25 +11,18 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-// The UI render/input path must read the cached telemetry snapshot ONLY — it must
-// never re-derive telemetry from disk (sqlite sidecar / token ledger /
-// events.jsonl). This test proves that by loading a snapshot via the async fetch,
-// then DELETING the orchestrator's on-disk telemetry sources, and asserting that
-// View() still renders the row and hasHomeTelemetry() still reports true. If View
-// or hasHomeTelemetry did any disk I/O, removing the sources would blank the row.
+// The UI render/input path must read the cached telemetry snapshot ONLY — it
+// must never re-derive telemetry from disk (the Agent record, sqlite sidecar,
+// token ledger, or events.jsonl). This test proves that by loading a snapshot
+// via the async fetch, then DELETING the orchestrator's on-disk
+// `system/agent_record.json`, and asserting that View() still renders the row
+// and hasHomeTelemetry() still reports true. If View or hasHomeTelemetry did
+// any disk I/O, removing the source would blank the row.
 func TestHomeTelemetryUIPathReadsCacheNotDisk(t *testing.T) {
 	const w, h = 100, 24
 	dir := t.TempDir()
 	orchDir := filepath.Join(dir, "orch")
-	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.73}}}` + "\n"
-	eventsPath := filepath.Join(logsDir, "events.jsonl")
-	if err := os.WriteFile(eventsPath, []byte(event), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeHomeAgentRecord(t, orchDir, `{"schema": "lingtai.agent_record/v1", "usage": {"context_used_tokens": 182500, "context_limit_tokens": 250000, "context_usage_pct": 73}}`)
 	humanDir := filepath.Join(dir, "human")
 	if err := os.MkdirAll(humanDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -48,12 +41,14 @@ func TestHomeTelemetryUIPathReadsCacheNotDisk(t *testing.T) {
 		t.Fatal("setup: telemetry row should render after the async fetch")
 	}
 
-	// Now remove every on-disk telemetry source. The whole logs tree goes, so a
-	// disk read on the UI path would find nothing.
-	if err := os.RemoveAll(logsDir); err != nil {
+	// Now remove every on-disk telemetry source. A disk read on the UI path
+	// would find nothing.
+	if err := os.RemoveAll(filepath.Join(orchDir, "system")); err != nil {
 		t.Fatal(err)
 	}
-	// Also remove any sqlite sidecar the ingest may have written.
+	if err := os.RemoveAll(filepath.Join(orchDir, "logs")); err != nil {
+		t.Fatal(err)
+	}
 	if entries, err := os.ReadDir(orchDir); err == nil {
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".db") || strings.HasSuffix(e.Name(), ".sqlite") {

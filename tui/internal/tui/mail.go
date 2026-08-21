@@ -253,6 +253,13 @@ type MailModel struct {
 	homeTelemetryLoaded    bool          // true once a background fetch has completed at least once
 	homeTelemetryInFlight  bool          // true while a fetchHomeTelemetry command is running (debounce)
 	homeTelemetryLastFetch time.Time     // completion time of the last fetch, for the TTL floor
+	// homeTelemetryDisplay is the validated row expression from tui_config.json's
+	// optional `home_telemetry_display` presentation preference; nil means the
+	// built-in default expression. It is an app-owned TUI preference, not a
+	// property of a mail context, so it is applied by App.installMailModel and
+	// re-applied on the settings-return path (app.go) rather than threaded
+	// through NewMailModel — the render path only ever walks a legal order.
+	homeTelemetryDisplay []homeTelemetrySegment
 
 	// Home async-work stats resolve exactly like home telemetry: a background
 	// fs.CountDaemons() read, cached snapshot, in-flight debounce, TTL floor.
@@ -2380,13 +2387,12 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	// Read the cached telemetry snapshot ONLY — never gatherHomeTelemetry — so the
 	// render path performs no sqlite/filesystem/JSONL work. The snapshot is
 	// refreshed asynchronously by fetchHomeTelemetry (see home_telemetry.go).
-	// Gate on hasHomeTelemetry() (which carries the homeTelemetryLoaded guard) so
-	// View and syncViewportHeight share the exact same visibility predicate and can
-	// never disagree about whether the row occupies a line.
+	// Gate on hasHomeTelemetry() (which carries the homeTelemetryLoaded guard and
+	// the selected expression) so View and syncViewportHeight share the exact same
+	// visibility predicate and can never disagree about whether the row occupies a
+	// line. It is true exactly when formatHomeTelemetry returns a row.
 	if !direct && m.hasHomeTelemetry() {
-		if telemetry := formatHomeTelemetry(m.homeTelemetry, m.width); telemetry != "" {
-			footer += telemetry + "\n"
-		}
+		footer += formatHomeTelemetry(m.homeTelemetry, m.width, m.homeTelemetryDisplay) + "\n"
 	}
 	if !direct && m.hasHomeAsyncStats() {
 		if async := formatHomeAsyncStats(m.homeAsyncStats, m.width); async != "" {
