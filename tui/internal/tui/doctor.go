@@ -24,6 +24,7 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/doctorreport"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
@@ -1709,10 +1710,10 @@ func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
 	// K6 was the former project migration/version-chain diagnostic. Runtime
 	// migrations are retired, so /doctor reports kernel/runtime health only.
 
-	// K7. Orchestrator heartbeat. Uses the canonical 3.0s liveness threshold
-	// from app.go / mail.go / nirvana.go. No remediation suggestion — a stale
-	// heartbeat can mean ASLEEP, SUSPENDED, crashed, or just lagging; the
-	// main view is the authoritative place for state and recovery actions.
+	// K7. Orchestrator heartbeat. Uses the shared env-resolved liveness
+	// threshold from fs.AgentAliveThresholdSec(), matching the rest of the TUI.
+	// No remediation suggestion — a stale heartbeat can mean ASLEEP, SUSPENDED,
+	// crashed, or just lagging; the main view is authoritative for recovery.
 	age, hbErr := readHeartbeatAge(orchDir)
 	switch {
 	case hbErr != nil && os.IsNotExist(hbErr):
@@ -1723,7 +1724,7 @@ func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
 		*lines = append(*lines, doctorLine{
 			Text: i18n.TF("doctor.heartbeat_unreadable", hbErr.Error()), Warn: true,
 		})
-	case age < 3*time.Second:
+	case age.Seconds() < fs.AgentAliveThresholdSec():
 		*lines = append(*lines, doctorLine{
 			Text: i18n.TF("doctor.heartbeat_fresh", formatHeartbeatAge(age)), OK: true,
 		})
