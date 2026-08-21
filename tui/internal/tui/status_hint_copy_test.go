@@ -145,7 +145,7 @@ func TestHomeTelemetryFirstLineShowsCopyHint(t *testing.T) {
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
 	// Wide terminal so the right-aligned affordance is not dropped.
-	got := ansi.Strip(formatHomeTelemetry(tel, 160))
+	got := ansi.Strip(formatHomeTelemetry(tel, 160, nil))
 
 	const want = "ctrl+y to select text, /kanban for details"
 	if !strings.Contains(got, want) {
@@ -176,7 +176,7 @@ func TestHomeTelemetryFirstLineDropsCopyHintWhenNarrow(t *testing.T) {
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
 		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
-	got := ansi.Strip(formatHomeTelemetry(tel, 30)) // narrow
+	got := ansi.Strip(formatHomeTelemetry(tel, 30, nil)) // narrow
 
 	if strings.Contains(got, i18n.T("mail.telemetry_copy_hint")) {
 		t.Errorf("narrow row %q must drop the copy hint rather than collide with the metrics", got)

@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
@@ -58,6 +59,80 @@ type homeTelemetry struct {
 	contextLimit  int64   // model context window; 0 = unknown
 	contextUsed   int64   // context tokens in use (Agent record usage.context_used_tokens); 0 = unknown
 	contextUsage  float64 // latest context-usage fraction 0..1; <0 = unknown
+}
+
+// --- Display expression -----------------------------------------------------
+//
+// The row renders through ONE named default expression
+// (defaultHomeTelemetryDisplay): the ordered list of the fragments it already
+// builds — session label, LLM pair, API calls, tokens/miss, cache rate, and the
+// context/gauge segment. That default is what every install shows and what the
+// row renders byte-for-byte when no preference is set.
+//
+// A user may replace it with an ordered selection of the SAME fragments via the
+// optional `home_telemetry_display` preference in TUI-owned
+// ~/.lingtai-tui/tui_config.json (config.TUIConfig.HomeTelemetryDisplay). The
+// expression is a selection/reordering and nothing else: it cannot introduce a
+// template, a format string, a color, a width, or a metric this row does not
+// already compute, and it cannot reach past the one Agent Record read in
+// gatherHomeTelemetry. The right-aligned /kanban hint and the width-dependent
+// context bar stay renderer/layout behavior below, outside the expression.
+//
+// Validation is fail-closed and wholesale: a missing, empty, over-long,
+// duplicated, unknown-name, or wrong-typed value renders the default rather
+// than a partially-honored expression, so a typo can never silently delete a
+// fragment the user still expects to see. It lives in config
+// (NormalizeHomeTelemetryDisplay), applied on both load and save, so an invalid
+// expression is discarded rather than re-written as durable config the next
+// time an unrelated preference changes.
+//
+// An expression selects; it does not reserve. A valid expression that selects
+// only fragments the current snapshot has nothing for hides the row AND drops
+// its reserved footer line, because both answers come from homeTelemetrySegments.
+
+// homeTelemetrySegment names one already-formatted fragment of the row. The
+// string values are the on-disk vocabulary of `home_telemetry_display`.
+type homeTelemetrySegment string
+
+const (
+	homeTelemetrySegSession homeTelemetrySegment = "session"
+	homeTelemetrySegLLM     homeTelemetrySegment = "llm"
+	homeTelemetrySegAPI     homeTelemetrySegment = "api"
+	homeTelemetrySegTokens  homeTelemetrySegment = "tokens"
+	homeTelemetrySegCache   homeTelemetrySegment = "cache"
+	homeTelemetrySegContext homeTelemetrySegment = "context"
+)
+
+// defaultHomeTelemetryDisplay is the built-in default expression: the whole
+// vocabulary, in the row's historical order — scope label first, then the
+// configured LLM pair, then the session economy, then live context pressure.
+// It is derived from config.AllowedHomeTelemetryDisplay, the ONE declaration of
+// that vocabulary and order (config owns it because config is what must accept
+// or reject the persisted value), so the default rendered here and the
+// expression accepted on disk cannot drift apart. Changing that list changes
+// what every install without a preference sees.
+var defaultHomeTelemetryDisplay = homeTelemetryDisplayFromConfig(config.AllowedHomeTelemetryDisplay[:])
+
+// homeTelemetryDisplayFromConfig turns a persisted `home_telemetry_display`
+// value into a renderable expression, or returns nil to mean "render the
+// default". It is called once when a MailModel is installed or re-configured —
+// never per frame.
+//
+// Validation itself is config.NormalizeHomeTelemetryDisplay (fail-closed and
+// wholesale: absent, empty, over-long, repeated, or unknown all yield nil),
+// the same normalization LoadTUIConfig and SaveTUIConfig apply, so the renderer
+// and the on-disk contract agree by construction rather than by convention.
+// This function only maps the accepted names onto the fragments below.
+func homeTelemetryDisplayFromConfig(raw []string) []homeTelemetrySegment {
+	names := config.NormalizeHomeTelemetryDisplay(raw)
+	if len(names) == 0 {
+		return nil
+	}
+	display := make([]homeTelemetrySegment, len(names))
+	for i, name := range names {
+		display[i] = homeTelemetrySegment(name)
+	}
+	return display
 }
 
 // --- Async scheduling ------------------------------------------------------
@@ -198,9 +273,15 @@ func (t homeTelemetry) hasData() bool {
 }
 
 // hasHomeTelemetry reports whether View() will render the additive telemetry row.
-// It is the single predicate shared by the height budget (syncViewportHeight)
-// and the renderer (View) so they can never disagree about whether the row
-// occupies a line — a disagreement is exactly what clipped the status bar.
+// It is the single predicate shared by the height budget (syncViewportHeight),
+// the renderer (View), and the visibility-change check in applyHomeTelemetry, so
+// they can never disagree about whether the row occupies a line — a
+// disagreement is exactly what clipped the status bar.
+//
+// It asks homeTelemetrySegments, the same function that decides the row's
+// content, so "has data" is not enough on its own: a valid user expression can
+// select only fragments this snapshot has nothing for, and then there is no row
+// to reserve a line for either.
 //
 // It reads the last-known cached snapshot (m.homeTelemetry) ONLY — never
 // gatherHomeTelemetry — so it stays on the UI hot path without touching
@@ -214,7 +295,7 @@ func (t homeTelemetry) hasData() bool {
 // row rather than showing a spurious "ctx 0%". Once a fetch has completed, the
 // snapshot carries the real -1/≥0 sentinel and hasData() is authoritative.
 func (m MailModel) hasHomeTelemetry() bool {
-	return m.homeTelemetryLoaded && m.homeTelemetry.hasData()
+	return m.homeTelemetryLoaded && len(homeTelemetrySegments(m.homeTelemetry, m.width, m.homeTelemetryDisplay)) > 0
 }
 
 // mailFooterHeight returns how many terminal rows the mail-view footer block
@@ -233,81 +314,15 @@ func mailFooterHeight(paletteLines, inputLines, telemetryRows int) int {
 // left-padded to align with the status-bar path label ("  " indent). width is
 // the full terminal width; the bar adapts to it and is hidden entirely below
 // homeTelemetryBarMinWidth so narrow terminals keep the numbers.
-func formatHomeTelemetry(t homeTelemetry, width int) string {
-	if !t.hasData() {
-		return ""
-	}
-
-	var segs []string
-
-	// Active configured LLM and current-session token economy. The Agent
-	// record's model identity is omitted as a pair when either field is absent;
-	// every token fragment is likewise dropped when its source is unknown so
-	// Home never shows a fabricated zero.
-	if t.provider != "" && t.model != "" {
-		segs = append(segs, i18n.T("mail.telemetry_model")+" "+t.provider+"/"+t.model)
-	}
-	if t.apiCalls > 0 {
-		segs = append(segs, fmt.Sprintf("%s %d", i18n.T("mail.telemetry_api"), t.apiCalls))
-	}
-	if t.sessionTokens > 0 {
-		tok := i18n.T("mail.telemetry_tok") + " " + humanizeTokenCount(t.sessionTokens)
-		// Cache-miss (input NOT served from cache) glued to the token total in
-		// parens, exactly where Jason asked for it — right after `tok …`, NOT after
-		// the cache percentage. Reuses cacheMiss() (input - cached, clamped ≥0) and
-		// humanizeTokenCount so it reads "tok 1.1M (miss 8.6k)" in the same units as
-		// the token total. Gated on inputTokens > 0 so a session with no recorded
-		// input never shows a bare "(miss 0)".
-		if t.inputTokens > 0 {
-			tok += " (" + i18n.T("mail.telemetry_miss") + " " + humanizeTokenCount(cacheMiss(t.cached, t.inputTokens)) + ")"
-		}
-		segs = append(segs, tok)
-	}
-	if t.inputTokens > 0 {
-		segs = append(segs, i18n.T("mail.telemetry_cache")+" "+formatCacheRate(t.cached, t.inputTokens))
-	}
-
-	// ctx  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure
-	// with the gauge Jason liked (msg 3195/3196). Jason's layout follow-up
-	// (msg 3251): the scope reads as an explicit label, then used/limit, then the
-	// bar, then the percentage on the RIGHT of the bar — so the eye reads
-	// "what / how much / how full" in order, never the confusing "73% / 250k" the
-	// percentage-first form produced. Jason's final follow-up trimmed the verbose
-	// "Current Context" label to the technical abbreviation "ctx" (same in every
-	// locale). The used/limit + bar + percentage are the core; the bar is dropped
-	// on narrow terminals (the numbers stay), and the "ctx" label + percentage
-	// always frame the metric.
-	if t.contextUsage >= 0 {
-		pct := t.contextUsage * 100
-		ctx := i18n.T("mail.telemetry_context")
-		if t.contextUsed > 0 && t.contextLimit > 0 {
-			ctx += " " + humanizeTokenCount(t.contextUsed) + "/" + humanizeTokenCount(t.contextLimit)
-		} else if t.contextLimit > 0 {
-			// No absolute "used" recorded yet (e.g. a fresh session with a known
-			// window but zero context tokens so far): derive it from the usage
-			// fraction so used/limit still renders rather than vanishing.
-			ctx += " " + humanizeTokenCount(int64(t.contextUsage*float64(t.contextLimit))) + "/" + humanizeTokenCount(t.contextLimit)
-		}
-		if barW := homeTelemetryBarWidth(width); barW > 0 {
-			ctx += "  " + renderContextBar(pct, barW)
-		}
-		// Percentage to the RIGHT of the bar (or right of used/limit when the bar
-		// is hidden), never before used/limit.
-		ctx += fmt.Sprintf(" %.0f%%", pct)
-		segs = append(segs, ctx)
-	}
-
+//
+// display is the validated expression to render (see homeTelemetryDisplayFromConfig);
+// nil means the built-in default, so the historical two-argument behavior is
+// simply formatHomeTelemetry(t, width, nil).
+func formatHomeTelemetry(t homeTelemetry, width int, display []homeTelemetrySegment) string {
+	segs := homeTelemetrySegments(t, width, display)
 	if len(segs) == 0 {
 		return ""
 	}
-	// Lead with a localized scope label (Jason, msg 3217) so the user reads
-	// "these numbers are the CURRENT SESSION" before the metrics. Localized via
-	// i18n (mail.telemetry_session), never hard-coded. Jason's final follow-up
-	// trimmed the verbose "Current Session" to the compact "Session:" label (same
-	// in every locale); the trailing colon now carries the set-off the middle-dot
-	// used to, so the bullet is dropped and the label reads "Session:  api 42 …".
-	// The whole row is muted by StyleFaint below.
-	segs = append([]string{i18n.T("mail.telemetry_session")}, segs...)
 	// Two spaces between segments for a calm, low-density-feeling separation; the
 	// label words themselves are muted by the caller's style.
 	left := "  " + StyleFaint.Render(strings.Join(segs, "  "))
@@ -318,7 +333,124 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 	// via i18n (mail.telemetry_kanban_hint). It is dropped on terminals too narrow
 	// to right-align it without colliding with the metrics, so the numbers always
 	// win the space. Mirrors the status bar's left/pad/right layout (mail.go).
+	// It is renderer/layout behavior, NOT expression content: no expression can
+	// move, repeat, or remove it.
 	return appendKanbanHint(left, width)
+}
+
+// homeTelemetrySegments renders, in expression order, every fragment the given
+// expression selects that this snapshot actually has data for. A nil expression
+// means the built-in default.
+//
+// It is the ONE place the row's content is decided, and it does no I/O: it reads
+// only the cached snapshot it is handed. formatHomeTelemetry styles and joins
+// what it returns; hasHomeTelemetry only asks whether it returned anything. So
+// the rendered row and the reserved footer line are the same decision, including
+// under a user expression that selects only fragments this snapshot is missing —
+// there the row hides AND no line is reserved, rather than the row hiding under a
+// line the height budget still holds open.
+func homeTelemetrySegments(t homeTelemetry, width int, display []homeTelemetrySegment) []string {
+	if !t.hasData() {
+		return nil
+	}
+	if len(display) == 0 {
+		display = defaultHomeTelemetryDisplay
+	}
+	var segs []string
+	for _, seg := range display {
+		// Every fragment is dropped when its source is unknown, so Home never
+		// shows a fabricated zero — under the default expression that is the
+		// same per-fragment gating the row has always applied.
+		if frag := homeTelemetryFragment(t, width, seg); frag != "" {
+			segs = append(segs, frag)
+		}
+	}
+	return segs
+}
+
+// homeTelemetryFragment renders one allowlisted fragment, or "" when this
+// snapshot has nothing to show for it. It is the only place a fragment's text
+// is built, so the default expression and any user expression render the exact
+// same bytes for the same fragment — the expression decides order and inclusion
+// and nothing else.
+func homeTelemetryFragment(t homeTelemetry, width int, seg homeTelemetrySegment) string {
+	switch seg {
+	case homeTelemetrySegSession:
+		// A localized scope label (Jason, msg 3217) so the user reads "these
+		// numbers are the CURRENT SESSION" before the metrics. Localized via
+		// i18n (mail.telemetry_session), never hard-coded. Jason's final follow-up
+		// trimmed the verbose "Current Session" to the compact "Session:" label
+		// (same in every locale); the trailing colon now carries the set-off the
+		// middle-dot used to, so the bullet is dropped and the label reads
+		// "Session:  api 42 …". The whole row is muted by StyleFaint above.
+		return i18n.T("mail.telemetry_session")
+
+	case homeTelemetrySegLLM:
+		// The Agent record's model identity is omitted as a pair when either
+		// field is absent — half a pair is not an identity.
+		if t.provider != "" && t.model != "" {
+			return i18n.T("mail.telemetry_model") + " " + t.provider + "/" + t.model
+		}
+
+	case homeTelemetrySegAPI:
+		if t.apiCalls > 0 {
+			return fmt.Sprintf("%s %d", i18n.T("mail.telemetry_api"), t.apiCalls)
+		}
+
+	case homeTelemetrySegTokens:
+		if t.sessionTokens > 0 {
+			tok := i18n.T("mail.telemetry_tok") + " " + humanizeTokenCount(t.sessionTokens)
+			// Cache-miss (input NOT served from cache) glued to the token total in
+			// parens, exactly where Jason asked for it — right after `tok …`, NOT after
+			// the cache percentage. Reuses cacheMiss() (input - cached, clamped ≥0) and
+			// humanizeTokenCount so it reads "tok 1.1M (miss 8.6k)" in the same units as
+			// the token total. Gated on inputTokens > 0 so a session with no recorded
+			// input never shows a bare "(miss 0)". The miss belongs to this fragment,
+			// so no expression can separate it from its token total.
+			if t.inputTokens > 0 {
+				tok += " (" + i18n.T("mail.telemetry_miss") + " " + humanizeTokenCount(cacheMiss(t.cached, t.inputTokens)) + ")"
+			}
+			return tok
+		}
+
+	case homeTelemetrySegCache:
+		if t.inputTokens > 0 {
+			return i18n.T("mail.telemetry_cache") + " " + formatCacheRate(t.cached, t.inputTokens)
+		}
+
+	case homeTelemetrySegContext:
+		// ctx  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure
+		// with the gauge Jason liked (msg 3195/3196). Jason's layout follow-up
+		// (msg 3251): the scope reads as an explicit label, then used/limit, then the
+		// bar, then the percentage on the RIGHT of the bar — so the eye reads
+		// "what / how much / how full" in order, never the confusing "73% / 250k" the
+		// percentage-first form produced. Jason's final follow-up trimmed the verbose
+		// "Current Context" label to the technical abbreviation "ctx" (same in every
+		// locale). The used/limit + bar + percentage are the core; the bar is dropped
+		// on narrow terminals (the numbers stay), and the "ctx" label + percentage
+		// always frame the metric. That internal layout is renderer behavior — an
+		// expression can only choose WHERE this whole fragment goes.
+		if t.contextUsage >= 0 {
+			pct := t.contextUsage * 100
+			ctx := i18n.T("mail.telemetry_context")
+			if t.contextUsed > 0 && t.contextLimit > 0 {
+				ctx += " " + humanizeTokenCount(t.contextUsed) + "/" + humanizeTokenCount(t.contextLimit)
+			} else if t.contextLimit > 0 {
+				// No absolute "used" recorded yet (e.g. a fresh session with a known
+				// window but zero context tokens so far): derive it from the usage
+				// fraction so used/limit still renders rather than vanishing.
+				ctx += " " + humanizeTokenCount(int64(t.contextUsage*float64(t.contextLimit))) + "/" + humanizeTokenCount(t.contextLimit)
+			}
+			if barW := homeTelemetryBarWidth(width); barW > 0 {
+				ctx += "  " + renderContextBar(pct, barW)
+			}
+			// Percentage to the RIGHT of the bar (or right of used/limit when the bar
+			// is hidden), never before used/limit.
+			ctx += fmt.Sprintf(" %.0f%%", pct)
+			return ctx
+		}
+	}
+	return ""
 }
 
 // appendKanbanHint right-aligns the first-line affordance against the terminal

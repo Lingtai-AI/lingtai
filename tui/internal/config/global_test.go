@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -483,4 +484,119 @@ func TestHasAPIKeys(t *testing.T) {
 			t.Errorf("%s: HasAPIKeys(%v) = %v, want %v", tc.name, tc.keys, got, tc.want)
 		}
 	}
+}
+
+// home_telemetry_display is an optional presentation preference the user hand-
+// edits. Loading it must never cost them their other preferences, and never
+// setting it must leave no key behind.
+func TestTUIConfigHomeTelemetryDisplayFailsClosedAndStaysOmitted(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	t.Run("wrong type falls back to absent without resetting other preferences", func(t *testing.T) {
+		// A hand-edited string where a list belongs. Decoding this field as a
+		// plain []string would fail the WHOLE file and silently reset language,
+		// theme, and mail_page_size to defaults.
+		dir := write(t, `{
+  "language": "zh",
+  "theme": "ink-light",
+  "mail_page_size": 500,
+  "tool_call_truncate": 400,
+  "home_telemetry_display": "context"
+}`)
+		tc := LoadTUIConfig(dir)
+		if tc.HomeTelemetryDisplay != nil {
+			t.Errorf("wrong-typed home_telemetry_display = %v, want nil (fall back to default)", tc.HomeTelemetryDisplay)
+		}
+		if tc.Language != "zh" || tc.Theme != "ink-light" || tc.MailPageSize != 500 || tc.ToolCallTruncate != 400 {
+			t.Fatalf("one malformed presentation preference reset the others: %+v", tc)
+		}
+
+		// Saving back must not reintroduce the malformed value, and must still
+		// carry the surviving preferences.
+		if err := SaveTUIConfig(dir, tc); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "tui_config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "home_telemetry_display") {
+			t.Errorf("save re-wrote the invalid preference:\n%s", data)
+		}
+		if reloaded := LoadTUIConfig(dir); reloaded.Language != "zh" || reloaded.Theme != "ink-light" || reloaded.MailPageSize != 500 || reloaded.ToolCallTruncate != 400 {
+			t.Fatalf("preferences did not survive the load/save round trip: %+v", reloaded)
+		}
+	})
+
+	t.Run("a well-formed but invalid list is discarded and never re-saved", func(t *testing.T) {
+		// `ctx` is a near-miss of `context`. The list decodes fine, so nothing
+		// upstream rejects it — NormalizeHomeTelemetryDisplay is what has to,
+		// wholesale, on BOTH load and save. Otherwise changing an unrelated
+		// preference in /settings re-writes the typo as durable config.
+		for _, body := range []string{
+			`{"language": "zh", "theme": "ink-light", "mail_page_size": 500, "home_telemetry_display": ["context", "ctx"]}`,
+			`{"language": "zh", "theme": "ink-light", "mail_page_size": 500, "home_telemetry_display": ["context", "context"]}`,
+			`{"language": "zh", "theme": "ink-light", "mail_page_size": 500, "home_telemetry_display": []}`,
+			`{"language": "zh", "theme": "ink-light", "mail_page_size": 500,
+			  "home_telemetry_display": ["session", "llm", "api", "tokens", "cache", "context", "session"]}`,
+		} {
+			dir := write(t, body)
+			tc := LoadTUIConfig(dir)
+			if tc.HomeTelemetryDisplay != nil {
+				t.Errorf("invalid home_telemetry_display in %s loaded as %v, want nil", body, tc.HomeTelemetryDisplay)
+			}
+			if tc.Language != "zh" || tc.Theme != "ink-light" || tc.MailPageSize != 500 {
+				t.Fatalf("discarding the invalid expression cost the other preferences: %+v", tc)
+			}
+			if err := SaveTUIConfig(dir, tc); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "tui_config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "home_telemetry_display") {
+				t.Errorf("save re-wrote the invalid preference:\n%s", data)
+			}
+			if !strings.Contains(string(data), `"language": "zh"`) || !strings.Contains(string(data), `"mail_page_size": 500`) {
+				t.Errorf("save dropped the surviving preferences:\n%s", data)
+			}
+		}
+	})
+
+	t.Run("a valid expression survives load and save", func(t *testing.T) {
+		dir := write(t, `{"language": "en", "home_telemetry_display": ["context", "session"]}`)
+		tc := LoadTUIConfig(dir)
+		if len(tc.HomeTelemetryDisplay) != 2 || tc.HomeTelemetryDisplay[0] != "context" || tc.HomeTelemetryDisplay[1] != "session" {
+			t.Fatalf("home_telemetry_display = %v, want [context session]", tc.HomeTelemetryDisplay)
+		}
+		if err := SaveTUIConfig(dir, tc); err != nil {
+			t.Fatal(err)
+		}
+		reloaded := LoadTUIConfig(dir)
+		if len(reloaded.HomeTelemetryDisplay) != 2 || reloaded.HomeTelemetryDisplay[0] != "context" || reloaded.HomeTelemetryDisplay[1] != "session" {
+			t.Fatalf("valid home_telemetry_display did not round trip: %v", reloaded.HomeTelemetryDisplay)
+		}
+	})
+
+	t.Run("absent stays absent on save", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := SaveTUIConfig(dir, DefaultTUIConfig()); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "tui_config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "home_telemetry_display") {
+			t.Errorf("the default (absent) preference wrote a key:\n%s", data)
+		}
+	})
 }
