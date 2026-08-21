@@ -258,7 +258,7 @@ func enrichRecord(r *Record) {
 		r.ContextAvailable = true
 	}
 	r.Role = RoleFor(*r)
-	r.Heartbeat = fs.ReadHeartbeat(r.AgentDir, fs.AgentAliveThresholdSec)
+	r.Heartbeat = fs.ReadHeartbeat(r.AgentDir, fs.AgentAliveThresholdSec())
 	r.LockExists = fileExists(filepath.Join(r.AgentDir, ".agent.lock"))
 }
 

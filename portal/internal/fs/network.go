@@ -26,14 +26,13 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 		if nodes[i].IsHuman {
 			nodes[i].Alive = true
 		} else {
-			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec)
-			// Heartbeat is ground truth — no heartbeat means SUSPENDED.
-			// Malformed manifests keep their explicit repair state instead of
-			// being relabeled as suspended (issue #846).
-			if !nodes[i].Alive && nodes[i].State != "" && nodes[i].State != "MALFORMED" {
-
-				nodes[i].State = "SUSPENDED"
-			}
+			// Heartbeat freshness is liveness evidence, not a lifecycle
+			// state. A stale/missing heartbeat surfaces through Alive=false;
+			// it must not fabricate a manifest state transition into
+			// SUSPENDED (issue false-suspended, 2026-08-18). A manifest that
+			// is genuinely SUSPENDED stays SUSPENDED because this leaves
+			// State untouched.
+			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, AgentAliveThresholdSec())
 		}
 	}
 

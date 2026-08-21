@@ -248,6 +248,103 @@ func TestComputeNetworkActivity_HumanIgnored(t *testing.T) {
 	}
 }
 
+// TestNormalizeAgentLiveness_StaleHeartbeatKeepsManifestState is the
+// topology-level regression for the false-suspended fix (2026-08-18): a
+// stale/missing heartbeat must surface only through Alive=false and must not
+// fabricate a manifest ACTIVE state into SUSPENDED.
+func TestNormalizeAgentLiveness_StaleHeartbeatKeepsManifestState(t *testing.T) {
+	base := t.TempDir()
+	writeActivityAgent(t, base, "alice", "ACTIVE", false)
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	var alice *AgentNode
+	for i := range net.Nodes {
+		if net.Nodes[i].Address == "alice" {
+			alice = &net.Nodes[i]
+		}
+	}
+	if alice == nil {
+		t.Fatal("alice node not found")
+	}
+	if alice.Alive {
+		t.Error("alice with stale heartbeat should not be alive")
+	}
+	if alice.State != "ACTIVE" {
+		t.Errorf("alice with stale heartbeat must keep manifest state ACTIVE, got State=%q", alice.State)
+	}
+}
+
+// TestNormalizeAgentLiveness_MissingHeartbeatKeepsManifestState is the
+// missing-heartbeat companion to the stale-heartbeat regression above: an
+// agent with no heartbeat file at all must behave the same as one with a
+// stale heartbeat — Alive=false without rewriting the manifest ACTIVE state.
+func TestNormalizeAgentLiveness_MissingHeartbeatKeepsManifestState(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "alice")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir agent: %v", err)
+	}
+	writeJSON(t, filepath.Join(agentDir, ".agent.json"), map[string]interface{}{
+		"agent_name": "alice",
+		"address":    "alice",
+		"state":      "ACTIVE",
+		"admin":      map[string]interface{}{"karma": true},
+	})
+	// No heartbeat file written at all.
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	var alice *AgentNode
+	for i := range net.Nodes {
+		if net.Nodes[i].Address == "alice" {
+			alice = &net.Nodes[i]
+		}
+	}
+	if alice == nil {
+		t.Fatal("alice node not found")
+	}
+	if alice.Alive {
+		t.Error("alice with missing heartbeat should not be alive")
+	}
+	if alice.State != "ACTIVE" {
+		t.Errorf("alice with missing heartbeat must keep manifest state ACTIVE, got State=%q", alice.State)
+	}
+}
+
+// TestNormalizeAgentLiveness_GenuineSuspendedStaysSuspended proves a real
+// kernel/manifest SUSPENDED lifecycle state remains visibly SUSPENDED — the
+// fix removes state fabrication for other states without weakening an actual
+// SUSPENDED manifest.
+func TestNormalizeAgentLiveness_GenuineSuspendedStaysSuspended(t *testing.T) {
+	base := t.TempDir()
+	writeActivityAgent(t, base, "bob", "SUSPENDED", false)
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	var bob *AgentNode
+	for i := range net.Nodes {
+		if net.Nodes[i].Address == "bob" {
+			bob = &net.Nodes[i]
+		}
+	}
+	if bob == nil {
+		t.Fatal("bob node not found")
+	}
+	if bob.Alive {
+		t.Error("bob with stale heartbeat should not be alive")
+	}
+	if bob.State != "SUSPENDED" {
+		t.Errorf("bob with genuine manifest SUSPENDED state should stay SUSPENDED, got State=%q", bob.State)
+	}
+}
+
 func TestComputeNetworkActivity_StuckLiveAgentFallsBackToIdle(t *testing.T) {
 	base := t.TempDir()
 	writeActivityAgent(t, base, "alice", "STUCK", true)

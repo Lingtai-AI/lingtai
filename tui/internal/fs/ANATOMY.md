@@ -153,7 +153,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | **network.go** | | |
 | `NetworkOptions` / `BuildNetwork(baseDir)` / `BuildNetworkWithOptions` | `tui/internal/fs/network.go:8-79` | typed full topology by default; `SkipMailEdges` keeps nodes/avatar/contact/activity shape while omitting the historical mail scan and its total |
 | **activity.go** | | |
-| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:42` | lightweight non-human project activity badge: folds agent state, heartbeat liveness, `.status.json` activity evidence, and running daemons into active, daemon-active, idle, asleep, suspend |
+| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:46` | lightweight non-human project activity badge: folds agent state, heartbeat liveness, `.status.json` activity evidence, and running daemons into active, daemon-active, idle, asleep, suspend. Heartbeat liveness (`Alive`) gates every non-daemon bucket but never rewrites the per-agent manifest `State` — a stale/missing heartbeat surfaces only through `AgentNode.Alive=false`, and a genuine manifest `SUSPENDED` is the only path to a `SUSPENDED` node |
 | `hasStatusActivity(agentDir, now)` | `tui/internal/fs/activity.go:174` | treats heartbeat-live agents as active when status-snapshot evidence is fresh: `active_turn` via mtime/started_at/last_progress_at within 600s, or `last_progress_at` within 90s |
 | `CountDaemons(agentDir)` | `tui/internal/fs/activity.go:238` | counts parseable `daemons/<run_id>/daemon.json` files; running daemons feed project daemon-active status and selected-agent running/total displays |
 | **resolve.go** | | |

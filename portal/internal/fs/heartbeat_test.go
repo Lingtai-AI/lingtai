@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,49 +9,69 @@ import (
 	"time"
 )
 
-// TestAgentAliveThresholdSec_MatchesKernelContract pins the Portal's liveness
-// window to the kernel contract: one-second heartbeat tick and five-second
-// liveness (src/lingtai/kernel/config.py:132-133), applied with a strict
-// age < threshold comparison (src/lingtai/kernel/agent_presence/__init__.py).
-// Drift back to 2s (issue #845) fails here so the disagreement stays visible.
-func TestAgentAliveThresholdSec_MatchesKernelContract(t *testing.T) {
-	if AgentAliveThresholdSec != 5.0 {
-		t.Fatalf("AgentAliveThresholdSec = %v, want 5.0 (kernel heartbeat liveness, issue #845)", AgentAliveThresholdSec)
+// TestAgentAliveThresholdSec_Default pins the fallback heartbeat-liveness
+// window to 5s. This window is a Portal-side presentation/operational
+// setting, intentionally independent of the kernel's own heartbeat liveness
+// config.
+func TestAgentAliveThresholdSec_Default(t *testing.T) {
+	t.Setenv(AgentAliveThresholdEnvVar, "")
+	if got := AgentAliveThresholdSec(); got != 5.0 {
+		t.Fatalf("AgentAliveThresholdSec() = %v, want default 5.0", got)
 	}
 }
 
-func TestIsAlive_ThreeSecondOldHeartbeat_Alive(t *testing.T) {
-	// Regression for issue #845: a heartbeat ~3s old is alive to the kernel
-	// (3 < 5) and must be alive to the Portal too, never reported dead.
+func TestAgentAliveThresholdSec_ValidOverride(t *testing.T) {
+	t.Setenv(AgentAliveThresholdEnvVar, "7.5")
+	if got := AgentAliveThresholdSec(); got != 7.5 {
+		t.Fatalf("AgentAliveThresholdSec() = %v, want overridden 7.5", got)
+	}
+}
+
+func TestAgentAliveThresholdSec_InvalidFallsBackToDefault(t *testing.T) {
+	cases := []string{"", "   ", "not-a-number", "0", "-1", "NaN", "Inf", "-Inf"}
+	for _, raw := range cases {
+		t.Run(fmt.Sprintf("%q", raw), func(t *testing.T) {
+			t.Setenv(AgentAliveThresholdEnvVar, raw)
+			if got := AgentAliveThresholdSec(); got != DefaultAgentAliveThresholdSec {
+				t.Errorf("AgentAliveThresholdSec() with env=%q = %v, want default %v", raw, got, DefaultAgentAliveThresholdSec)
+			}
+		})
+	}
+}
+
+func TestIsAlive_TwoSecondOldHeartbeat_Alive(t *testing.T) {
 	dir := t.TempDir()
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-3*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-2*time.Second).Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if !IsAlive(dir, AgentAliveThresholdSec) {
-		t.Error("expected alive for 3s-old heartbeat under the kernel 5s contract")
+	if !IsAlive(dir, AgentAliveThresholdSec()) {
+		t.Error("expected alive for 2s-old heartbeat under the default 5s threshold")
 	}
 }
 
 func TestIsAlive_FiveSecondOldHeartbeat_Stale(t *testing.T) {
-	// Strict boundary: an age at or beyond the 5s threshold is stale
-	// (kernel compares age < threshold, not age <= threshold).
+	// Strict boundary: an age at or beyond the threshold is stale
+	// (age < threshold, not age <= threshold).
 	dir := t.TempDir()
 	ts := fmt.Sprintf("%f", float64(time.Now().Add(-5*time.Second).Unix()))
 	os.WriteFile(filepath.Join(dir, ".agent.heartbeat"), []byte(ts), 0o644)
-	if IsAlive(dir, AgentAliveThresholdSec) {
+	if IsAlive(dir, AgentAliveThresholdSec()) {
 		t.Error("expected stale for 5s-old heartbeat (strict age < threshold boundary)")
 	}
 }
 
 // TestBuildNetwork_HeartbeatAgeDrivesAliveState is the Portal topology-level
-// regression for issue #845: a 3s-old heartbeat (alive to the kernel) must not
-// be marked dead or SUSPENDED, while an 8s-old heartbeat (stale even to the
-// kernel) is not alive and is mapped to SUSPENDED.
+// regression for issue #845: a 2s-old heartbeat (alive under the default
+// threshold) must not be marked dead, while a 6s-old heartbeat (stale
+// under the default threshold) is not alive. Neither age rewrites the
+// manifest ACTIVE state: heartbeat freshness is liveness evidence (Alive),
+// not permission to fabricate a lifecycle state (false-suspended fix,
+// 2026-08-18).
 func TestBuildNetwork_HeartbeatAgeDrivesAliveState(t *testing.T) {
 	base := t.TempDir()
 
 	bobDir := filepath.Join(base, "bob")
 	writeAgentManifest(t, bobDir, "bob", false) // manifest state "ACTIVE"
-	ts := fmt.Sprintf("%f", float64(time.Now().Add(-3*time.Second).Unix()))
+	ts := fmt.Sprintf("%f", float64(time.Now().Add(-2*time.Second).Unix()))
 	os.WriteFile(filepath.Join(bobDir, ".agent.heartbeat"), []byte(ts), 0o644)
 
 	net, err := BuildNetwork(base)
@@ -67,15 +88,16 @@ func TestBuildNetwork_HeartbeatAgeDrivesAliveState(t *testing.T) {
 		t.Fatal("bob node not found")
 	}
 	if !bob.Alive {
-		t.Errorf("bob with 3s-old heartbeat should be alive under the kernel 5s contract, got Alive=false")
+		t.Errorf("bob with 2s-old heartbeat should be alive under the default 5s threshold, got Alive=false")
 	}
 	if bob.State == "SUSPENDED" {
-		t.Errorf("bob with 3s-old heartbeat must not be SUSPENDED, got State=%q", bob.State)
+		t.Errorf("bob with 2s-old heartbeat must not be SUSPENDED, got State=%q", bob.State)
 	}
 
-	// An 8s-old heartbeat is stale to the kernel too: not alive and, having a
-	// state, mapped to SUSPENDED by the topology build.
-	staleTs := fmt.Sprintf("%f", float64(time.Now().Add(-8*time.Second).Unix()))
+	// A 6s-old heartbeat is stale under the default threshold too: not
+	// alive, but the manifest's ACTIVE state must survive untouched —
+	// liveness and lifecycle state are observed independently.
+	staleTs := fmt.Sprintf("%f", float64(time.Now().Add(-6*time.Second).Unix()))
 	os.WriteFile(filepath.Join(bobDir, ".agent.heartbeat"), []byte(staleTs), 0o644)
 
 	net, err = BuildNetwork(base)
@@ -92,9 +114,88 @@ func TestBuildNetwork_HeartbeatAgeDrivesAliveState(t *testing.T) {
 		t.Fatal("bob node not found after stale heartbeat")
 	}
 	if bob.Alive {
-		t.Error("bob with 8s-old heartbeat should not be alive")
+		t.Error("bob with 6s-old heartbeat should not be alive")
 	}
-	if bob.State != "SUSPENDED" {
-		t.Errorf("bob with 8s-old heartbeat and a state should be SUSPENDED, got State=%q", bob.State)
+	if bob.State != "ACTIVE" {
+		t.Errorf("bob with 6s-old heartbeat must keep manifest state ACTIVE, got State=%q", bob.State)
+	}
+}
+
+// TestBuildNetwork_MissingHeartbeatKeepsManifestState is the missing-heartbeat
+// companion to TestBuildNetwork_HeartbeatAgeDrivesAliveState: an agent with no
+// heartbeat file at all must behave the same as one with a stale heartbeat —
+// Alive=false without rewriting the manifest ACTIVE state (false-suspended
+// fix, 2026-08-18).
+func TestBuildNetwork_MissingHeartbeatKeepsManifestState(t *testing.T) {
+	base := t.TempDir()
+
+	daveDir := filepath.Join(base, "dave")
+	writeAgentManifest(t, daveDir, "dave", false) // manifest state "ACTIVE", no heartbeat file written
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	var dave *AgentNode
+	for i := range net.Nodes {
+		if net.Nodes[i].Address == "dave" {
+			dave = &net.Nodes[i]
+		}
+	}
+	if dave == nil {
+		t.Fatal("dave node not found")
+	}
+	if dave.Alive {
+		t.Error("dave with missing heartbeat should not be alive")
+	}
+	if dave.State != "ACTIVE" {
+		t.Errorf("dave with missing heartbeat must keep manifest state ACTIVE, got State=%q", dave.State)
+	}
+}
+
+// TestBuildNetwork_SuspendedManifestStaysSuspendedWhenDead proves the
+// genuine kernel/manifest SUSPENDED lifecycle state remains visibly
+// SUSPENDED when its heartbeat is stale — the fix removes state fabrication
+// for other states without weakening a real SUSPENDED manifest.
+func TestBuildNetwork_SuspendedManifestStaysSuspendedWhenDead(t *testing.T) {
+	base := t.TempDir()
+
+	carolDir := filepath.Join(base, "carol")
+	writeAgentManifest(t, carolDir, "carol", false)
+	manifestPath := filepath.Join(carolDir, ".agent.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["state"] = "SUSPENDED"
+	out, _ := json.Marshal(m)
+	if err := os.WriteFile(manifestPath, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleTs := fmt.Sprintf("%f", float64(time.Now().Add(-6*time.Second).Unix()))
+	os.WriteFile(filepath.Join(carolDir, ".agent.heartbeat"), []byte(staleTs), 0o644)
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	var carol *AgentNode
+	for i := range net.Nodes {
+		if net.Nodes[i].Address == "carol" {
+			carol = &net.Nodes[i]
+		}
+	}
+	if carol == nil {
+		t.Fatal("carol node not found")
+	}
+	if carol.Alive {
+		t.Error("carol with 6s-old heartbeat should not be alive")
+	}
+	if carol.State != "SUSPENDED" {
+		t.Errorf("carol with genuine manifest SUSPENDED state should stay SUSPENDED, got State=%q", carol.State)
 	}
 }
