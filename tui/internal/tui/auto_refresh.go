@@ -35,10 +35,6 @@ func autoRefreshTick() tea.Cmd {
 	return tea.Every(autoRefreshInterval, func(t time.Time) tea.Msg { return autoRefreshTickMsg(t) })
 }
 
-func autoRefreshCtrlRMsg() tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
-}
-
 // autoRefreshActiveView reloads only the kanban/props view. Other Ctrl+R-
 // reloadable screens (/mailbox, /system, /daemons, markdown viewers, pickers,
 // and editors) are intentionally excluded from the 1s auto-refresh loop because
