@@ -504,6 +504,8 @@ func StateColor(state string) color.Color {
 		return ColorAsleep
 	case "SUSPENDED":
 		return ColorSuspended
+	case "STALE":
+		return ColorStuck
 	case "REFRESHING":
 		return ColorIdle
 	default:

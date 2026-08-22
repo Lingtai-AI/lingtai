@@ -416,6 +416,7 @@
   "state.asleep": "休眠",
   "state.idle": "待命",
   "state.stuck": "卡顿",
+  "state.stale": "过期",
   "state.suspended": "假死",
   "state.refreshing": "沐浴",
   "palette.doctor": "诊断连接问题",

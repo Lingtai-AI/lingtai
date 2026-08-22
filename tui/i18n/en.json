@@ -420,6 +420,7 @@
   "state.asleep": "asleep",
   "state.idle": "idle",
   "state.stuck": "stuck",
+  "state.stale": "stale",
   "state.suspended": "suspended",
   "state.refreshing": "refreshing",
   "palette.doctor": "Diagnose connection issues",
