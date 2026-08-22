@@ -416,6 +416,7 @@
   "state.asleep": "眠",
   "state.idle": "定",
   "state.stuck": "滞",
+  "state.stale": "陈",
   "state.suspended": "假死",
   "state.refreshing": "更衣",
   "palette.doctor": "诊连",

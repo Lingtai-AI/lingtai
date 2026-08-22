@@ -80,11 +80,12 @@ type mailRefreshMsg struct {
 	acceptedSnapshot     acceptedMailSnapshot
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
-	directStates         map[string]string    // stable direct-thread key -> target lifecycle state
-	lastApiCallAt        time.Time            // orchestrator .status.json runtime.last_api_call_at (fallback last_progress_at; zero when absent)
-	directLastApiCall    map[string]time.Time // stable direct-thread key -> target last_api_call_at
+	directStates         map[string]agentLifecycleState // stable direct-thread key -> target lifecycle presentation
+	lastApiCallAt        time.Time                      // orchestrator .status.json runtime.last_api_call_at (fallback last_progress_at; zero when absent)
+	directLastApiCall    map[string]time.Time           // stable direct-thread key -> target last_api_call_at
 	alive                bool
-	state                string // active, idle, stuck, asleep, suspended, or ""
+	state                string // active, idle, stuck, asleep, stale, suspended, or ""
+	staleSeconds         int    // ordinary stale heartbeat age; zero outside the stale presentation
 	activity             fs.NetworkActivity
 	orchName             string // agent name from .agent.json (may change at runtime)
 	orchNickname         string // nickname from .agent.json
@@ -157,9 +158,23 @@ var thinkingQuotesMap = map[string][]string{
 	},
 }
 
+// heartbeatSuspendedGapSec is deliberately a presentation cutoff: the normal
+// liveness threshold still decides fresh versus stale, while a much longer
+// observed heartbeat gap may render as suspended.
+const heartbeatSuspendedGapSec = 120.0
+
+// agentLifecycleState is the command-prepared lifecycle presentation. State
+// comes from the manifest unless a valid stale heartbeat needs the temporary
+// stale/long-gap overlay; staleSeconds is rendered only for ordinary staleness.
+type agentLifecycleState struct {
+	state        string
+	staleSeconds int
+}
+
 type directAgentLifecycle struct {
-	state       string
-	activeSince time.Time
+	state        string
+	activeSince  time.Time
+	staleSeconds int
 }
 
 type MailModel struct {
@@ -185,7 +200,8 @@ type MailModel struct {
 	ready             bool
 	pollRate          time.Duration // refresh interval
 	orchAlive         bool
-	orchState         string // agent state from .agent.json
+	orchState         string // manifest lifecycle or heartbeat presentation state
+	orchStaleSeconds  int    // ordinary stale heartbeat age; zero outside the stale presentation
 	networkActivity   fs.NetworkActivity
 	statusFlash       string    // transient status message shown in status bar
 	statusExpiry      time.Time // when to clear the flash
@@ -579,25 +595,44 @@ func (m MailModel) issueRefreshRequest() (MailModel, tea.Cmd) {
 	return m, m.refreshMail
 }
 
-func resolveAgentLifecycle(directory string) (bool, string, fs.AgentNode) {
-	alive := directory != "" && fs.IsAlive(directory, fs.AgentAliveThresholdSec())
-	var node fs.AgentNode
-	if directory != "" {
-		node, _ = fs.ReadAgent(directory)
+func resolveAgentLifecycle(directory string) (bool, agentLifecycleState, fs.AgentNode) {
+	if directory == "" {
+		return false, agentLifecycleState{}, fs.AgentNode{}
 	}
-	state := node.State
-	if !alive {
-		if fs.HasRefreshTaken(directory) {
-			state = "refreshing"
+
+	heartbeat := fs.ReadHeartbeat(directory, fs.AgentAliveThresholdSec())
+	alive := heartbeat.Fresh
+	node, _ := fs.ReadAgent(directory)
+	lifecycle := agentLifecycleState{state: strings.ToLower(strings.TrimSpace(node.State))}
+
+	// A manifest-declared suspension is a real lifecycle transition. Keep it
+	// visible regardless of heartbeat age rather than letting a stale observation
+	// manufacture or erase that state.
+	if alive || strings.EqualFold(lifecycle.state, "SUSPENDED") {
+		return alive, lifecycle, node
+	}
+	if fs.HasRefreshTaken(directory) {
+		lifecycle.state = "refreshing"
+		return alive, lifecycle, node
+	}
+
+	// Only a parseable timestamp has an elapsed gap to present. Missing or
+	// malformed heartbeats retain the manifest state instead of being guessed as
+	// suspended. The normal threshold is stale; the 120-second presentation cutoff
+	// is the only heartbeat-gap path that renders suspended.
+	if heartbeat.Exists && heartbeat.Error == "" {
+		if heartbeat.AgeSeconds >= heartbeatSuspendedGapSec {
+			lifecycle.state = "suspended"
 		} else {
-			state = "suspended"
+			lifecycle.state = "stale"
+			lifecycle.staleSeconds = int(heartbeat.AgeSeconds)
 		}
 	}
-	return alive, state, node
+	return alive, lifecycle, node
 }
 
-func resolveDirectLifecycleStates(rows []agentSelectorRow) map[string]string {
-	states := make(map[string]string, len(rows))
+func resolveDirectLifecycleStates(rows []agentSelectorRow) map[string]agentLifecycleState {
+	states := make(map[string]agentLifecycleState, len(rows))
 	for _, row := range rows {
 		if row.Main {
 			continue
@@ -606,8 +641,8 @@ func resolveDirectLifecycleStates(rows []agentSelectorRow) map[string]string {
 		if key == "" {
 			continue
 		}
-		_, state, _ := resolveAgentLifecycle(row.Target.Directory)
-		states[key] = state
+		_, lifecycle, _ := resolveAgentLifecycle(row.Target.Directory)
+		states[key] = lifecycle
 	}
 	return states
 }
@@ -633,7 +668,7 @@ func (m MailModel) refreshMail() tea.Msg {
 		acceptedSnapshot.cache.Messages,
 	)
 
-	alive, state, orchestrator := resolveAgentLifecycle(m.orchestrator)
+	alive, lifecycle, orchestrator := resolveAgentLifecycle(m.orchestrator)
 	directStates := resolveDirectLifecycleStates(selectorRows)
 	lastApiCallAt, _ := fs.LastApiCallAt(m.orchestrator, time.Now())
 	directLastApiCall := make(map[string]time.Time, len(directStates))
@@ -673,7 +708,8 @@ func (m MailModel) refreshMail() tea.Msg {
 		lastApiCallAt:        lastApiCallAt,
 		directLastApiCall:    directLastApiCall,
 		alive:                alive,
-		state:                state,
+		state:                lifecycle.state,
+		staleSeconds:         lifecycle.staleSeconds,
 		activity:             activity,
 		orchName:             orchName,
 		orchNickname:         orchNickname,
@@ -1104,6 +1140,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			}
 			m.orchAlive = msg.alive
 			m.orchState = msg.state
+			m.orchStaleSeconds = msg.staleSeconds
 			m.networkActivity = msg.activity
 			if msg.orchName != "" {
 				m.orchName = msg.orchName
@@ -2034,12 +2071,12 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
-func (m MailModel) installDirectLifecycleStates(states map[string]string, lastApiCall map[string]time.Time) MailModel {
+func (m MailModel) installDirectLifecycleStates(states map[string]agentLifecycleState, lastApiCall map[string]time.Time) MailModel {
 	now := time.Now()
 	next := make(map[string]directAgentLifecycle, len(states))
-	for key, state := range states {
+	for key, lifecycle := range states {
 		status := m.directLifecycles[key]
-		if strings.EqualFold(state, "ACTIVE") {
+		if strings.EqualFold(lifecycle.state, "ACTIVE") {
 			if !strings.EqualFold(status.state, "ACTIVE") || status.activeSince.IsZero() {
 				status.activeSince = lastApiCall[key]
 				if status.activeSince.IsZero() {
@@ -2053,7 +2090,8 @@ func (m MailModel) installDirectLifecycleStates(states map[string]string, lastAp
 		} else {
 			status.activeSince = time.Time{}
 		}
-		status.state = state
+		status.state = lifecycle.state
+		status.staleSeconds = lifecycle.staleSeconds
 		next[key] = status
 	}
 	m.directLifecycles = next
@@ -2064,7 +2102,7 @@ func (m MailModel) activeRecipientLifecycle() directAgentLifecycle {
 	if target, ok := m.currentDirectTarget(); ok {
 		return m.directLifecycles[fs.DirectThreadKey(target)]
 	}
-	return directAgentLifecycle{state: m.orchState, activeSince: m.activeSince}
+	return directAgentLifecycle{state: m.orchState, activeSince: m.activeSince, staleSeconds: m.orchStaleSeconds}
 }
 
 // stateGlyphFor returns the leading glyph for an agent-state badge. ACTIVE uses
@@ -2079,6 +2117,8 @@ func (m MailModel) stateGlyphFor(state string) string {
 		return "◌"
 	case "SUSPENDED":
 		return "○"
+	case "STALE":
+		return "◉"
 	case "REFRESHING":
 		return "⟳"
 	default: // IDLE, STUCK, unknown
@@ -2096,6 +2136,13 @@ func activeElapsedFor(state string, activeSince time.Time) string {
 	}
 	d := time.Since(activeSince)
 	return fmt.Sprintf(" %ds", int(d.Seconds()))
+}
+
+func staleElapsedFor(state string, staleSeconds int) string {
+	if !strings.EqualFold(state, "STALE") || staleSeconds < 0 {
+		return ""
+	}
+	return fmt.Sprintf(" %ds", staleSeconds)
 }
 
 // activeElapsed returns a short " 12s" / " 240s" suffix while Main is ACTIVE,
@@ -2321,7 +2368,7 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	// where their attention already is. Reuses the header's stateStyle/stateLabel
 	// and is independent of the verbose level.
 	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel())
-	indicator := stateStyle.Render(m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince))
+	indicator := stateStyle.Render(m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince) + staleElapsedFor(recipientLifecycle.state, recipientLifecycle.staleSeconds))
 	toLabel += "  " + indicator + " "
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
