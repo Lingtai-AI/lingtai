@@ -58,6 +58,16 @@ func writeStubPython(t *testing.T, dir, logPath string, exitStatus int) string {
 	return p
 }
 
+func writeStubLingtaiAgent(t *testing.T, dir, logPath string, exitStatus int) string {
+	t.Helper()
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" >> %q\nexit %d\n", logPath, exitStatus)
+	p := filepath.Join(dir, "lingtai-agent")
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func readInvocationLog(t *testing.T, logPath string) string {
 	t.Helper()
 	data, err := os.ReadFile(logPath)
@@ -115,6 +125,7 @@ func TestLaunchAgentUnsafeValidAddonKeyKeepsLaunchBehavior(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "python-calls.log")
 	stub := writeStubPython(t, dir, logPath, 0)
+	writeStubLingtaiAgent(t, dir, logPath, 0)
 
 	agentDir := filepath.Join(dir, "alice")
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
@@ -144,7 +155,7 @@ func TestLaunchAgentUnsafeValidAddonKeyKeepsLaunchBehavior(t *testing.T) {
 	}
 
 	calls := readInvocationLog(t, logPath)
-	for _, want := range []string{"-c", "import lingtai.addons.imap", "-m", "lingtai", "run"} {
+	for _, want := range []string{"-c", "import lingtai.addons.imap", "run"} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("interpreter log missing %q; got:\n%s", want, calls)
 		}

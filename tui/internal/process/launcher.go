@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -93,6 +94,14 @@ func resolvePython(agentDir, fallbackCmd string) string {
 // in that case. The kernel's flock guarantees correctness of on-disk state,
 // but a duplicate Python process still shows up in `ps`/`lingtai-tui list`
 // and can mislead users; this guard keeps the process accounting honest.
+func kernelCLI(python string) string {
+	name := "lingtai-agent"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(filepath.Dir(python), name)
+}
+
 func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	if IsAgentRunning(agentDir) {
 		return nil, ErrAgentAlreadyRunning
@@ -119,7 +128,7 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("ensure addons: %w", err)
 	}
 
-	cmd := exec.Command(python, "-m", "lingtai", "run", agentDir)
+	cmd := exec.Command(kernelCLI(python), "run", agentDir)
 	// Redirect agent output to a log file instead of the TUI terminal
 	logPath := filepath.Join(agentDir, "logs")
 	if err := os.MkdirAll(logPath, 0o755); err != nil {
