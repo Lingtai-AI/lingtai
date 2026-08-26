@@ -49,7 +49,7 @@ func TestPropsSoulFlowDisabledByDefault(t *testing.T) {
 	// No .env / no opt-in → /kanban shows "disabled" + opt-in hint, never a
 	// raw delay sentinel as if it were the off switch.
 	m, _ := propsWithEnv(t, "99999", nil)
-	left := ansi.Strip(m.renderLeft(120))
+	left := ansi.Strip(m.renderDetail())
 
 	if !strings.Contains(left, i18n.T("props.soul_flow_disabled")) {
 		t.Fatalf("expected soul flow shown as disabled:\n%s", left)
@@ -69,7 +69,7 @@ func TestPropsSoulFlowDisabledByDefault(t *testing.T) {
 func TestPropsSoulFlowEnabledShowsCadence(t *testing.T) {
 	env := "LINGTAI_SOUL_FLOW_ENABLED=1\n"
 	m, _ := propsWithEnv(t, "7200", &env)
-	left := ansi.Strip(m.renderLeft(120))
+	left := ansi.Strip(m.renderDetail())
 
 	if !strings.Contains(left, i18n.T("props.soul_flow_enabled")) {
 		t.Fatalf("expected soul flow shown as enabled:\n%s", left)
@@ -85,7 +85,7 @@ func TestPropsSoulFlowEnabledShowsCadence(t *testing.T) {
 func TestPropsSoulFlowEnabledDefaultCadenceWhenOmitted(t *testing.T) {
 	env := "LINGTAI_SOUL_FLOW_ENABLED=true\n"
 	m, _ := propsWithEnv(t, "", &env) // no soul.delay in manifest
-	left := ansi.Strip(m.renderLeft(120))
+	left := ansi.Strip(m.renderDetail())
 
 	if !strings.Contains(left, i18n.T("props.soul_flow_enabled")) {
 		t.Fatalf("expected soul flow enabled:\n%s", left)
