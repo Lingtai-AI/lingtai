@@ -406,7 +406,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case mailRefreshMsg, mailPersistMsg, homeTelemetryMsg, homeAsyncStatsMsg:
+	case mailRefreshMsg, mailPersistMsg, homeTelemetryMsg, homeAsyncStatsMsg, streamProgressMsg:
 		// Mail content/count rebuilds, older pages, post-frame persistence, and
 		// telemetry can outlive the view that launched them. Route all at the root so Projects/Help
 		// cannot drop Mail's state machine; MailModel owns generation acceptance.

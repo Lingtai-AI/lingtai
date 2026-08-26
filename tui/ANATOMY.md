@@ -9,6 +9,7 @@ related_files:
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/preset/ANATOMY.md
   - tui/internal/processscan/ANATOMY.md
+  - tui/internal/streamprogress/ANATOMY.md
   - tui/CONTRACT.md
   - tui/main.go
   - tui/main_no_project_gate_test.go
@@ -106,7 +107,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **`tui_process_unix.go` / `tui_process_windows.go`** — platform helpers for detecting other running `lingtai-tui` binaries; native Homebrew migration leaves those sibling processes running while it pauses only their agents.
 - **`Makefile:1-23`** — build, dev (fast local), cross-compile (darwin/linux × arm64/amd64), clean. Version stamp via `-ldflags "-X main.version=$(VERSION)"` where `VERSION` is `git describe --tags --always`.
 - **`tui/i18n/i18n.go:10`** — `//go:embed en.json zh.json wen.json`. The only embed target in the root `tui/` package; all other embeds are in `internal/preset/`.
-- **`tui/internal/`** — all substantive packages (tui screens, preset engine, historical migration package, filesystem readers, process launcher, headless JSON CLI surface, lock shims). Each has its own anatomy; descend rather than reading them from here: `tui/internal/tui/ANATOMY.md`, `tui/internal/preset/ANATOMY.md`, `tui/internal/fs/ANATOMY.md`, `tui/internal/config/ANATOMY.md`, `tui/internal/inventory/ANATOMY.md`, `tui/internal/migrate/ANATOMY.md`, `tui/internal/globalmigrate/ANATOMY.md`, `tui/internal/process/ANATOMY.md`, `tui/internal/processscan/ANATOMY.md`, `tui/internal/sqlitelog/ANATOMY.md`, `tui/internal/headless/ANATOMY.md`, `tui/internal/doctorreport/ANATOMY.md`. The locale tables have their own map at `tui/i18n/ANATOMY.md`.
+- **`tui/internal/`** — all substantive packages (tui screens, preset engine, historical migration package, filesystem readers, process launcher, headless JSON CLI surface, lock shims). Each has its own anatomy; descend rather than reading them from here: `tui/internal/tui/ANATOMY.md`, `tui/internal/preset/ANATOMY.md`, `tui/internal/fs/ANATOMY.md`, `tui/internal/config/ANATOMY.md`, `tui/internal/inventory/ANATOMY.md`, `tui/internal/migrate/ANATOMY.md`, `tui/internal/globalmigrate/ANATOMY.md`, `tui/internal/process/ANATOMY.md`, `tui/internal/processscan/ANATOMY.md`, `tui/internal/streamprogress/ANATOMY.md` (read-only loopback client for the kernel's RAM-resident stream-progress API), `tui/internal/sqlitelog/ANATOMY.md`, `tui/internal/headless/ANATOMY.md`, `tui/internal/doctorreport/ANATOMY.md`. The locale tables have their own map at `tui/i18n/ANATOMY.md`.
 - **`tui/internal/headless/`** — JSON-emitting non-interactive surface. `RunPresets` (lists templates/saved presets as JSON), `RunSpawn` (creates a project + launches an agent), and `ExitError` (structured error codes). Wired from `main.go` via `bootstrapMain` (`tui/main.go:959`), `presetsMain` (`tui/main.go:1047`), and `spawnMain` (`tui/main.go:1071`). For agents and scripts that drive `lingtai-tui` without the Bubble Tea UI. `RunSpawn`'s runtime check calls `config.RuntimeReady` — read-only, never installs/repairs/upgrades. Headless spawn cannot prompt, so a not-ready runtime (missing, broken, or a declined preflight) surfaces as an actionable `bootstrap_failed` error instead of a silent install.
 
 ## Connections

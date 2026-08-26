@@ -14,6 +14,8 @@ related_files:
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/SKILL.md
   - tui/internal/preset/preset.go
+  - tui/internal/tui/stream_progress.go
+  - tui/internal/streamprogress/client.go
   - tui/main.go
   - tui/internal/config/global_test.go
   - docs/tui-agent-alignment.md
@@ -112,6 +114,39 @@ appears as the degraded state below.
    (fable F8, D1-D5 below): check agents present (R1), `config.json`
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
    (R1), runtime/version (R1).
+
+## Live stream-progress badge (additive, loopback-only)
+
+While the visible recipient is `ACTIVE`, Mail's `Email To:` indicator may
+append ` · N tok downloaded` beside `Active N s`. The value is the kernel's
+consumer-neutral, read-only `lingtai.stream-progress/v1` snapshot
+(`GET /v1/stream-progress` on `127.0.0.1`, discovered deterministically from the
+agent's stable `agent_id`; client and arithmetic in
+`tui/internal/streamprogress/ANATOMY.md`, adapter in
+`tui/internal/tui/stream_progress.go`), rendered as the integer
+`streamed_chars / 4`. New agents the TUI creates ship `"streaming": true`
+(`tui/internal/preset/preset.go`, `templates/init.jsonc`), matching the kernel's
+default-on contract; an explicit `false` in `init.json` still opts out.
+
+1. **Purely additive, fail-open, strict.** A missing, refused, redirecting,
+   foreign, or malformed endpoint is never a launch gate, banner, or doctor
+   check — the suffix is simply absent and the next poll tries again. The
+   client never follows an HTTP redirect (so nothing can send it off
+   loopback) and accepts only an exact seven-field v1 body: any extra field
+   (a `text` field above all), duplicate key, or trailing data is rejected.
+2. **RAM only.** No snapshot, port, or progress state is written under
+   `.lingtai/` or `~/.lingtai-tui/`; the shared on-disk schema read by both
+   binaries is unchanged.
+3. **Never on the render path.** `View()` reads one cached reading; all
+   loopback I/O runs in a poll-tick `tea.Cmd` and its result is accepted only
+   when the Mail generation and the visible recipient's stable identity (Main
+   orchestrator, or the validated direct target) still match.
+4. **Active-only, immediate clear.** The suffix shows only while the recipient
+   lifecycle is `ACTIVE` and the snapshot is active; it clears at once when
+   either stops holding or the visible recipient changes. Narrow terminals omit
+   it rather than wrap the interaction line.
+5. **No text.** The kernel publishes character counts only; the TUI reads and
+   shows no output preview.
 
 ## Model list curation
 
