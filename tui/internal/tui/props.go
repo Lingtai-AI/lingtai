@@ -3,11 +3,13 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -364,6 +366,223 @@ type propsField struct {
 	label string
 }
 
+const (
+	kanbanLLMIdentityLimit     = 256
+	kanbanLLMSettingLimit      = 64
+	kanbanBaseURLLimit         = 2048
+	kanbanCompactEndpointLimit = 64
+)
+
+// kanbanLLMConfig is the presentation-local, secret-free LLM identity used by
+// /kanban. Runtime-safe fields prefer the kernel-materialized llm block in
+// .agent.json (the same source Telegram's automatic Task Card reads) and fall
+// back field-by-field to the resolved/init manifest. Thinking uses the same
+// resolver for compatibility but normally falls back because today's runtime
+// safelist does not publish it.
+type kanbanLLMConfig struct {
+	Model        string
+	Provider     string
+	BaseURL      string
+	Endpoint     string
+	ServiceTier  string
+	Thinking     string
+	APICompat    string
+	APIKeyEnv    string
+	Streaming    string
+	ContextLimit string
+}
+
+type kanbanPresetInfo struct {
+	DefaultRef string
+	ActiveRef  string
+	Allowed    []preset.ResolvedRef
+}
+
+func boundedKanbanText(v any, limit int) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	s = strings.TrimSpace(s)
+	if s == "" || len([]rune(s)) > limit || strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	return s, true
+}
+
+func boundedKanbanField(raw map[string]any, key string, limit int) (value string, present bool) {
+	v, present := raw[key]
+	if !present {
+		return "", false
+	}
+	value, _ = boundedKanbanText(v, limit)
+	return value, true
+}
+
+// llmTextField distinguishes an omitted field (present=false) from a present
+// malformed value (present=true, value=""). A malformed materialized value is
+// omitted rather than replaced with potentially stale manifest data.
+func llmTextField(raw map[string]any, key string, limit int) (value string, present bool) {
+	block, blockPresent := raw["llm"]
+	if !blockPresent {
+		return "", false
+	}
+	llm, ok := block.(map[string]any)
+	if !ok {
+		return "", true
+	}
+	return boundedKanbanField(llm, key, limit)
+}
+
+func resolvedKanbanLLMText(agentRaw, initRaw map[string]any, key string, limit int) string {
+	if value, present := llmTextField(agentRaw, key, limit); present {
+		return value
+	}
+	if value, present := llmTextField(initRaw, key, limit); present {
+		return value
+	}
+	value, _ := boundedKanbanField(initRaw, key, limit)
+	return value
+}
+
+func boundedKanbanScalar(v any, limit int) (string, bool) {
+	switch value := v.(type) {
+	case string:
+		return boundedKanbanText(value, limit)
+	case bool, float64, float32, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64:
+		return boundedKanbanText(fmt.Sprint(value), limit)
+	default:
+		return "", false
+	}
+}
+
+func llmScalarField(raw map[string]any, key string, limit int) (value string, present bool) {
+	block, blockPresent := raw["llm"]
+	if !blockPresent {
+		return "", false
+	}
+	llm, ok := block.(map[string]any)
+	if !ok {
+		return "", true
+	}
+	v, present := llm[key]
+	if !present {
+		return "", false
+	}
+	switch number := v.(type) {
+	case float64, float32, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64:
+		value, _ = boundedKanbanText(fmt.Sprint(number), limit)
+	}
+	return value, true
+}
+
+func resolvedKanbanLLMScalar(agentRaw, initRaw map[string]any, key string, limit int) string {
+	if value, present := llmScalarField(agentRaw, key, limit); present {
+		return value
+	}
+	if value, present := llmScalarField(initRaw, key, limit); present {
+		return value
+	}
+	value, _ := boundedKanbanScalar(initRaw[key], limit)
+	return value
+}
+
+func manifestLLMScalar(raw map[string]any, key string, limit int) string {
+	if block, ok := raw["llm"].(map[string]any); ok {
+		value, _ := boundedKanbanScalar(block[key], limit)
+		return value
+	}
+	value, _ := boundedKanbanScalar(raw[key], limit)
+	return value
+}
+
+// parseKanbanBaseURL validates once and derives a bounded, host-only summary
+// endpoint. Malformed URLs and userinfo are omitted rather than exposed.
+func parseKanbanBaseURL(raw string) (baseURL, endpoint string) {
+	baseURL, ok := boundedKanbanText(raw, kanbanBaseURLLimit)
+	if !ok {
+		return "", ""
+	}
+	u, err := url.ParseRequestURI(baseURL)
+	if err != nil || u.Scheme == "" || u.Hostname() == "" || u.User != nil {
+		return "", ""
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	return baseURL, "@" + truncate(host, kanbanCompactEndpointLimit)
+}
+
+func resolveKanbanLLMConfig(agentRaw, initRaw map[string]any) kanbanLLMConfig {
+	baseURL, endpoint := parseKanbanBaseURL(resolvedKanbanLLMText(agentRaw, initRaw, "base_url", kanbanBaseURLLimit))
+	return kanbanLLMConfig{
+		Model:        resolvedKanbanLLMText(agentRaw, initRaw, "model", kanbanLLMIdentityLimit),
+		Provider:     resolvedKanbanLLMText(agentRaw, initRaw, "provider", kanbanLLMIdentityLimit),
+		BaseURL:      baseURL,
+		Endpoint:     endpoint,
+		ServiceTier:  resolvedKanbanLLMText(agentRaw, initRaw, "service_tier", kanbanLLMSettingLimit),
+		Thinking:     resolvedKanbanLLMText(agentRaw, initRaw, "thinking", kanbanLLMSettingLimit),
+		APICompat:    resolvedKanbanLLMText(agentRaw, initRaw, "api_compat", kanbanLLMSettingLimit),
+		APIKeyEnv:    manifestLLMScalar(initRaw, "api_key_env", kanbanLLMIdentityLimit),
+		Streaming:    manifestLLMScalar(initRaw, "streaming", kanbanLLMSettingLimit),
+		ContextLimit: resolvedKanbanLLMScalar(agentRaw, initRaw, "context_limit", kanbanLLMSettingLimit),
+	}
+}
+
+func mergeKanbanAgentRaw(agentRaw, initRaw map[string]any) map[string]any {
+	merged := make(map[string]any, len(agentRaw)+len(initRaw))
+	for key, value := range initRaw {
+		merged[key] = value
+	}
+	for key, value := range agentRaw {
+		merged[key] = value
+	}
+	return merged
+}
+
+func (m PropsModel) resolveKanbanPresetInfo(raw map[string]any) kanbanPresetInfo {
+	block, _ := raw["preset"].(map[string]any)
+	info := kanbanPresetInfo{}
+	if block == nil {
+		return info
+	}
+	info.DefaultRef, _ = block["default"].(string)
+	info.ActiveRef, _ = block["active"].(string)
+	allowed, _ := block["allowed"].([]any)
+	refs := make([]string, 0, len(allowed))
+	for _, entry := range allowed {
+		if ref, ok := entry.(string); ok && strings.TrimSpace(ref) != "" {
+			refs = append(refs, ref)
+		}
+	}
+	if len(refs) == 0 {
+		return info
+	}
+	keys, _ := config.ResolveKeys(m.globalDir)
+	poolEligible, poolEligibleModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
+	auth := preset.AuthState{
+		CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
+		CodexAuthDir:              m.globalDir,
+		CodexPoolEligible:         poolEligible,
+		CodexPoolEligibleModels:   poolEligibleModels,
+		CodexPoolFallbackEligible: poolFallback,
+		ClaudeCodeAuthConfigured:  claudeCodeAuthConfigured(),
+	}
+	info.Allowed = preset.ResolveRefsWithAuth(refs, keys, auth)
+	return info
+}
+
+func presetHealthCounts(info kanbanPresetInfo) (healthy, broken int) {
+	for _, resolved := range info.Allowed {
+		if resolved.Exists && resolved.HasKey {
+			healthy++
+		} else {
+			broken++
+		}
+	}
+	return healthy, broken
+}
+
 func (m PropsModel) renderBody() string {
 	leftW := m.width/2 - 1
 	rightW := m.width - leftW - 1
@@ -487,19 +706,15 @@ func (m PropsModel) renderLeft(maxW int) string {
 
 	var lines []string
 
-	raw, err := fs.ReadAgentRaw(m.selectedDir)
+	agentRaw, err := fs.ReadAgentRaw(m.selectedDir)
 	if err != nil {
 		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.no_data")))
 		return strings.Join(lines, "\n")
 	}
-
-	if initRaw, err := fs.ReadInitManifest(m.selectedDir); err == nil {
-		for k, v := range initRaw {
-			if _, exists := raw[k]; !exists {
-				raw[k] = v
-			}
-		}
-	}
+	initRaw, _ := fs.ReadInitManifest(m.selectedDir)
+	raw := mergeKanbanAgentRaw(agentRaw, initRaw)
+	llm := resolveKanbanLLMConfig(agentRaw, initRaw)
+	presetInfo := m.resolveKanbanPresetInfo(raw)
 
 	renderFields := func(fields []propsField) {
 		for _, f := range fields {
@@ -523,214 +738,72 @@ func (m PropsModel) renderLeft(maxW int) string {
 			lines = append(lines, "  "+labelStyle.Render(f.label+": ")+val)
 		}
 	}
+	appendRow := func(label, value string) {
+		if value != "" {
+			lines = append(lines, "  "+labelStyle.Render(label+": ")+valueStyle.Render(value))
+		}
+	}
 
-	// Identity
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_identity")))
-	lines = append(lines, "")
+	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_agent_now")), "")
 	renderFields([]propsField{
 		{"agent_name", i18n.T("props.name")},
 		{"nickname", i18n.T("props.nickname")},
-		{"agent_id", i18n.T("props.id")},
 		{"state", i18n.T("props.state")},
-		{"address", i18n.T("props.address")},
-		{"language", i18n.T("props.language")},
-		{"started_at", i18n.T("props.started_at")},
-		{"combo", i18n.T("props.combo")},
 	})
-
-	// LLM
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_llm")))
-	lines = append(lines, "")
-	renderFields([]propsField{
-		{"model", i18n.T("props.model")},
-		{"provider", i18n.T("props.provider")},
-		{"base_url", i18n.T("props.base_url")},
-		{"api_compat", i18n.T("props.api_compat")},
-		{"api_key_env", i18n.T("props.api_key_env")},
-		{"streaming", i18n.T("props.streaming")},
-		{"context_limit", i18n.T("props.context_limit")},
-	})
-
-	// Runtime
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_runtime")))
-	lines = append(lines, "")
-	// Soul flow: show it as an on/off status, NOT a raw delay sentinel.
-	// The enable/disable control is the env opt-in (LINGTAI_SOUL_FLOW_ENABLED),
-	// not soul.delay — a huge delay is no longer an "off switch". When
-	// enabled we surface soul.delay as the reflection cadence; when disabled
-	// we point the reader at the opt-in var and the soul-manual tool.
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.soul_flow")+": ")+m.renderSoulFlowValue(raw, valueStyle, labelStyle))
-	renderFields([]propsField{
-		{"molt_count", i18n.T("props.molt_count")},
-		{"max_turns", i18n.T("props.max_turns")},
-		{"max_rpm", i18n.T("props.max_rpm")},
-	})
+	llmParts := make([]string, 0, 2)
+	if llm.Model != "" {
+		llmParts = append(llmParts, llm.Model)
+	}
+	if llm.Provider != "" {
+		llmParts = append(llmParts, llm.Provider)
+	}
+	appendRow(i18n.T("props.llm_identity"), strings.Join(llmParts, " · "))
+	appendRow(i18n.T("props.service_tier"), llm.ServiceTier)
+	appendRow(i18n.T("props.thinking_effort"), llm.Thinking)
+	appendRow(i18n.T("props.endpoint"), llm.Endpoint)
+	appendRow(i18n.T("props.preset_active"), refDisplayName(presetInfo.ActiveRef))
+	if len(presetInfo.Allowed) > 0 {
+		healthy, broken := presetHealthCounts(presetInfo)
+		parts := []string{i18n.TF("props.preset_health_healthy", healthy)}
+		if broken > 0 {
+			parts = append(parts, i18n.TF("props.preset_health_broken", broken))
+		}
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+": ")+valueStyle.Render(strings.Join(parts, " · ")))
+	}
 
 	// Context window (from cached .status.json)
 	ctx := m.selectedStatus.Tokens.Context
 	if ctx.WindowSize > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_context")))
-		lines = append(lines, "")
 		pctColor := ColorAgent
 		if ctx.UsagePct > 80 {
 			pctColor = lipgloss.Color("#e06c75")
 		} else if ctx.UsagePct > 60 {
 			pctColor = lipgloss.Color("#e5c07b")
 		}
-		lines = append(lines, "  "+labelStyle.Render("usage:   ")+lipgloss.NewStyle().Foreground(pctColor).Render(
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.context_usage")+": ")+lipgloss.NewStyle().Foreground(pctColor).Render(
 			fmt.Sprintf("%s / %s (%.1f%%)", formatComma(int64(ctx.TotalTokens)), formatComma(int64(ctx.WindowSize)), ctx.UsagePct)))
-		lines = append(lines, "  "+labelStyle.Render("system:  ")+valueStyle.Render(formatComma(int64(ctx.SystemTokens))))
-		lines = append(lines, "  "+labelStyle.Render("tools:   ")+valueStyle.Render(formatComma(int64(ctx.ToolsTokens))))
-		lines = append(lines, "  "+labelStyle.Render("history: ")+valueStyle.Render(formatComma(int64(ctx.HistoryTokens))))
 	}
 
-	// Presets — surfaces manifest.preset.{default, active, allowed}
-	// with a key-presence and existence check per allowed entry. Keeps
-	// answers to "what can this agent run, and is anything broken?"
-	// one screen away from the agent's other vitals.
-	if presetBlock, ok := raw["preset"].(map[string]interface{}); ok {
-		defaultRef, _ := presetBlock["default"].(string)
-		activeRef, _ := presetBlock["active"].(string)
-		var allowedRefs []string
-		if al, ok := presetBlock["allowed"].([]interface{}); ok {
-			for _, e := range al {
-				if s, ok := e.(string); ok && s != "" {
-					allowedRefs = append(allowedRefs, s)
-				}
-			}
-		}
-		if defaultRef != "" || activeRef != "" || len(allowedRefs) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_presets")))
-			lines = append(lines, "")
-
-			// Single line when active and default match (the common case);
-			// otherwise show both. We render the home-shortened name
-			// rather than the full ref string — the allowed list below
-			// shows full names so the active line is just a label.
-			defaultName := refDisplayName(defaultRef)
-			activeName := refDisplayName(activeRef)
-			if activeRef == defaultRef && activeRef != "" {
-				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_active")+": ")+valueStyle.Render(activeName))
-			} else {
-				if activeName != "" {
-					lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_active")+": ")+valueStyle.Render(activeName))
-				}
-				if defaultName != "" {
-					lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_default")+": ")+valueStyle.Render(defaultName))
-				}
-			}
-
-			if len(allowedRefs) > 0 {
-				// ResolveKeys: .env is authoritative (agents' source), config.json
-				// mirror fills gaps — /props must show the keys the TUI will
-				// actually use, including after a degraded launch (fable F3).
-				keys, _ := config.ResolveKeys(m.globalDir)
-				poolEligible, poolEligibleModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
-				auth := preset.AuthState{
-					CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
-					CodexAuthDir:              m.globalDir,
-					CodexPoolEligible:         poolEligible,
-					CodexPoolEligibleModels:   poolEligibleModels,
-					CodexPoolFallbackEligible: poolFallback,
-					ClaudeCodeAuthConfigured:  claudeCodeAuthConfigured(),
-				}
-				resolved := preset.ResolveRefsWithAuth(allowedRefs, keys, auth)
-				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
-				for _, rr := range resolved {
-					marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")
-					if !rr.Exists || !rr.HasKey {
-						marker = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("✗")
-					}
-					tag := ""
-					switch rr.Source {
-					case preset.SourceTemplate:
-						tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_template")+")")
-					case preset.SourceSaved:
-						tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_saved")+")")
-					}
-					name := rr.Name
-					if name == "" {
-						name = rr.Ref
-					}
-					lines = append(lines, "    "+marker+" "+valueStyle.Render(name)+tag)
-				}
-			}
-		}
-	}
-
-	// Capabilities
-	if caps, ok := raw["capabilities"]; ok && caps != nil {
-		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_capabilities")))
-		lines = append(lines, "")
-		capsJSON, _ := json.Marshal(caps)
-		capNames := fs.CapabilitiesForDisplay(fs.ParseCapabilities(capsJSON))
-		if len(capNames) > 0 {
-			capStr := strings.Join(capNames, ", ")
-			wrapped := lipgloss.NewStyle().Width(maxW - 6).Render(capStr)
-			for _, line := range strings.Split(wrapped, "\n") {
-				lines = append(lines, "    "+valueStyle.Render(line))
-			}
-		}
-	}
-
-	// Tokens (from cached ledger)
-	if m.selectedTokens.APICalls > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_tokens")))
-		if m.selectedStatus.Tokens.Estimated {
-			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
-			lines = append(lines, "  "+warnStyle.Render("⚠ estimated (provider did not return usage)"))
-		}
-		lines = append(lines, "")
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(m.selectedTokens.Input))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(m.selectedTokens.Output))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("thinking: %s", formatComma(m.selectedTokens.Thinking))))
-		// Cache: show absolute cached tokens + hit rate as %. Rate = cached / input
-		// across the ledger's lifetime — sum of cache_read_input_tokens over sum of
-		// total input_tokens (input_tokens here is already the true total: raw +
-		// cache_read + cache_write, normalised in each adapter).
-		cacheRateStr := ""
-		if m.selectedTokens.Input > 0 {
-			cacheRateStr = fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.selectedTokens.Cached)/float64(m.selectedTokens.Input))
-		}
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s%s", formatComma(m.selectedTokens.Cached), cacheRateStr)))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", m.selectedTokens.APICalls)))
-	}
-
-	// Current-session average is sourced from the same live .status.json
-	// counters as Home, rather than the lifetime selectedTokens ledger above.
-	// Keep it in its own section so the unit and scope cannot be read as a
-	// lifetime average; older/incomplete snapshots with zero calls omit it.
+	// Current session: the complete since-molt economy tuple from .status.json.
+	// The primary deliberately shows an absolute cache miss only; no default
+	// cache-miss budget exists in the published status/manifest contract.
 	session := m.selectedStatus.Tokens
-	if session.APICalls > 0 {
+	if session.InputTokens > 0 || session.OutputTokens > 0 || session.ThinkingTokens > 0 || session.CachedTokens > 0 || session.APICalls > 0 {
 		tokens := session.InputTokens + session.OutputTokens + session.ThinkingTokens
+		lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_current_session")))
+		if session.Estimated {
+			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
+			lines = append(lines, "  "+warnStyle.Render(i18n.T("props.estimated_usage_warning")))
+		}
 		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_current_session")))
-		lines = append(lines, "")
-		lines = append(lines, "    "+labelStyle.Render(i18n.T("props.session_tokens_per_api_call")+": ")+
-			valueStyle.Render(formatComma(avgPerCall(tokens, session.APICalls))))
-	}
-
-	// Admin
-	if admin, ok := raw["admin"]; ok && admin != nil {
-		if adminMap, ok := admin.(map[string]interface{}); ok && len(adminMap) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_admin")))
-			lines = append(lines, "")
-			adminKeys := make([]string, 0, len(adminMap))
-			for k := range adminMap {
-				adminKeys = append(adminKeys, k)
-			}
-			sort.Strings(adminKeys)
-			for _, k := range adminKeys {
-				lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("%s: %v", k, adminMap[k])))
-			}
+		if session.InputTokens > 0 {
+			appendRow(i18n.T("props.session_input_tokens"), formatComma(session.InputTokens))
+			appendRow(i18n.T("props.session_cache_hit_rate"), formatCacheRate(session.CachedTokens, session.InputTokens))
+			appendRow(i18n.T("props.session_cache_miss"), formatComma(cacheMiss(session.CachedTokens, session.InputTokens)))
+		}
+		appendRow(i18n.T("props.session_api_calls"), formatComma(session.APICalls))
+		if session.APICalls > 0 {
+			appendRow(i18n.T("props.session_tokens_per_api_call"), formatComma(avgPerCall(tokens, session.APICalls)))
 		}
 	}
 
@@ -789,18 +862,7 @@ func (m PropsModel) renderRight(maxW int) string {
 
 	var lines []string
 
-	// Network
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_network")))
-	lines = append(lines, "")
-
-	if m.adminStart != "" {
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_created")+": ")+valueStyle.Render(formatKanbanTimestamp(m.adminStart)))
-		if t, err := time.Parse(time.RFC3339, m.adminStart); err == nil {
-			uptime := time.Since(t)
-			lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_uptime")+": ")+valueStyle.Render(formatDuration(uptime)))
-		}
-	}
+	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_network_now")), "")
 
 	stats := m.network.Stats
 	totalAgents := len(m.network.Nodes)
@@ -812,7 +874,7 @@ func (m PropsModel) renderRight(maxW int) string {
 			agentCount++
 		}
 	}
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_agents")+": ")+
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_total")+": ")+
 		valueStyle.Render(fmt.Sprintf("%d", totalAgents))+
 		labelStyle.Render(fmt.Sprintf("  (%d %s, %d %s)",
 			agentCount, i18n.T("props.network_agents"), humanCount, i18n.T("props.network_humans"))))
@@ -848,49 +910,10 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_daemons")+": ")+
 		valueStyle.Render(fmt.Sprintf("%d %s", m.network.Activity.RunningDaemons, i18n.T("props.network_daemons_running"))))
 
-	// Tokens
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_tokens")))
-	lines = append(lines, "")
-	lines = append(lines, "  "+labelStyle.Render("Input:    ")+valueStyle.Render(formatComma(m.tokens.Input)))
-	lines = append(lines, "  "+labelStyle.Render("Output:   ")+valueStyle.Render(formatComma(m.tokens.Output)))
-	lines = append(lines, "  "+labelStyle.Render("Thinking: ")+valueStyle.Render(formatComma(m.tokens.Thinking)))
-	// Cached row shows absolute + cache-hit rate across the whole network
-	// (sum of cache_read / sum of total input, same denominator semantics
-	// as the per-agent ledger view).
-	cachedStr := formatComma(m.tokens.Cached)
-	if m.tokens.Input > 0 {
-		cachedStr = fmt.Sprintf("%s (%.1f%%)", cachedStr, 100.0*float64(m.tokens.Cached)/float64(m.tokens.Input))
-	}
-	lines = append(lines, "  "+labelStyle.Render("Cached:   ")+valueStyle.Render(cachedStr))
-
-	// API Calls
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_api_calls")))
-	lines = append(lines, "")
-	lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(formatComma(m.tokens.APICalls)))
-
-	// Mail history is intentionally omitted from the live kanban snapshot.
-	// Do not present the fast path's zero-value total as authoritative.
-	if m.mailStatsAvailable {
-		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_mails")))
-		lines = append(lines, "")
-		lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(fmt.Sprintf("%d", stats.TotalMails)))
-	}
-
-	// Avatar tree
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.tree")))
-	lines = append(lines, "")
-	lines = append(lines, m.renderTree(maxW)...)
-
 	return strings.Join(lines, "\n")
 }
 
-// renderDetail renders the full-screen detail view: token usage broken
-// down by provider, recent activity, MCP servers, and daemon run counts.
-// Toggled with Ctrl+D from the kanban summary.
+// renderDetail preserves the full diagnostic dashboard behind Ctrl+D.
 func (m PropsModel) renderDetail() string {
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
@@ -899,23 +922,21 @@ func (m PropsModel) renderDetail() string {
 
 	var lines []string
 
-	raw := map[string]any{}
-	if agentRaw, err := fs.ReadAgentRaw(m.selectedDir); err == nil {
-		for k, v := range agentRaw {
-			raw[k] = v
-		}
+	agentRaw := map[string]any{}
+	if loaded, err := fs.ReadAgentRaw(m.selectedDir); err == nil {
+		agentRaw = loaded
 	}
-	if initRaw, err := fs.ReadInitManifest(m.selectedDir); err == nil {
-		for k, v := range initRaw {
-			if _, exists := raw[k]; !exists {
-				raw[k] = v
-			}
-		}
+	initRaw := map[string]any{}
+	if loaded, err := fs.ReadInitManifest(m.selectedDir); err == nil {
+		initRaw = loaded
 	}
+	raw := mergeKanbanAgentRaw(agentRaw, initRaw)
+	llm := resolveKanbanLLMConfig(agentRaw, initRaw)
+	presetInfo := m.resolveKanbanPresetInfo(raw)
 
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_agent_info")))
-	lines = append(lines, "")
+	appendSection := func(title string) {
+		lines = append(lines, "", "  "+sectionStyle.Render(title), "")
+	}
 	appendDetailRow := func(label, value string) {
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -928,17 +949,141 @@ func (m PropsModel) renderDetail() string {
 		if !ok || v == nil {
 			return
 		}
-		appendDetailRow(label, fmt.Sprintf("%v", v))
+		value := fmt.Sprintf("%v", v)
+		if isTimestampPropField(key) {
+			value = formatKanbanTimestamp(value)
+		}
+		appendDetailRow(label, value)
 	}
-	appendRawRow("agent_name", i18n.T("props.agent_name"))
+
+	appendSection(i18n.T("props.detail_identity_runtime"))
+	appendRawRow("agent_name", i18n.T("props.name"))
 	appendRawRow("nickname", i18n.T("props.nickname"))
-	appendRawRow("agent_id", i18n.T("props.agent_id"))
-	appendRawRow("address", i18n.T("props.address"))
+	appendRawRow("agent_id", i18n.T("props.id"))
 	appendRawRow("state", i18n.T("props.state"))
+	appendRawRow("address", i18n.T("props.address"))
+	appendRawRow("language", i18n.T("props.language"))
+	appendRawRow("started_at", i18n.T("props.started_at"))
+	appendRawRow("combo", i18n.T("props.combo"))
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.soul_flow")+": ")+m.renderSoulFlowValue(raw, valueStyle, labelStyle))
+	appendRawRow("molt_count", i18n.T("props.molt_count"))
+	appendRawRow("max_turns", i18n.T("props.max_turns"))
+	appendRawRow("max_rpm", i18n.T("props.max_rpm"))
 	appendDetailRow(i18n.T("props.detail_agent_path"), m.selectedDir)
 	appendDetailRow(i18n.T("props.detail_network_path"), m.baseDir)
 	if m.orchDir != "" && m.orchDir != m.selectedDir {
 		appendDetailRow(i18n.T("props.detail_orchestrator_path"), m.orchDir)
+	}
+
+	appendSection(i18n.T("props.detail_llm_configuration"))
+	appendDetailRow(i18n.T("props.model"), llm.Model)
+	appendDetailRow(i18n.T("props.provider"), llm.Provider)
+	appendDetailRow(i18n.T("props.service_tier"), llm.ServiceTier)
+	appendDetailRow(i18n.T("props.thinking_effort"), llm.Thinking)
+	appendDetailRow(i18n.T("props.base_url"), llm.BaseURL)
+	appendDetailRow(i18n.T("props.api_compat"), llm.APICompat)
+	appendDetailRow(i18n.T("props.api_key_env"), llm.APIKeyEnv)
+	appendDetailRow(i18n.T("props.streaming"), llm.Streaming)
+	appendDetailRow(i18n.T("props.context_limit"), llm.ContextLimit)
+
+	appendSection(i18n.T("props.detail_presets_capabilities_admin"))
+	appendDetailRow(i18n.T("props.preset_active"), refDisplayName(presetInfo.ActiveRef))
+	appendDetailRow(i18n.T("props.preset_default"), refDisplayName(presetInfo.DefaultRef))
+	if len(presetInfo.Allowed) > 0 {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
+		for _, resolved := range presetInfo.Allowed {
+			marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")
+			if !resolved.Exists || !resolved.HasKey {
+				marker = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("✗")
+			}
+			tag := ""
+			switch resolved.Source {
+			case preset.SourceTemplate:
+				tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_template")+")")
+			case preset.SourceSaved:
+				tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_saved")+")")
+			}
+			name := resolved.Name
+			if name == "" {
+				name = resolved.Ref
+			}
+			lines = append(lines, "    "+marker+" "+valueStyle.Render(name)+tag)
+		}
+	}
+	if caps, ok := raw["capabilities"]; ok && caps != nil {
+		capsJSON, _ := json.Marshal(caps)
+		capNames := fs.CapabilitiesForDisplay(fs.ParseCapabilities(capsJSON))
+		if len(capNames) > 0 {
+			lines = append(lines, "  "+labelStyle.Render(i18n.T("props.section_capabilities")+":"))
+			wrapWidth := 74
+			if m.width > 0 {
+				wrapWidth = max(1, m.width-6)
+			}
+			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(strings.Join(capNames, ", "))
+			for _, line := range strings.Split(wrapped, "\n") {
+				lines = append(lines, "    "+valueStyle.Render(line))
+			}
+		}
+	}
+	if adminMap, ok := raw["admin"].(map[string]any); ok && len(adminMap) > 0 {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.section_admin")+":"))
+		keys := make([]string, 0, len(adminMap))
+		for key := range adminMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("%s: %v", key, adminMap[key])))
+		}
+	}
+
+	appendSection(i18n.T("props.detail_context_detail"))
+	ctx := m.selectedStatus.Tokens.Context
+	if ctx.WindowSize > 0 {
+		appendDetailRow(i18n.T("props.context_usage"), fmt.Sprintf("%s / %s (%.1f%%)",
+			formatComma(int64(ctx.TotalTokens)), formatComma(int64(ctx.WindowSize)), ctx.UsagePct))
+		appendDetailRow(i18n.T("props.context_system"), formatComma(int64(ctx.SystemTokens)))
+		appendDetailRow(i18n.T("props.context_tools"), formatComma(int64(ctx.ToolsTokens)))
+		appendDetailRow(i18n.T("props.context_history"), formatComma(int64(ctx.HistoryTokens)))
+	}
+
+	if m.selectedTokens.APICalls > 0 {
+		appendSection(i18n.T("props.detail_agent_lifetime_usage"))
+		appendDetailRow("input", formatComma(m.selectedTokens.Input))
+		appendDetailRow("output", formatComma(m.selectedTokens.Output))
+		appendDetailRow("thinking", formatComma(m.selectedTokens.Thinking))
+		cached := formatComma(m.selectedTokens.Cached)
+		if m.selectedTokens.Input > 0 {
+			cached += fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.selectedTokens.Cached)/float64(m.selectedTokens.Input))
+		}
+		appendDetailRow("cached", cached)
+		appendDetailRow("api_calls", formatComma(m.selectedTokens.APICalls))
+	}
+
+	appendSection(i18n.T("props.detail_network_history_topology"))
+	if m.adminStart != "" {
+		appendDetailRow(i18n.T("props.network_created"), formatKanbanTimestamp(m.adminStart))
+		if started, err := time.Parse(time.RFC3339, m.adminStart); err == nil {
+			appendDetailRow(i18n.T("props.network_uptime"), formatDuration(time.Since(started)))
+		}
+	}
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.total_tokens")+":"))
+	lines = append(lines, "    "+labelStyle.Render("Input:    ")+valueStyle.Render(formatComma(m.tokens.Input)))
+	lines = append(lines, "    "+labelStyle.Render("Output:   ")+valueStyle.Render(formatComma(m.tokens.Output)))
+	lines = append(lines, "    "+labelStyle.Render("Thinking: ")+valueStyle.Render(formatComma(m.tokens.Thinking)))
+	networkCached := formatComma(m.tokens.Cached)
+	if m.tokens.Input > 0 {
+		networkCached += fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.tokens.Cached)/float64(m.tokens.Input))
+	}
+	lines = append(lines, "    "+labelStyle.Render("Cached:   ")+valueStyle.Render(networkCached))
+	appendDetailRow(i18n.T("props.total_api_calls"), formatComma(m.tokens.APICalls))
+	if m.mailStatsAvailable {
+		appendDetailRow(i18n.T("props.total_mails"), fmt.Sprintf("%d", m.network.Stats.TotalMails))
+	}
+	tree := m.renderTree(m.width)
+	if len(tree) > 0 {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.tree")+":"))
+		lines = append(lines, tree...)
 	}
 
 	lines = append(lines, "")

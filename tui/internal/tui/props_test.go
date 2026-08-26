@@ -9,10 +9,279 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestResolveKanbanLLMConfig(t *testing.T) {
+	llm := func(fields map[string]any) map[string]any { return map[string]any{"llm": fields} }
+	tests := []struct {
+		name              string
+		agentRaw, initRaw map[string]any
+		want              kanbanLLMConfig
+	}{
+		{
+			name: "materialized values win field by field",
+			agentRaw: llm(map[string]any{"model": "gpt-5.6-sol", "provider": "codex-pool", "base_url": "https://chatgpt.com/backend-api/codex",
+				"service_tier": "default", "thinking": "xhigh", "api_compat": "responses", "context_limit": float64(250000)}),
+			initRaw: llm(map[string]any{"model": "stale-model", "provider": "stale-provider", "base_url": "https://stale.example/v1",
+				"service_tier": "flex", "thinking": "low", "api_compat": "openai", "streaming": true, "context_limit": float64(500000)}),
+			want: kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex-pool", BaseURL: "https://chatgpt.com/backend-api/codex", Endpoint: "@chatgpt.com",
+				ServiceTier: "default", Thinking: "xhigh", APICompat: "responses", Streaming: "true", ContextLimit: "250000"},
+		},
+		{
+			name:    "explicit init fallback",
+			initRaw: llm(map[string]any{"model": "legacy-model", "provider": "legacy-provider", "base_url": "https://legacy.example/v1", "service_tier": "priority", "thinking": "medium", "api_compat": "openai", "context_limit": float64(500000)}),
+			want:    kanbanLLMConfig{Model: "legacy-model", Provider: "legacy-provider", BaseURL: "https://legacy.example/v1", Endpoint: "@legacy.example", ServiceTier: "priority", Thinking: "medium", APICompat: "openai", ContextLimit: "500000"},
+		},
+		{name: "missing fields stay absent", initRaw: llm(map[string]any{"model": "only-model"}), want: kanbanLLMConfig{Model: "only-model"}},
+		{
+			name:     "malformed published fields omit instead of reviving stale values",
+			agentRaw: llm(map[string]any{"service_tier": 42, "thinking": "bad\nvalue", "base_url": "not a URL", "api_compat": 42, "context_limit": "bad"}),
+			initRaw:  llm(map[string]any{"model": "fallback-model", "service_tier": "priority", "thinking": "low", "base_url": "https://fallback.example/v1", "api_compat": "openai", "context_limit": float64(500000)}),
+			want:     kanbanLLMConfig{Model: "fallback-model"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveKanbanLLMConfig(tc.agentRaw, tc.initRaw); got != tc.want {
+				t.Fatalf("resolveKanbanLLMConfig() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKanbanEndpointIsHostOnlyAndBounded(t *testing.T) {
+	longHost := strings.Repeat("a", 100) + ".example.com"
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"host only", "https://ChatGPT.com:443/backend-api/codex?token=hidden", "@chatgpt.com"},
+		{"malformed", "not a URL", ""},
+		{"userinfo rejected", "https://user:secret@example.com/v1", ""},
+		{"overlong input", "https://" + strings.Repeat("a", kanbanBaseURLLimit) + ".example", ""},
+		{"long host bounded", "https://" + longHost + "/v1", "@" + strings.Repeat("a", kanbanCompactEndpointLimit-1) + "…"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseURL, got := parseKanbanBaseURL(tc.raw)
+			if got != tc.want {
+				t.Fatalf("compact endpoint = %q, want %q", got, tc.want)
+			}
+			if tc.want == "" && baseURL != "" {
+				t.Fatalf("invalid URL retained detail value %q", baseURL)
+			}
+			if len([]rune(got)) > kanbanCompactEndpointLimit+1 {
+				t.Fatalf("compact endpoint leaked an unbounded host (%d runes): %q", len([]rune(got)), got)
+			}
+			if strings.Contains(got, "/") || strings.Contains(got, "?") || strings.Contains(got, "secret") {
+				t.Fatalf("compact endpoint exposed non-host material: %q", got)
+			}
+		})
+	}
+}
+
+func requireContains(t *testing.T, got string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func requireNotContains(t *testing.T, got string, unwanted ...string) {
+	t.Helper()
+	for _, value := range unwanted {
+		if strings.Contains(got, value) {
+			t.Fatalf("output unexpectedly contains %q:\n%s", value, got)
+		}
+	}
+}
+
+func newKanbanHierarchyFixture(t *testing.T) PropsModel {
+	t.Helper()
+	baseDir := t.TempDir()
+	agentDir := filepath.Join(baseDir, "main")
+	globalDir := filepath.Join(baseDir, "global")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	brokenRef := filepath.Join(globalDir, "presets", "saved", "broken-preset.json")
+	defaultRef := filepath.Join(globalDir, "presets", "templates", "default-preset.json")
+	agent := map[string]any{
+		"agent_id":     "agent-identity-123",
+		"agent_name":   "MainAgent",
+		"nickname":     "MainNick",
+		"address":      "localhost:/only-in-details",
+		"state":        "ACTIVE",
+		"language":     "Esperanto",
+		"started_at":   "2026-06-13T03:00:00Z",
+		"combo":        "alpha+beta",
+		"molt_count":   7,
+		"max_turns":    42,
+		"max_rpm":      9,
+		"capabilities": []string{"bash"},
+		"admin":        map[string]any{"nirvana": true},
+		"llm": map[string]any{
+			"model":        "gpt-5.6-sol",
+			"provider":     "codex-pool",
+			"base_url":     "https://chatgpt.com/backend-api/codex",
+			"service_tier": "default",
+			"thinking":     "xhigh",
+		},
+	}
+	writeJSON(t, filepath.Join(agentDir, ".agent.json"), agent)
+	init := map[string]any{"manifest": map[string]any{
+		"llm": map[string]any{
+			"api_compat":    "openai",
+			"api_key_env":   "EXAMPLE_API_KEY",
+			"streaming":     true,
+			"context_limit": 500000,
+		},
+		"soul": map[string]any{"delay": 7200},
+		"preset": map[string]any{
+			"active":  brokenRef,
+			"default": defaultRef,
+			"allowed": []string{brokenRef},
+		},
+	}}
+	writeJSON(t, filepath.Join(agentDir, "init.json"), init)
+
+	status := fs.AgentStatus{}
+	status.Tokens.InputTokens = 100
+	status.Tokens.OutputTokens = 20
+	status.Tokens.ThinkingTokens = 10
+	status.Tokens.CachedTokens = 80
+	status.Tokens.APICalls = 2
+	status.Tokens.Context.SystemTokens = 11
+	status.Tokens.Context.ToolsTokens = 22
+	status.Tokens.Context.HistoryTokens = 33
+	status.Tokens.Context.TotalTokens = 66
+	status.Tokens.Context.WindowSize = 500000
+	status.Tokens.Context.UsagePct = 13.2
+	agentNodes := []fs.AgentNode{
+		{AgentID: "human", AgentName: "Human", Address: "human", IsHuman: true, State: "ACTIVE"},
+		{AgentID: "main", AgentName: "MainAgent", Address: "main", State: "ACTIVE", WorkingDir: agentDir},
+		{AgentID: "worker", AgentName: "WorkerOnlyInTree", Address: "worker", State: "IDLE"},
+	}
+
+	return PropsModel{
+		baseDir:        baseDir,
+		orchDir:        agentDir,
+		globalDir:      globalDir,
+		selectedDir:    agentDir,
+		width:          120,
+		height:         40,
+		selectedStatus: status,
+		selectedTokens: fs.TokenTotals{Input: 9001, Output: 8002, Thinking: 7003, Cached: 6004, APICalls: 5},
+		tokens:         fs.TokenTotals{Input: 7001, Output: 6002, Thinking: 5003, Cached: 4004, APICalls: 12},
+		adminStart:     "2026-06-13T03:00:00Z",
+		agentNodes:     agentNodes,
+		network: fs.Network{
+			Nodes:       agentNodes,
+			AvatarEdges: []fs.AvatarEdge{{Parent: "main", Child: "worker"}},
+			Stats:       fs.NetworkStats{Active: 1, Idle: 1},
+			Activity:    fs.NetworkActivity{Status: fs.NetworkStatusDaemonActive, ActiveAgents: 1, RunningDaemons: 2},
+		},
+		detailByProvider:       map[string]fs.TokenTotals{"codex-pool": {Input: 100, APICalls: 2}},
+		detailDaemonByProvider: map[string]fs.TokenTotals{"claude-p": {Input: 50, APICalls: 1}},
+		detailMCPNames:         []string{"telegram"},
+	}
+}
+
+func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
+	m := newKanbanHierarchyFixture(t)
+	left := ansi.Strip(m.renderLeft(60))
+	right := ansi.Strip(m.renderRight(60))
+	primary := left + "\n" + right
+
+	requireContains(t, primary, []string{
+		i18n.T("props.section_agent_now"),
+		i18n.T("props.section_current_session"),
+		i18n.T("props.section_network_now"),
+		"MainAgent", "MainNick", "ACTIVE",
+		"gpt-5.6-sol · codex-pool", "default", "xhigh", "@chatgpt.com",
+		"broken-preset", i18n.TF("props.preset_health_healthy", 0), i18n.TF("props.preset_health_broken", 1),
+		"66 / 500,000 (13.2%)",
+		i18n.T("props.session_input_tokens") + ": 100",
+		i18n.T("props.session_cache_hit_rate") + ": 80.0%",
+		i18n.T("props.session_cache_miss") + ": 20",
+		i18n.T("props.session_api_calls") + ": 2",
+		i18n.T("props.session_tokens_per_api_call") + ": 65",
+		i18n.T("props.network_total") + ": 3", "2 running",
+	}...)
+	requireNotContains(t, primary, []string{
+		"localhost:/only-in-details", "Esperanto", "alpha+beta",
+		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY",
+		"default-preset", "(" + i18n.T("props.preset_source_saved") + ")", "bash", "nirvana",
+		i18n.T("props.context_system") + ":", "9,001",
+		i18n.T("props.network_created") + ":", "7,001", "WorkerOnlyInTree",
+		i18n.T("props.section_identity"),
+		i18n.T("props.section_runtime"), i18n.T("props.section_capabilities"),
+		i18n.T("props.section_admin"), i18n.T("props.tree"),
+	}...)
+}
+
+func TestPropsDetailPreservesEveryMovedCategory(t *testing.T) {
+	m := newKanbanHierarchyFixture(t)
+	detail := ansi.Strip(m.renderDetail())
+	requireContains(t, detail, []string{
+		i18n.T("props.detail_identity_runtime"),
+		i18n.T("props.detail_llm_configuration"),
+		i18n.T("props.detail_presets_capabilities_admin"),
+		i18n.T("props.detail_context_detail"),
+		i18n.T("props.detail_agent_lifetime_usage"),
+		i18n.T("props.detail_network_history_topology"),
+		"agent-identity-123", "localhost:/only-in-details", "Esperanto", "alpha+beta",
+		i18n.T("props.soul_flow"), "7", "42", "9",
+		"gpt-5.6-sol", "codex-pool", "default", "xhigh",
+		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY", "true", "500000",
+		"broken-preset", "default-preset", "✗", "(" + i18n.T("props.preset_source_saved") + ")", "bash", "nirvana: true",
+		i18n.T("props.context_usage") + ": 66 / 500,000 (13.2%)",
+		i18n.T("props.context_system") + ": 11",
+		i18n.T("props.context_tools") + ": 22",
+		i18n.T("props.context_history") + ": 33",
+		"9,001", i18n.T("props.network_created"), "7,001", "WorkerOnlyInTree",
+		i18n.T("props.detail_main_tokens_by_provider"),
+		i18n.T("props.detail_daemon_tokens_by_provider"),
+		i18n.T("props.detail_mcp"), "telegram",
+		i18n.T("props.detail_daemons"),
+		i18n.T("props.detail_recent_main"), i18n.T("props.detail_recent_daemons"),
+	}...)
+}
+
+func TestPropsCurrentSessionCacheMissClampsWithoutFabricatedBudget(t *testing.T) {
+	m := newKanbanHierarchyFixture(t)
+	m.selectedStatus.Tokens.CachedTokens = 150
+	left := ansi.Strip(m.renderLeft(80))
+	if want := i18n.T("props.session_cache_miss") + ": 0"; !strings.Contains(left, want) {
+		t.Fatalf("current-session cache miss must clamp non-negative; missing %q:\n%s", want, left)
+	}
+	requireNotContains(t, strings.ToLower(left), "2,000,000", "2.0m", "budget")
+}
+
+func TestPropsNarrowRenderingAndDetailRouting(t *testing.T) {
+	for _, width := range []int{30, 100} {
+		m := newKanbanHierarchyFixture(t)
+		m.width = width
+		m.height = 24
+		body := ansi.Strip(m.renderBody())
+		for _, section := range []string{i18n.T("props.section_agent_now"), i18n.T("props.section_network_now")} {
+			if !strings.Contains(body, section) {
+				t.Fatalf("width %d summary missing %q:\n%s", width, section, body)
+			}
+		}
+	}
+
+	m := newKanbanHierarchyFixture(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if !updated.detailOpen || !strings.Contains(ansi.Strip(updated.viewport.View()), i18n.T("props.detail_identity_runtime")) {
+		t.Fatalf("ctrl+d must still route to the detail pane")
+	}
+}
 
 func TestPropsLoadDataSkipsMailEdges(t *testing.T) {
 	base := t.TempDir()
@@ -71,7 +340,7 @@ func TestKanbanTimestampKeepsInvalidLegacyCompact(t *testing.T) {
 	}
 }
 
-func TestPropsRenderLeftShowsStartedAtLocalOffset(t *testing.T) {
+func TestPropsRenderDetailShowsStartedAtLocalOffset(t *testing.T) {
 	origLocal := time.Local
 	t.Cleanup(func() { time.Local = origLocal })
 	time.Local = time.FixedZone("test", -7*60*60)
@@ -82,16 +351,16 @@ func TestPropsRenderLeftShowsStartedAtLocalOffset(t *testing.T) {
 	}
 
 	m := PropsModel{selectedDir: dir}
-	left := ansi.Strip(m.renderLeft(80))
-	if !strings.Contains(left, "2026-06-12 20:00 U-7:00") {
-		t.Fatalf("renderLeft should render started_at in local time with offset:\n%s", left)
+	detail := ansi.Strip(m.renderDetail())
+	if !strings.Contains(detail, "2026-06-12 20:00 U-7:00") {
+		t.Fatalf("renderDetail should render started_at in local time with offset:\n%s", detail)
 	}
-	if strings.Contains(left, "2026-06-13T03:00:00Z") {
-		t.Fatalf("renderLeft should not show raw UTC started_at:\n%s", left)
+	if strings.Contains(detail, "2026-06-13T03:00:00Z") {
+		t.Fatalf("renderDetail should not show raw UTC started_at:\n%s", detail)
 	}
 }
 
-func TestPropsRenderLeftShowsCurrentSessionTokensPerAPICallSeparately(t *testing.T) {
+func TestPropsRenderLeftShowsCurrentSessionEconomy(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".agent.json"), []byte(`{"agent_name":"mimo"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -111,37 +380,36 @@ func TestPropsRenderLeftShowsCurrentSessionTokensPerAPICallSeparately(t *testing
 	}
 
 	out := ansi.Strip(m.renderLeft(80))
-	lifetime := "input: 1,000"
 	sessionTitle := i18n.T("props.section_current_session")
+	sessionInput := i18n.T("props.session_input_tokens") + ": 100"
+	sessionCache := i18n.T("props.session_cache_hit_rate") + ": 0.0%"
+	sessionMiss := i18n.T("props.session_cache_miss") + ": 100"
+	sessionCalls := i18n.T("props.session_api_calls") + ": 2"
 	sessionAverage := i18n.T("props.session_tokens_per_api_call") + ": 65"
-	for _, want := range []string{lifetime, sessionTitle, sessionAverage} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("normal kanban missing %q:\n%s", want, out)
-		}
-	}
-	if strings.Index(out, lifetime) >= strings.Index(out, sessionTitle) {
-		t.Fatalf("current-session average must stay visually distinct after lifetime totals:\n%s", out)
+	requireContains(t, out, sessionTitle, sessionInput, sessionCache, sessionMiss, sessionCalls, sessionAverage)
+	if strings.Contains(out, "input: 1,000") {
+		t.Fatalf("selected-agent lifetime totals must move out of the primary summary:\n%s", out)
 	}
 
 	m.selectedStatus.Tokens.APICalls = 0
 	out = ansi.Strip(m.renderLeft(80))
-	if strings.Contains(out, sessionTitle) || strings.Contains(out, i18n.T("props.session_tokens_per_api_call")) {
-		t.Fatalf("zero-call current session must not render an average:\n%s", out)
+	if !strings.Contains(out, sessionTitle) || strings.Contains(out, i18n.T("props.session_tokens_per_api_call")) {
+		t.Fatalf("zero-call current session must keep known economy fields but omit the average:\n%s", out)
 	}
 }
 
-func TestPropsRenderRightShowsNetworkCreatedLocalOffset(t *testing.T) {
+func TestPropsRenderDetailShowsNetworkCreatedLocalOffset(t *testing.T) {
 	origLocal := time.Local
 	t.Cleanup(func() { time.Local = origLocal })
 	time.Local = time.FixedZone("test", -7*60*60)
 
 	m := PropsModel{adminStart: "2026-06-13T03:00:00Z"}
-	right := ansi.Strip(m.renderRight(80))
-	if !strings.Contains(right, "2026-06-12 20:00 U-7:00") {
-		t.Fatalf("renderRight should render network_created in local time with offset:\n%s", right)
+	detail := ansi.Strip(m.renderDetail())
+	if !strings.Contains(detail, "2026-06-12 20:00 U-7:00") {
+		t.Fatalf("renderDetail should render network_created in local time with offset:\n%s", detail)
 	}
-	if strings.Contains(right, "2026-06-13T03:00:00Z") {
-		t.Fatalf("renderRight should not show raw UTC timestamp:\n%s", right)
+	if strings.Contains(detail, "2026-06-13T03:00:00Z") {
+		t.Fatalf("renderDetail should not show raw UTC timestamp:\n%s", detail)
 	}
 }
 
@@ -212,7 +480,7 @@ func TestPropsRenderDetailShowsAgentPathInfo(t *testing.T) {
 
 	got := ansi.Strip(m.renderDetail())
 	for _, want := range []string{
-		i18n.T("props.detail_agent_info"),
+		i18n.T("props.detail_identity_runtime"),
 		i18n.T("props.detail_agent_path"),
 		i18n.T("props.detail_network_path"),
 		i18n.T("props.detail_orchestrator_path"),
