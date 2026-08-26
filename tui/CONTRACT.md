@@ -124,9 +124,14 @@ consumer-neutral, read-only `lingtai.stream-progress/v1` snapshot
 agent's stable `agent_id`; client and arithmetic in
 `tui/internal/streamprogress/ANATOMY.md`, adapter in
 `tui/internal/tui/stream_progress.go`), rendered as the integer
-`streamed_chars / 4`. New agents the TUI creates ship `"streaming": true`
-(`tui/internal/preset/preset.go`, `templates/init.jsonc`), matching the kernel's
-default-on contract; an explicit `false` in `init.json` still opts out.
+`streamed_chars / 4`. Whether an agent streams at all is kernel-owned runtime
+configuration with exactly one owner path — the kernel's System settings
+resolver: a valid `LINGTAI_STREAMING_ENABLED` environment value, otherwise a
+valid boolean `streaming` in the agent's `settings/system.json`, otherwise on.
+`init.json` carries no `streaming` field: `GenerateInitJSON`
+(`tui/internal/preset/preset.go`), `templates/init.jsonc`, and
+`examples/init.jsonc` emit none, `/kanban` shows no such row, and the TUI
+offers no editor or writer for the System setting.
 
 1. **Purely additive, fail-open, strict.** A missing, refused, redirecting,
    foreign, or malformed endpoint is never a launch gate, banner, or doctor

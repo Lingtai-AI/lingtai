@@ -2043,10 +2043,9 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// AgentOpts (caller didn't set it) still writes a valid default rather
 	// than 0, which the kernel would treat as "never retry".
 	manifest["max_aed_attempts"] = ClampAedAttempts(opts.MaxAedAttempts)
-	// Streaming is on by default (kernel default-on contract); the kernel
-	// publishes RAM-only stream progress the TUI renders as "N tok downloaded".
-	// A user may still set false explicitly in init.json to opt out.
-	manifest["streaming"] = true
+	// No manifest["streaming"]: LLM output streaming is kernel/System-owned
+	// runtime configuration (LINGTAI_STREAMING_ENABLED, then the agent's
+	// settings/system.json, then on) — init.json no longer carries the field.
 	// Track which preset this agent was created from. The kernel reads this
 	// at boot to materialize manifest.llm + manifest.capabilities from the
 	// referenced preset file. As of the path-as-name redesign, the value is

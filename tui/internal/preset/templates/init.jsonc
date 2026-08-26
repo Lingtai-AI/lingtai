@@ -173,13 +173,7 @@
     // karma: allows lull (sleep other), interrupt, suspend actions.
     // nirvana: allows permanent destruction of other agents.
     // Avatars always get {} (no privileges) regardless of parent.
-    "admin": { "karma": true, "nirvana": false },
-
-    // Whether to use streaming for LLM responses. Default on: a missing key
-    // also means true; set false explicitly to opt out. While streaming, the
-    // agent publishes RAM-only progress (character count, no text) on a
-    // loopback endpoint so the TUI can show "N tok downloaded".
-    "streaming": true
+    "admin": { "karma": true, "nirvana": false }
   },
 
   // =============================================================
