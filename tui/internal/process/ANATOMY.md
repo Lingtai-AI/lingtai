@@ -23,7 +23,7 @@ maintenance: |
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in the same commit as code changes.
 
-`process` is the TUI's subprocess boundary with the Python kernel: the one place that turns "start this agent" into a real `python -m lingtai run <dir>` child under the managed runtime venv, and the one place that terminates such a child. It is the *only* direct process-level coupling between the two languages — after launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation.
+`process` is the TUI's subprocess boundary with the Python kernel: it runs the noninteractive fresh-seed `lingtai-agent project create` command with literal argv and captured output, and it starts/terminates the guarded `lingtai-agent run <dir>` child under the managed runtime venv. It is the *only* direct process-level coupling between the two languages — after a create or launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation.
 
 ## Components
 
@@ -32,18 +32,21 @@ maintenance: |
 | `AgentProcess` | `tui/internal/process/check.go:9` | type alias re-exporting `processscan.AgentProcess` so callers need only one import |
 | `FindAgentProcesses` | `tui/internal/process/check.go:18` | delegates to `processscan` for the running processes bound to one agent dir |
 | `IsAgentRunning` | `tui/internal/process/check.go:30` | the boolean launch/refresh gate built on that scan |
-| `ErrAgentAlreadyRunning` | `tui/internal/process/launcher.go:18` | the sentinel `LaunchAgent` returns instead of starting a second kernel in one workdir |
-| `InitProject` | `tui/internal/process/launcher.go:20` | creates/stamps a project's `.lingtai/` skeleton before the first launch |
-| `LaunchAgent` | `tui/internal/process/launcher.go:96` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking |
-| `ForceLaunchAgent` | `tui/internal/process/launcher.go:109` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
+| `ErrAgentAlreadyRunning` | `tui/internal/process/launcher.go:21` | the sentinel `LaunchAgent` returns instead of starting a second kernel in one workdir |
+| `ProjectCreateRequest` / `ProjectCreateResult` / `ProjectCreateError` | `tui/internal/process/launcher.go:26,36,57` | literal create inputs plus captured accepted output or classified handler/transport failure |
+| `kernelCLI` / `kernelCLIForOS` | `tui/internal/process/launcher.go:151,157` | resolves the managed sibling executable; the production resolver supplies `runtime.GOOS` while the suffix decision remains platform-neutral and unit-testable |
+| `CreateProject` | `tui/internal/process/launcher.go:170` | synchronously runs `lingtai-agent project create --dir --name --preset --covenant-file --json`; accepts only exit-0 one-object `created` output for the requested agent with a nonempty canonical `preset_ref`, and preserves all other terminal outcomes for conservative callers |
+| `InitProject` | `tui/internal/process/launcher.go:83` | legacy TUI-owned `.lingtai/` skeleton helper retained for its independent callers; headless spawn does not use it |
+| `LaunchAgent` | `tui/internal/process/launcher.go:295` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking |
+| `ForceLaunchAgent` | `tui/internal/process/launcher.go:308` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
 | `TerminateAgentProcesses` | `tui/internal/process/kill_unix.go:18`, `tui/internal/process/kill_windows.go:18` | per-OS termination of every process matched for an agent dir; `terminateError` (`kill_unix.go:54`, `kill_windows.go:43`) names the PIDs that survived |
 
 ## Connections
 
 - **Calls `tui/internal/processscan/`** for all process-table matching — this package adds launch/terminate policy, not parsing.
-- **Calls `tui/internal/config/`** to resolve the runtime venv interpreter (`~/.lingtai-tui/runtime/venv`) the kernel is launched from.
-- **Called by `tui/main.go`** (interactive start, `purge`, `suspend`), by `tui/internal/tui/` (`launcher.go`, the network home's start/stop actions), and by `tui/internal/headless/spawn.go` for the non-interactive path.
-- **Launches the kernel only.** It never speaks to a running agent afterward; all further communication is filesystem-only through `tui/internal/fs/`.
+- **Calls `tui/internal/config/`** to resolve the runtime venv interpreter (`~/.lingtai-tui/runtime/venv`) whose sibling `lingtai-agent` executable handles both create and run.
+- **Called by `tui/main.go`** (interactive start, `purge`, `suspend`), by `tui/internal/tui/` (`launcher.go`, the network home's start/stop actions), and by `tui/internal/headless/spawn.go`, which alone uses `CreateProject` for noninteractive fresh seeding before the existing launch path.
+- **Starts kernel CLI commands only.** It never speaks to a running agent afterward; all further communication is filesystem-only through `tui/internal/fs/`.
 
 ## Composition
 
@@ -53,6 +56,7 @@ maintenance: |
 
 ## Notes
 
+- **Create completion is process-authoritative.** `CreateProject` never deletes a root or `.lingtai/` tree after a child error: malformed output, a signal, cancellation, timeout, or another transport outcome can leave an uncertain tree for explicit recovery.
 - **One agent per workdir.** `LaunchAgent` fails with `ErrAgentAlreadyRunning` rather than starting a second kernel against the same `.lingtai/<agent>/`. `ForceLaunchAgent` is the explicit, operator-visible override — do not make it the default path.
 - **Process-table detection is advisory.** Same caveat as `processscan`: matching is best-effort and racy. The kernel's own workdir lock is the authoritative gate; never rely on `IsAgentRunning` alone for correctness under concurrency.
 - **Keep the import direction clean.** `processscan` exists precisely because `process` imports `migrate`; packages below that line must import `processscan`, never `process`.

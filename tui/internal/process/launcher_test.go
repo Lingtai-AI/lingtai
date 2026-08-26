@@ -1,6 +1,8 @@
 package process
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,5 +161,118 @@ func TestLaunchAgentUnsafeValidAddonKeyKeepsLaunchBehavior(t *testing.T) {
 		if !strings.Contains(calls, want) {
 			t.Errorf("interpreter log missing %q; got:\n%s", want, calls)
 		}
+	}
+}
+
+func writeProjectCreateStub(t *testing.T, dir, logPath, stdout, stderr string, exitStatus int) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX stub lingtai-agent not available on Windows")
+	}
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nprintf '%%b' %q\nprintf '%%b' %q >&2\nexit %d\n", logPath, stdout, stderr, exitStatus)
+	if err := os.WriteFile(filepath.Join(dir, "lingtai-agent"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKernelCLIForOS_UsesExpectedExecutableName(t *testing.T) {
+	python := filepath.Join("runtime", "venv", "bin", "python")
+	for _, tc := range []struct {
+		name     string
+		goos     string
+		filename string
+	}{
+		{name: "unix", goos: "linux", filename: "lingtai-agent"},
+		{name: "windows", goos: "windows", filename: "lingtai-agent.exe"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := kernelCLIForOS(python, tc.goos)
+			if filepath.Base(got) != tc.filename {
+				t.Errorf("kernelCLIForOS filename = %q, want %q", filepath.Base(got), tc.filename)
+			}
+			if filepath.Dir(got) != filepath.Dir(python) {
+				t.Errorf("kernelCLIForOS dir = %q, want %q", filepath.Dir(got), filepath.Dir(python))
+			}
+		})
+	}
+}
+
+func TestCreateProject_UsesLiteralArgvAndCapturesSuccess(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "create-argv.log")
+	stdout := "{\"agent_name\":\"alice\",\"preset_ref\":\"/presets/chosen.json\",\"status\":\"created\"}\n"
+	writeProjectCreateStub(t, dir, logPath, stdout, "", 0)
+
+	request := ProjectCreateRequest{
+		Dir:          filepath.Join(dir, "project with spaces"),
+		AgentName:    "alice",
+		Preset:       filepath.Join(dir, "chosen preset.json"),
+		CovenantFile: filepath.Join(dir, "covenant input.md"),
+	}
+	result, err := CreateProject(context.Background(), filepath.Join(dir, "python"), request)
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if result.Status != "created" || result.AgentName != request.AgentName || result.PresetRef != "/presets/chosen.json" || result.ExitCode != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.Stdout != stdout || result.Stderr != "" {
+		t.Fatalf("child output was not retained: %+v", result)
+	}
+	got := strings.Split(strings.TrimSuffix(readInvocationLog(t, logPath), "\n"), "\n")
+	want := []string{
+		"project", "create",
+		"--dir", request.Dir,
+		"--name", request.AgentName,
+		"--preset", request.Preset,
+		"--covenant-file", request.CovenantFile,
+		"--json",
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("literal argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestCreateProject_MapsOnlyExitOneJSONStderrAsHandlerFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeProjectCreateStub(t, dir, filepath.Join(dir, "create-argv.log"), "untrusted stdout", `{"code":"invalid_preset","error":"bad preset","status":"error"}`, 1)
+
+	_, err := CreateProject(context.Background(), filepath.Join(dir, "python"), ProjectCreateRequest{})
+	var failure *ProjectCreateError
+	if !errors.As(err, &failure) {
+		t.Fatalf("error = %v, want ProjectCreateError", err)
+	}
+	if failure.Kind != ProjectCreateHandlerFailure || failure.Code != "invalid_preset" || failure.Message != "bad preset" || failure.Stdout != "untrusted stdout" {
+		t.Fatalf("unexpected handler failure: %+v", failure)
+	}
+}
+
+func TestCreateProject_RejectsMalformedSuccessAndExitTwoAsTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stdout    string
+		stderr    string
+		exit      int
+		agentName string
+		reason    string
+	}{
+		{name: "multiple stdout documents", stdout: "{\"agent_name\":\"alice\",\"preset_ref\":\"/presets/chosen.json\",\"status\":\"created\"}\n{\"extra\":true}", exit: 0, agentName: "alice", reason: "malformed_result"},
+		{name: "mismatched agent", stdout: "{\"agent_name\":\"bob\",\"preset_ref\":\"/presets/chosen.json\",\"status\":\"created\"}", exit: 0, agentName: "alice", reason: "malformed_result"},
+		{name: "missing preset reference", stdout: "{\"agent_name\":\"alice\",\"status\":\"created\"}", exit: 0, agentName: "alice", reason: "malformed_result"},
+		{name: "relative preset reference", stdout: "{\"agent_name\":\"alice\",\"preset_ref\":\"presets/chosen.json\",\"status\":\"created\"}", exit: 0, agentName: "alice", reason: "malformed_result"},
+		{name: "argparse exit two", stderr: "usage: lingtai-agent project create", exit: 2, reason: "argument_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeProjectCreateStub(t, dir, filepath.Join(dir, "create-argv.log"), tc.stdout, tc.stderr, tc.exit)
+			_, err := CreateProject(context.Background(), filepath.Join(dir, "python"), ProjectCreateRequest{AgentName: tc.agentName})
+			var failure *ProjectCreateError
+			if !errors.As(err, &failure) {
+				t.Fatalf("error = %v, want ProjectCreateError", err)
+			}
+			if failure.Kind != ProjectCreateTransportFailure || failure.Reason != tc.reason {
+				t.Fatalf("unexpected transport failure: %+v", failure)
+			}
+		})
 	}
 }
