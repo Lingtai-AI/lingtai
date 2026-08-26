@@ -2408,7 +2408,7 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel())
 	indicatorText := m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince) + staleElapsedFor(recipientLifecycle.state, recipientLifecycle.staleSeconds)
 	indicator := stateStyle.Render(indicatorText)
-	// Stream-progress suffix (" · N tok downloaded") beside "active Ns" — read
+	// Stream-progress suffix (" · N chars · delay 0.1s") beside "active Ns" — read
 	// from the cached loopback snapshot only (no I/O here), rendered only while
 	// the visible recipient is ACTIVE, and omitted rather than wrapped when the
 	// terminal is too narrow for the whole interaction line.

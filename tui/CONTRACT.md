@@ -118,13 +118,16 @@ appears as the degraded state below.
 ## Live stream-progress badge (additive, loopback-only)
 
 While the visible recipient is `ACTIVE`, Mail's `Email To:` indicator may
-append ` · N tok downloaded` beside `Active N s`. The value is the kernel's
-consumer-neutral, read-only `lingtai.stream-progress/v1` snapshot
+append ` · C chars · delay D.Ds` beside `Active N s`. The value comes from the
+kernel's consumer-neutral, read-only `lingtai.stream-progress/v1` snapshot
 (`GET /v1/stream-progress` on `127.0.0.1`, discovered deterministically from the
-agent's stable `agent_id`; client and arithmetic in
-`tui/internal/streamprogress/ANATOMY.md`, adapter in
-`tui/internal/tui/stream_progress.go`), rendered as the integer
-`streamed_chars / 4`. Whether an agent streams at all is kernel-owned runtime
+agent's stable `agent_id`; client in
+`tui/internal/streamprogress/ANATOMY.md`, display adapter in
+`tui/internal/tui/stream_progress.go`). `C` is the factual `streamed_chars`
+value: exact below 1000 and one-decimal `k` at or above 1000. `delay` is snapshot
+freshness, `max(now - updated_unix_ms, 0)`, shown to one decimal second; it is
+not provider-response duration and performs no token conversion. Whether an
+agent streams at all is kernel-owned runtime
 configuration with exactly one owner path — the kernel's System settings
 resolver: a valid `LINGTAI_STREAMING_ENABLED` environment value, otherwise a
 valid boolean `streaming` in the agent's `settings/system.json`, otherwise on.

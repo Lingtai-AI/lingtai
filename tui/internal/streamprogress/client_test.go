@@ -122,14 +122,6 @@ func TestParseSnapshotAcceptsZeroUpdatedAndBoundaryValues(t *testing.T) {
 	}
 }
 
-func TestEstimatedTokensIsIntegerQuarter(t *testing.T) {
-	for chars, want := range map[int64]int64{0: 0, 3: 0, 4: 1, 7: 1, 4099: 1024, 4100: 1025, -8: 0} {
-		if got := (Snapshot{StreamedChars: chars}).EstimatedTokens(); got != want {
-			t.Errorf("EstimatedTokens(%d) = %d, want %d", chars, got, want)
-		}
-	}
-}
-
 // fakeServer serves a fixed agent identity and counts hits.
 type fakeServer struct {
 	srv   *httptest.Server
@@ -475,8 +467,8 @@ func TestFetchRealLoopbackCandidate(t *testing.T) {
 	for {
 		snap, ok := c.Fetch(agentID)
 		if ok {
-			if snap.EstimatedTokens() != 100 {
-				t.Fatalf("EstimatedTokens = %d, want 100", snap.EstimatedTokens())
+			if snap.StreamedChars != 400 {
+				t.Fatalf("StreamedChars = %d, want 400", snap.StreamedChars)
 			}
 			if port, _ := c.CachedPort(agentID); port != ln.Addr().(*net.TCPAddr).Port {
 				t.Fatalf("cached port %d != bound %d", port, ln.Addr().(*net.TCPAddr).Port)

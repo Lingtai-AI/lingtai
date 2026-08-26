@@ -86,15 +86,6 @@ type Snapshot struct {
 	PID           int
 }
 
-// EstimatedTokens is the documented consumer estimate: integer
-// `streamed_chars / 4`.
-func (s Snapshot) EstimatedTokens() int64 {
-	if s.StreamedChars <= 0 {
-		return 0
-	}
-	return s.StreamedChars / 4
-}
-
 // ParseSnapshot validates one response body for agentID against the frozen v1
 // contract: exactly one JSON object carrying exactly the seven documented
 // fields — nothing missing, nothing extra (a `text` field or any other

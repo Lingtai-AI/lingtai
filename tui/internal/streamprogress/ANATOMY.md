@@ -38,7 +38,7 @@ it owns no rendering.
 |---|---|---|
 | `Schema`, `Path`, `DefaultTimeout` | `tui/internal/streamprogress/client.go` | the v1 schema string, the one resource path, and the per-probe timeout |
 | `Seed` / `CandidatePorts` | `tui/internal/streamprogress/client.go` | `uint16_be(SHA256(schema+"\0"+agent_id)[0:2])` and candidate `i = 41000 + ((seed + i*7919) mod 20000)` for `i = 0..7` — byte-for-byte the kernel's `candidate_ports` |
-| `Snapshot` / `EstimatedTokens` | `tui/internal/streamprogress/client.go` | the seven documented fields (no text) and the documented integer `streamed_chars / 4` estimate |
+| `Snapshot` | `tui/internal/streamprogress/client.go` | the seven documented fields (no text); `streamed_chars` and `updated_unix_ms` remain factual source values with no token estimate in the client |
 | `ParseSnapshot` / `rejectDuplicateKeys` | `tui/internal/streamprogress/client.go` | strict frozen-v1 body validation: exactly one JSON object with exactly the seven documented fields — unknown fields (including a forbidden `text`), duplicate keys, and trailing data are rejected — exact schema, exact `agent_id`, unsigned `generation`, non-negative `streamed_chars`/`updated_unix_ms`, positive `pid` |
 | `Client` (`NewClient`, `Fetch`, `CachedPort`, `Forget`) | `tui/internal/streamprogress/client.go` | loopback-only `http.Client` that never follows redirects (`ErrRedirect`) and keeps no connections alive; probes the cached port first, otherwise the candidates in order (skipping the port that just failed as the cache); accepts only a valid matching body of at most `maxBodyBytes` (64 KiB) — an oversized body is rejected whole, never truncated and parsed; caches the port in RAM; forgets and rescans after any failure |
 
@@ -47,8 +47,10 @@ it owns no rendering.
 - **Upstream caller:** `tui/internal/tui/stream_progress.go` — Mail's
   poll-path adapter. It calls `Client.Fetch` only inside a `tea.Cmd` scheduled
   from the poll tick (never from `View()`), gates the result by Mail generation
-  and visible-recipient identity, and renders `· N tok downloaded` beside
-  `Active N s`. See `tui/internal/tui/ANATOMY.md`.
+  and visible-recipient identity, and renders the factual char count plus
+  snapshot freshness — `· 999 chars · delay 0.1s` or
+  `· 1.0k chars · delay 0.1s` — beside `Active N s`. See
+  `tui/internal/tui/ANATOMY.md`.
 - **External dependency:** the kernel agent process (`lingtai-kernel`
   `src/lingtai/adapters/stream_progress.py`) serving loopback only. A missing,
   refused, foreign, or malformed endpoint is an ordinary `ok=false` — the

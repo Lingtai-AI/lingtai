@@ -36,11 +36,22 @@ func (f *fakeStreamFetcher) Fetch(agentID string) (streamprogress.Snapshot, bool
 }
 
 func activeStreamSnapshot(chars int64) streamprogress.Snapshot {
-	return streamprogress.Snapshot{Schema: streamprogress.Schema, Generation: 1, Active: true, StreamedChars: chars, PID: 1}
+	return streamprogress.Snapshot{
+		Schema:        streamprogress.Schema,
+		Generation:    1,
+		Active:        true,
+		StreamedChars: chars,
+		UpdatedUnixMS: time.Now().UnixMilli(),
+		PID:           1,
+	}
 }
 
-func tokSuffix(n int64) string {
-	return i18n.TF("mail.stream_progress_tok", n)
+func charsSuffix(chars string) string {
+	return i18n.TF("mail.stream_progress_chars", chars)
+}
+
+func delaySuffix(delay float64) string {
+	return i18n.TF("mail.stream_progress_delay", delay)
 }
 
 // newStreamMail builds a sized Main Mail model with a known orchestrator
@@ -76,41 +87,57 @@ func pollStream(t *testing.T, m MailModel, now time.Time) MailModel {
 }
 
 func TestStreamProgressSuffixRendersBesideActiveElapsed(t *testing.T) {
-	fetcher := &fakeStreamFetcher{snapshot: activeStreamSnapshot(4099), ok: true}
+	now := time.UnixMilli(1756200000100)
+	snapshot := activeStreamSnapshot(4099)
+	snapshot.UpdatedUnixMS = now.Add(-100 * time.Millisecond).UnixMilli()
+	fetcher := &fakeStreamFetcher{snapshot: snapshot, ok: true}
 	m := newStreamMail(t, fetcher, 100)
 	m = refreshState(t, m, "active")
-	m = pollStream(t, m, time.Now())
+	m = pollStream(t, m, now)
 
 	footer := emailToLine(m.View())
 	if footer == "" {
 		t.Fatal("no Email To: footer line")
 	}
 	label := i18n.T("state.active")
-	suffix := tokSuffix(1024)
-	if !strings.Contains(footer, label) || !strings.Contains(footer, suffix) {
-		t.Fatalf("footer should carry %q and %q; got %q", label, suffix, footer)
+	chars := charsSuffix("4.1k")
+	if !strings.Contains(footer, label) || !strings.Contains(footer, chars) {
+		t.Fatalf("footer should carry %q and %q; got %q", label, chars, footer)
 	}
-	// "active Ns · N tok downloaded": the suffix follows the elapsed seconds.
-	if strings.Index(footer, label) > strings.Index(footer, suffix) {
+	// "active Ns · N chars · delay 0.1s": the suffix follows elapsed seconds.
+	if strings.Index(footer, label) > strings.Index(footer, chars) {
 		t.Fatalf("suffix must render after the state label: %q", footer)
 	}
-	elapsedThenSuffix := strings.SplitN(footer[strings.Index(footer, label):], suffix, 2)[0]
+	elapsedThenSuffix := strings.SplitN(footer[strings.Index(footer, label):], chars, 2)[0]
 	if !strings.HasSuffix(strings.TrimSpace(elapsedThenSuffix), "s ·") {
 		t.Fatalf("expected `active Ns ·` immediately before the suffix; got %q", elapsedThenSuffix)
+	}
+	want := " · " + charsSuffix("4.1k") + " · " + delaySuffix(0.1)
+	if got := m.streamProgressSuffixAt("active", now); got != want {
+		t.Fatalf("exact suffix = %q, want %q", got, want)
 	}
 	if fetcher.agentIDs[0] != "orch-agent-id" {
 		t.Fatalf("Main must poll the orchestrator's stable agent_id; got %v", fetcher.agentIDs)
 	}
 }
 
-func TestStreamProgressCharQuarterFormatting(t *testing.T) {
-	for chars, want := range map[int64]int64{0: 0, 3: 0, 7: 1, 4099: 1024, 4100: 1025, 400000: 100000} {
-		fetcher := &fakeStreamFetcher{snapshot: activeStreamSnapshot(chars), ok: true}
-		m := newStreamMail(t, fetcher, 120)
-		m = refreshState(t, m, "active")
-		m = pollStream(t, m, time.Now())
-		if got := m.streamProgressSuffix("active"); got != " · "+tokSuffix(want) {
-			t.Errorf("chars=%d: suffix %q, want %q", chars, got, " · "+tokSuffix(want))
+func TestStreamProgressFactualCharAndDelayFormatting(t *testing.T) {
+	for chars, want := range map[int64]string{-8: "0", 0: "0", 999: "999", 1000: "1.0k", 1049: "1.0k", 1100: "1.1k", 4099: "4.1k"} {
+		if got := formatStreamedChars(chars); got != want {
+			t.Errorf("formatStreamedChars(%d) = %q, want %q", chars, got, want)
+		}
+	}
+	now := time.UnixMilli(1756200000100)
+	for name, tc := range map[string]struct {
+		updated int64
+		want    float64
+	}{
+		"one decimal":   {updated: now.Add(-100 * time.Millisecond).UnixMilli(), want: 0.1},
+		"future clamps": {updated: now.Add(time.Second).UnixMilli(), want: 0},
+		"whole seconds": {updated: now.Add(-1200 * time.Millisecond).UnixMilli(), want: 1.2},
+	} {
+		if got := streamProgressDelaySeconds(tc.updated, now); got != tc.want {
+			t.Errorf("%s: delay = %.3f, want %.3f", name, got, tc.want)
 		}
 	}
 }
@@ -123,7 +150,7 @@ func TestStreamProgressHiddenUnlessLifecycleActiveAndSnapshotActive(t *testing.T
 	if cmd := m.maybeScheduleStreamProgress(time.Now()); cmd != nil {
 		t.Fatal("no fetch may be scheduled while the recipient is not ACTIVE")
 	}
-	if strings.Contains(ansi.Strip(m.View()), "tok") {
+	if strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("idle recipient must not show progress")
 	}
 
@@ -134,7 +161,7 @@ func TestStreamProgressHiddenUnlessLifecycleActiveAndSnapshotActive(t *testing.T
 	m = newStreamMail(t, fetcher, 100)
 	m = refreshState(t, m, "active")
 	m = pollStream(t, m, time.Now())
-	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "tok") {
+	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("inactive snapshot must not show progress")
 	}
 
@@ -143,7 +170,7 @@ func TestStreamProgressHiddenUnlessLifecycleActiveAndSnapshotActive(t *testing.T
 	m = newStreamMail(t, fetcher, 100)
 	m = refreshState(t, m, "active")
 	m = pollStream(t, m, time.Now())
-	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "tok") {
+	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("unavailable endpoint must not show progress")
 	}
 	if !strings.Contains(emailToLine(m.View()), i18n.T("state.active")) {
@@ -156,14 +183,14 @@ func TestStreamProgressClearsImmediatelyWhenRecipientStopsBeingActive(t *testing
 	m := newStreamMail(t, fetcher, 100)
 	m = refreshState(t, m, "active")
 	m = pollStream(t, m, time.Now())
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(2000)) {
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("8.0k")) {
 		t.Fatal("setup: suffix should be visible")
 	}
 
 	// The very next refresh reports IDLE: the suffix is gone on the next frame,
 	// before any further poll, and the cached reading is dropped on the next tick.
 	m = refreshState(t, m, "idle")
-	if strings.Contains(ansi.Strip(m.View()), "tok") {
+	if strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("suffix must clear immediately once the recipient is not ACTIVE")
 	}
 	if cmd := m.maybeScheduleStreamProgress(time.Now()); cmd != nil || m.streamProgress.ok {
@@ -191,18 +218,18 @@ func TestStreamProgressIgnoresStaleGenerationAndMismatchedRecipient(t *testing.T
 	// cleared, never shown.
 	other := streamProgressMsg{generation: m.generation, serial: m.streamProgressSerial, recipient: streamRecipient{agentID: "someone-else", directory: m.orchestrator}, snapshot: activeStreamSnapshot(1), ok: true}
 	m, _ = m.Update(other)
-	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "tok") {
+	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("a result for a different recipient must clear the badge")
 	}
 
 	// The orchestrator identity changes under a still-cached reading: the
 	// render gate hides it at once.
 	m = pollStream(t, m, time.Now().Add(time.Minute))
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(1000)) {
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("4.0k")) {
 		t.Fatal("setup: suffix should be visible again")
 	}
 	m.orchAgentID = "replaced-agent-id"
-	if strings.Contains(ansi.Strip(m.View()), "tok") {
+	if strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("suffix must not render beside a recipient it was not fetched for")
 	}
 }
@@ -262,8 +289,8 @@ func TestStreamProgressDirectPageUsesTargetIdentityAndClearsOnReturn(t *testing.
 	if want.threadKey != key || want.directory != fx.targetA.Directory {
 		t.Fatalf("direct recipient identity = %+v", want)
 	}
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(500)) {
-		t.Fatalf("direct footer should show %q; got %q", tokSuffix(500), emailToLine(m.View()))
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("2.0k")) {
+		t.Fatalf("direct footer should show %q; got %q", charsSuffix("2.0k"), emailToLine(m.View()))
 	}
 
 	// Returning to Main changes the visible recipient: the suffix clears at
@@ -272,7 +299,7 @@ func TestStreamProgressDirectPageUsesTargetIdentityAndClearsOnReturn(t *testing.
 	if _, direct := m.currentDirectTarget(); direct {
 		t.Fatal("setup: Main should be current again")
 	}
-	if strings.Contains(ansi.Strip(m.View()), "tok") {
+	if strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("suffix must clear immediately when the visible recipient changes")
 	}
 	if cmd := m.maybeScheduleStreamProgress(time.Now()); cmd != nil || m.streamProgress.ok {
@@ -285,7 +312,7 @@ func TestStreamProgressNarrowTerminalOmitsSuffixWithoutWrapping(t *testing.T) {
 	m := newStreamMail(t, fetcher, 100)
 	m = refreshState(t, m, "active")
 	m = pollStream(t, m, time.Now())
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(1000)) {
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("4.0k")) {
 		t.Fatal("setup: wide terminal shows the suffix")
 	}
 
@@ -295,7 +322,7 @@ func TestStreamProgressNarrowTerminalOmitsSuffixWithoutWrapping(t *testing.T) {
 	for _, line := range strings.Split(view, "\n") {
 		if strings.Contains(line, "Email To:") {
 			footers++
-			if strings.Contains(line, "tok") {
+			if strings.Contains(line, "chars") {
 				t.Fatalf("narrow footer must omit the suffix: %q", line)
 			}
 			if !strings.Contains(line, i18n.T("state.active")) {
@@ -306,7 +333,7 @@ func TestStreamProgressNarrowTerminalOmitsSuffixWithoutWrapping(t *testing.T) {
 	if footers != 1 {
 		t.Fatalf("expected exactly one Email To: line, got %d", footers)
 	}
-	if strings.Contains(view, "tok") {
+	if strings.Contains(view, "chars") {
 		t.Fatal("suffix must not wrap onto another line")
 	}
 }
@@ -324,7 +351,7 @@ func TestStreamProgressViewPerformsNoIO(t *testing.T) {
 	// the suffix helper must all read the cached reading only.
 	fetcher.panicOnCall = true
 	for i := 0; i < 3; i++ {
-		if !strings.Contains(emailToLine(m.View()), tokSuffix(1000)) {
+		if !strings.Contains(emailToLine(m.View()), charsSuffix("4.0k")) {
 			t.Fatal("cached reading should keep rendering")
 		}
 		_ = m.streamProgressSuffix("active")
@@ -441,7 +468,7 @@ func TestStreamProgressExpiredRequestLandingAfterReplacementIsNoOp(t *testing.T)
 	if m.streamProgressInFlight {
 		t.Fatal("stale results must not re-arm the in-flight gate")
 	}
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(2000)) {
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("8.0k")) {
 		t.Fatalf("footer should keep the newer reading; got %q", emailToLine(m.View()))
 	}
 }
@@ -513,7 +540,7 @@ func TestStreamProgressRecipientSwitchSchedulesImmediatelyAndIgnoresOldResult(t 
 	if !m.streamProgressInFlight || m.streamProgressInFlightFor != directRecipient {
 		t.Fatal("old recipient's result must not clear the direct request's in-flight gate")
 	}
-	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "tok") {
+	if m.streamProgress.ok || strings.Contains(ansi.Strip(m.View()), "chars") {
 		t.Fatal("old recipient's result must not be applied or rendered")
 	}
 
@@ -523,8 +550,8 @@ func TestStreamProgressRecipientSwitchSchedulesImmediatelyAndIgnoresOldResult(t 
 	if m.streamProgressInFlight || !m.streamProgress.ok || m.streamProgress.recipient != directRecipient {
 		t.Fatalf("direct result must clear the gate and install for the direct recipient; inFlight=%v state=%+v", m.streamProgressInFlight, m.streamProgress)
 	}
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(500)) {
-		t.Fatalf("direct footer should show %q; got %q", tokSuffix(500), emailToLine(m.View()))
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("2.0k")) {
+		t.Fatalf("direct footer should show %q; got %q", charsSuffix("2.0k"), emailToLine(m.View()))
 	}
 	if len(fetcher.agentIDs) != 2 || fetcher.agentIDs[0] != "main-orch-id" || fetcher.agentIDs[1] != fx.targetA.AgentID {
 		t.Fatalf("fetch order should be Main then direct target; got %v", fetcher.agentIDs)
@@ -554,8 +581,8 @@ func TestStreamProgressNewestResultClearsGateAndApplies(t *testing.T) {
 	if !m.streamProgress.ok || m.streamProgress.snapshot.StreamedChars != 4000 || m.streamProgress.recipient != m.visibleStreamRecipient() {
 		t.Fatalf("newest result must install its reading; got %+v", m.streamProgress)
 	}
-	if !strings.Contains(emailToLine(m.View()), tokSuffix(1000)) {
-		t.Fatalf("footer should show %q; got %q", tokSuffix(1000), emailToLine(m.View()))
+	if !strings.Contains(emailToLine(m.View()), charsSuffix("4.0k")) {
+		t.Fatalf("footer should show %q; got %q", charsSuffix("4.0k"), emailToLine(m.View()))
 	}
 
 	// Next tick polls again with a fresh, strictly newer serial, and its
