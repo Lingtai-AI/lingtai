@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/charmbracelet/x/ansi"
@@ -100,6 +102,25 @@ func requireNotContains(t *testing.T, got string, unwanted ...string) {
 	}
 }
 
+func writeKanbanDispatchLedger(t *testing.T, agentDir string, runIDs ...string) {
+	t.Helper()
+	daemonsDir := filepath.Join(agentDir, "daemons")
+	if err := os.MkdirAll(daemonsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]string, 0, len(runIDs))
+	for i, runID := range runIDs {
+		lines = append(lines, fmt.Sprintf(`{"schema":"lingtai.daemon_dispatch/v1","sequence":%d,"run_id":%q,"created_at":"2026-08-26T05:32:52Z"}`, i+1, runID))
+	}
+	content := ""
+	if len(lines) > 0 {
+		content = strings.Join(lines, "\n") + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(daemonsDir, ".dispatch-ledger.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 	t.Helper()
 	baseDir := t.TempDir()
@@ -167,7 +188,7 @@ func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 		{AgentID: "worker", AgentName: "WorkerOnlyInTree", Address: "worker", State: "IDLE"},
 	}
 
-	return PropsModel{
+	m := PropsModel{
 		baseDir:        baseDir,
 		orchDir:        agentDir,
 		globalDir:      globalDir,
@@ -187,8 +208,40 @@ func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 		},
 		detailByProvider:       map[string]fs.TokenTotals{"codex-pool": {Input: 100, APICalls: 2}},
 		detailDaemonByProvider: map[string]fs.TokenTotals{"claude-p": {Input: 50, APICalls: 1}},
-		detailMCPNames:         []string{"telegram"},
+		detailCurrentSessionStats: fs.SessionTokenStats{TokenTotals: fs.TokenTotals{
+			Input: 100, Output: 20, Thinking: 10, Cached: 80, APICalls: 2,
+		}},
+		detailCurrentSessionToolCalls: 5,
+		detailMCPNames:                []string{"telegram"},
 	}
+	agentRaw, err := fs.ReadAgentRaw(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initRaw, err := fs.ReadInitManifest(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.selectedRaw = mergeKanbanAgentRaw(agentRaw, initRaw)
+	m.selectedLLM = resolveKanbanLLMConfig(agentRaw, initRaw)
+	m.selectedPresetInfo = resolveKanbanPresetInfo(initRaw)
+	return m
+}
+
+func TestResolveKanbanPresetInfoUsesConfiguredRefsWithoutHealthClaims(t *testing.T) {
+	configured := map[string]any{"preset": map[string]any{
+		"active":  "saved/configured.json",
+		"default": "templates/default.json",
+		"allowed": []any{"saved/configured.json", "missing/on-purpose.json"},
+	}}
+	info := resolveKanbanPresetInfo(configured)
+	if info.ActiveRef != "saved/configured.json" || info.DefaultRef != "templates/default.json" || len(info.Allowed) != 2 {
+		t.Fatalf("configured preset refs were not presented verbatim: %+v", info)
+	}
+	m := PropsModel{selectedPresetInfo: info}
+	view := ansi.Strip(m.renderDetail())
+	requireContains(t, view, "configured", "default", i18n.T("props.preset_refs_not_checked"))
+	requireNotContains(t, view, "✓", "✗", "healthy", "broken")
 }
 
 func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
@@ -203,7 +256,7 @@ func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
 		i18n.T("props.section_network_now"),
 		"MainAgent", "MainNick", "ACTIVE",
 		"gpt-5.6-sol · codex-pool", "default", "xhigh", "@chatgpt.com",
-		"broken-preset", i18n.TF("props.preset_health_healthy", 0), i18n.TF("props.preset_health_broken", 1),
+		"broken-preset", i18n.TF("props.preset_configured_count", 1),
 		"66 / 500,000 (13.2%)",
 		i18n.T("props.session_input_tokens") + ": 100",
 		i18n.T("props.session_cache_hit_rate") + ": 80.0%",
@@ -215,7 +268,8 @@ func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
 	requireNotContains(t, primary, []string{
 		"localhost:/only-in-details", "Esperanto", "alpha+beta",
 		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY",
-		"default-preset", "(" + i18n.T("props.preset_source_saved") + ")", "bash", "nirvana",
+		"default-preset", "bash", "nirvana",
+		i18n.TF("props.preset_health_healthy", 0), i18n.TF("props.preset_health_broken", 1), "✓", "✗",
 		i18n.T("props.context_system") + ":", "9,001",
 		i18n.T("props.network_created") + ":", "7,001", "WorkerOnlyInTree",
 		i18n.T("props.section_identity"),
@@ -224,21 +278,21 @@ func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
 	}...)
 }
 
-func TestPropsDetailPreservesEveryMovedCategory(t *testing.T) {
+func TestPropsSinglePanePreservesEveryLowerCategory(t *testing.T) {
 	m := newKanbanHierarchyFixture(t)
-	detail := ansi.Strip(m.renderDetail())
-	requireContains(t, detail, []string{
+	body := ansi.Strip(m.renderBody())
+	requireContains(t, body, []string{
 		i18n.T("props.detail_identity_runtime"),
 		i18n.T("props.detail_llm_configuration"),
 		i18n.T("props.detail_presets_capabilities_admin"),
 		i18n.T("props.detail_context_detail"),
-		i18n.T("props.detail_agent_lifetime_usage"),
+		i18n.T("props.detail_recent_token_usage"),
 		i18n.T("props.detail_network_history_topology"),
 		"agent-identity-123", "localhost:/only-in-details", "Esperanto", "alpha+beta",
 		i18n.T("props.soul_flow"), "7", "42", "9",
 		"gpt-5.6-sol", "codex-pool", "default", "xhigh",
 		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY", "true", "500000",
-		"broken-preset", "default-preset", "✗", "(" + i18n.T("props.preset_source_saved") + ")", "bash", "nirvana: true",
+		"broken-preset", "default-preset", i18n.T("props.preset_refs_not_checked"), "bash", "nirvana: true",
 		i18n.T("props.context_usage") + ": 66 / 500,000 (13.2%)",
 		i18n.T("props.context_system") + ": 11",
 		i18n.T("props.context_tools") + ": 22",
@@ -250,6 +304,100 @@ func TestPropsDetailPreservesEveryMovedCategory(t *testing.T) {
 		i18n.T("props.detail_daemons"),
 		i18n.T("props.detail_recent_main"), i18n.T("props.detail_recent_daemons"),
 	}...)
+	orderedSections := []string{
+		i18n.T("props.section_agent_now"),
+		i18n.T("props.section_current_session"),
+		i18n.T("props.section_network_now"),
+		i18n.T("props.detail_identity_runtime"),
+		i18n.T("props.detail_llm_configuration"),
+		i18n.T("props.detail_presets_capabilities_admin"),
+		i18n.T("props.detail_context_detail"),
+		i18n.T("props.detail_recent_token_usage"),
+		i18n.T("props.detail_network_history_topology"),
+		i18n.T("props.detail_daemons"),
+		i18n.T("props.detail_recent_main"),
+		i18n.T("props.detail_recent_daemons"),
+	}
+	previous := -1
+	for _, section := range orderedSections {
+		idx := strings.Index(body, section)
+		if idx < 0 {
+			t.Fatalf("single pane missing section %q:\n%s", section, body)
+		}
+		if idx <= previous {
+			t.Fatalf("single-pane section %q is out of canonical order:\n%s", section, body)
+		}
+		previous = idx
+	}
+	lowerIdx := strings.Index(body, i18n.T("props.detail_identity_runtime"))
+	lowerIdentity := body[lowerIdx:strings.Index(body, i18n.T("props.detail_llm_configuration"))]
+	for _, duplicatedRow := range []string{
+		i18n.T("props.name") + ":",
+		i18n.T("props.nickname") + ":",
+		i18n.T("props.state") + ":",
+	} {
+		if strings.Contains(lowerIdentity, duplicatedRow) {
+			t.Fatalf("top row %q was duplicated in lower identity diagnostics:\n%s", duplicatedRow, body)
+		}
+	}
+	for _, topOnlyRow := range []string{
+		i18n.T("props.session_api_calls") + ": 2",
+		i18n.T("props.session_cache_hit_rate") + ": 80.0%",
+		i18n.T("props.session_cache_miss") + ": 20",
+		i18n.T("props.session_tokens_per_api_call") + ": 65",
+	} {
+		if strings.Count(body, topOnlyRow) != 1 {
+			t.Fatalf("current-session row %q should appear exactly once:\n%s", topOnlyRow, body)
+		}
+	}
+}
+
+func TestPropsSourceUsesOnlyBoundedManualSnapshotReaders(t *testing.T) {
+	sourceBytes, err := os.ReadFile("props.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, forbidden := range []string{
+		"SumTokenLedger(",
+		"AggregateTokens(",
+		"SumTokenLedgerByProvider(",
+		"SumMoltSessionTokenLedger(",
+		"SumMoltSessionToolCalls(",
+		"ReadContextStats(",
+		"ReadDaemonDetailSnapshot(",
+		"RecentRebuildTimes(",
+		"RecentRefreshCompleteTimes(",
+		"config.ResolveKeys",
+		"preset.ResolveRefsWithAuth",
+		"codexOAuthConfigured(",
+		"claudeCodeAuthConfigured(",
+		"os.ReadDir(",
+		"AutoReloadCmd",
+		"AutoRefresh",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("PropsModel source reaches forbidden reader/probe %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"fs.KanbanNetworkOptions",
+		"fs.ReadKanbanTokenWindow",
+		"fs.ReadKanbanContextStats",
+		"fs.ReadKanbanDaemonDetailSnapshot",
+		"func (m PropsModel) loadSnapshot() tea.Msg",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("PropsModel source missing bounded snapshot seam %q", required)
+		}
+	}
+	autoRefreshBytes, err := os.ReadFile("auto_refresh.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(autoRefreshBytes), "appViewProps") {
+		t.Fatal("one-second auto-refresh router still references Kanban")
+	}
 }
 
 func TestPropsCurrentSessionCacheMissClampsWithoutFabricatedBudget(t *testing.T) {
@@ -262,7 +410,7 @@ func TestPropsCurrentSessionCacheMissClampsWithoutFabricatedBudget(t *testing.T)
 	requireNotContains(t, strings.ToLower(left), "2,000,000", "2.0m", "budget")
 }
 
-func TestPropsNarrowRenderingAndDetailRouting(t *testing.T) {
+func TestPropsNarrowRenderingAndCtrlDUsesViewport(t *testing.T) {
 	for _, width := range []int{30, 100} {
 		m := newKanbanHierarchyFixture(t)
 		m.width = width
@@ -277,9 +425,213 @@ func TestPropsNarrowRenderingAndDetailRouting(t *testing.T) {
 
 	m := newKanbanHierarchyFixture(t)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	beforeLines := updated.viewport.TotalLineCount()
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	if !updated.detailOpen || !strings.Contains(ansi.Strip(updated.viewport.View()), i18n.T("props.detail_identity_runtime")) {
-		t.Fatalf("ctrl+d must still route to the detail pane")
+	if updated.viewport.TotalLineCount() != beforeLines {
+		t.Fatal("ctrl+d replaced the single-pane viewport content")
+	}
+	view := ansi.Strip(updated.View())
+	if strings.Contains(view, "ctrl+d") || strings.Contains(view, "Agent Detail") {
+		t.Fatalf("ctrl+d exposed a retired Details affordance:\n%s", view)
+	}
+}
+
+func TestPropsInitAndAgentSelectionLoadSnapshotAsynchronously(t *testing.T) {
+	baseDir := t.TempDir()
+	oldDir := filepath.Join(baseDir, "old")
+	newDir := filepath.Join(baseDir, "new")
+	for _, dir := range []string{oldDir, newDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requireSnapshot := func(cmd tea.Cmd, selectedDir string) {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("expected a Bubble Tea snapshot command")
+		}
+		msg, ok := cmd().(propsLoadMsg)
+		if !ok {
+			t.Fatal("command did not return propsLoadMsg")
+		}
+		if msg.selectedDir != selectedDir {
+			t.Fatalf("snapshot selectedDir = %q, want %q", msg.selectedDir, selectedDir)
+		}
+	}
+	m := NewPropsModel(baseDir, oldDir, t.TempDir())
+	requireSnapshot(m.Init(), oldDir)
+
+	m.selectedRaw = map[string]any{"agent_name": "old cached agent"}
+	m.agentNodes = []fs.AgentNode{
+		{AgentName: "old", WorkingDir: oldDir},
+		{AgentName: "new", WorkingDir: newDir},
+	}
+	m.pickerOpen = true
+	m.pickerIdx = 1
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if updated.selectedDir != newDir {
+		t.Fatalf("selection stayed on %q, want %q", updated.selectedDir, newDir)
+	}
+	if len(updated.selectedRaw) != 0 {
+		t.Fatalf("selection synchronously loaded or retained mislabeled heavy facts: %#v", updated.selectedRaw)
+	}
+	requireSnapshot(cmd, newDir)
+}
+
+func TestPropsIgnoresStaleSnapshotAfterSelection(t *testing.T) {
+	newDir := filepath.Join(t.TempDir(), "new")
+	m := PropsModel{
+		selectedDir:    newDir,
+		selectedRaw:    map[string]any{"agent_name": "new cached agent"},
+		selectedTokens: fs.TokenTotals{Input: 44},
+	}
+	staleStatus := fs.AgentStatus{}
+	staleStatus.Tokens.APICalls = 99
+	after, _ := m.Update(propsLoadMsg{
+		selectedDir:    filepath.Join(t.TempDir(), "old"),
+		selectedStatus: staleStatus,
+		agentNodes:     []fs.AgentNode{{AgentName: "stale"}},
+		selectedRaw:    map[string]any{"agent_name": "stale agent"},
+		selectedTokens: fs.TokenTotals{Input: 999},
+	})
+	if after.selectedStatus.Tokens.APICalls != 0 || len(after.agentNodes) != 0 ||
+		after.selectedRaw["agent_name"] != "new cached agent" || after.selectedTokens.Input != 44 {
+		t.Fatalf("accepted stale snapshot: %+v", after)
+	}
+}
+
+func TestPropsRejectsOutOfOrderSameAgentCtrlRCompletion(t *testing.T) {
+	dir := t.TempDir()
+	m := NewPropsModel(dir, dir, t.TempDir())
+	olderCmd := m.Init()
+	older := olderCmd().(propsLoadMsg)
+
+	updated, newerCmd := m.Update(ctrlR())
+	newer := newerCmd().(propsLoadMsg)
+	if newer.generation <= older.generation {
+		t.Fatalf("request generations did not advance: older=%d newer=%d", older.generation, newer.generation)
+	}
+	newer.selectedRaw = map[string]any{"agent_name": "newer"}
+	updated, _ = updated.Update(newer)
+	older.selectedRaw = map[string]any{"agent_name": "older"}
+	after, _ := updated.Update(older)
+	if got := after.selectedRaw["agent_name"]; got != "newer" {
+		t.Fatalf("older same-agent completion overwrote Ctrl+R result: %v", got)
+	}
+}
+
+func TestPropsRejectsStaleACompletionAfterAtoBtoA(t *testing.T) {
+	baseDir := t.TempDir()
+	aDir := filepath.Join(baseDir, "a")
+	bDir := filepath.Join(baseDir, "b")
+	for _, dir := range []string{aDir, bDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes := []fs.AgentNode{{AgentName: "a", WorkingDir: aDir}, {AgentName: "b", WorkingDir: bDir}}
+	m := NewPropsModel(baseDir, aDir, t.TempDir())
+	staleACmd := m.Init()
+	staleA := staleACmd().(propsLoadMsg)
+
+	m.agentNodes = nodes
+	m.pickerOpen = true
+	m.pickerIdx = 1
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = m.Update(propsLoadMsg{selectedDir: bDir, generation: m.requestGeneration, agentNodes: nodes})
+	m.pickerOpen = true
+	m.pickerIdx = 0
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	latestGeneration := m.requestGeneration
+	m, _ = m.Update(propsLoadMsg{
+		selectedDir: aDir,
+		generation:  latestGeneration,
+		selectedRaw: map[string]any{"agent_name": "fresh-a"},
+		agentNodes:  nodes,
+	})
+	staleA.selectedRaw = map[string]any{"agent_name": "stale-a"}
+	after, _ := m.Update(staleA)
+	if got := after.selectedRaw["agent_name"]; got != "fresh-a" {
+		t.Fatalf("stale first A completion overwrote A→B→A result: %v", got)
+	}
+}
+
+func TestPropsRendersBoundedSourceTruth(t *testing.T) {
+	tokenDir := t.TempDir()
+	malformedPath := filepath.Join(tokenDir, "malformed.jsonl")
+	if err := os.WriteFile(malformedPath, []byte("not-json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	giantPath := filepath.Join(tokenDir, "giant.jsonl")
+	if err := os.WriteFile(giantPath, []byte(strings.Repeat("x", int(fs.KanbanJSONLByteLimit)+4096)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		read fs.BoundedReadStats
+		want string
+	}{
+		{name: "missing", read: fs.ReadKanbanTokenWindow(filepath.Join(tokenDir, "missing.jsonl"), 10).Read, want: i18n.TF("props.window_unavailable", i18n.T("props.source_token_ledger"))},
+		{name: "malformed only", read: fs.ReadKanbanTokenWindow(malformedPath, 10).Read, want: i18n.TF("props.window_malformed", i18n.T("props.source_token_ledger"))},
+		{name: "giant EOF line", read: fs.ReadKanbanTokenWindow(giantPath, 10).Read, want: i18n.TF("props.window_partial", i18n.T("props.source_token_ledger"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := PropsModel{selectedTokenRead: tc.read}
+			empty := kanbanSourceTruth(fs.KanbanReadState(tc.read), i18n.T("props.source_token_ledger"), i18n.T("props.detail_no_tokens"))
+			provider := ansi.Strip(strings.Join(appendProviderRows(nil, nil, empty, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle()), "\n"))
+			recent := ansi.Strip(strings.Join(m.renderMainCallRows(), "\n"))
+			got := provider + "\n" + recent
+			requireContains(t, got, tc.want)
+			requireNotContains(t, got, i18n.T("props.detail_no_tokens"), i18n.T("props.detail_recent_empty"))
+		})
+	}
+}
+
+func TestPropsRendersMissingContextEventAndDispatchSourcesHonestly(t *testing.T) {
+	missing := fs.BoundedReadStats{Status: "unavailable"}
+	m := PropsModel{
+		selectedTokens:          fs.TokenTotals{Input: 10, APICalls: 1},
+		selectedTokenRead:       fs.BoundedReadStats{Status: "ok", Complete: true, ValidRecords: 1},
+		detailContextRead:       missing,
+		detailEventRead:         missing,
+		detailDaemonWindowState: fs.KanbanSourceUnavailable,
+	}
+	out := ansi.Strip(m.renderDetail())
+	requireContains(t, out,
+		i18n.TF("props.window_unavailable", i18n.T("props.source_context_history")),
+		i18n.TF("props.window_unavailable", i18n.T("props.source_event_log")),
+		i18n.T("props.session_partitions_omitted"),
+		i18n.TF("props.window_unavailable", i18n.T("props.source_dispatch_ledger")),
+	)
+	requireNotContains(t, out, i18n.T("props.detail_current_session_recent"), i18n.T("props.detail_last_session_recent"), i18n.T("props.daemon_window_empty"))
+}
+
+func TestPropsNetworkTruncationRendersSubsetNotWholeNetworkClaims(t *testing.T) {
+	m := PropsModel{network: fs.Network{
+		AgentDirectoryTruncated: true,
+		Nodes: []fs.AgentNode{
+			{IsHuman: true, State: "ACTIVE"},
+			{State: "IDLE"},
+		},
+		Stats:    fs.NetworkStats{Active: 1, Idle: 1},
+		Activity: fs.NetworkActivity{Status: fs.NetworkStatusActive},
+	}}
+	out := ansi.Strip(m.renderRight(100))
+	requireContains(t, out, i18n.T("props.network_bounded_subset")+": 2", i18n.T("props.network_subset_notice"), i18n.T("props.network_subset_states"))
+	requireNotContains(t, out, i18n.T("props.network_total")+":", networkActivityLabel()+":")
+}
+
+func TestPropsRenderingUsesCachedFactsWhenSourcesDisappear(t *testing.T) {
+	m := newKanbanHierarchyFixture(t)
+	before := ansi.Strip(m.renderBody())
+	unavailable := m.baseDir + "-unavailable"
+	if err := os.Rename(m.baseDir, unavailable); err != nil {
+		t.Fatal(err)
+	}
+	after := ansi.Strip(m.renderBody())
+	if after != before {
+		t.Fatalf("cached render changed after agent/config paths became unavailable\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -307,12 +659,12 @@ func TestPropsLoadDataSkipsMailEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, ok := (PropsModel{baseDir: base, selectedDir: agentDir, orchDir: agentDir}).loadData().(propsLoadMsg)
+	msg, ok := (PropsModel{baseDir: base, selectedDir: agentDir, orchDir: agentDir}).loadSnapshot().(propsLoadMsg)
 	if !ok {
-		t.Fatal("loadData returned unexpected message type")
+		t.Fatal("loadSnapshot returned unexpected message type")
 	}
-	if msg.mailStatsAvailable {
-		t.Fatal("Props fast snapshot must mark mail totals unavailable")
+	if len(msg.network.MailEdges) != 0 || msg.network.Stats.TotalMails != 0 {
+		t.Fatal("Kanban bounded network snapshot must skip mailbox bodies")
 	}
 	view := (PropsModel{network: msg.network}).renderRight(80)
 	if strings.Contains(view, "Total: 0") {
@@ -350,7 +702,7 @@ func TestPropsRenderDetailShowsStartedAtLocalOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := PropsModel{selectedDir: dir}
+	m := PropsModel{selectedDir: dir, selectedRaw: map[string]any{"agent_name": "mimo", "started_at": "2026-06-13T03:00:00Z"}}
 	detail := ansi.Strip(m.renderDetail())
 	if !strings.Contains(detail, "2026-06-12 20:00 U-7:00") {
 		t.Fatalf("renderDetail should render started_at in local time with offset:\n%s", detail)
@@ -373,6 +725,7 @@ func TestPropsRenderLeftShowsCurrentSessionEconomy(t *testing.T) {
 	m := PropsModel{
 		selectedDir: dir,
 		globalDir:   t.TempDir(),
+		selectedRaw: map[string]any{"agent_name": "mimo"},
 		selectedTokens: fs.TokenTotals{
 			Input: 1_000, Output: 200, Thinking: 100, APICalls: 20,
 		},
@@ -388,7 +741,7 @@ func TestPropsRenderLeftShowsCurrentSessionEconomy(t *testing.T) {
 	sessionAverage := i18n.T("props.session_tokens_per_api_call") + ": 65"
 	requireContains(t, out, sessionTitle, sessionInput, sessionCache, sessionMiss, sessionCalls, sessionAverage)
 	if strings.Contains(out, "input: 1,000") {
-		t.Fatalf("selected-agent lifetime totals must move out of the primary summary:\n%s", out)
+		t.Fatalf("recent-window aggregate totals must stay out of the primary summary:\n%s", out)
 	}
 
 	m.selectedStatus.Tokens.APICalls = 0
@@ -447,7 +800,8 @@ func TestPropsRenderRightShowsRunningDaemons(t *testing.T) {
 	}
 
 	right := ansi.Strip(m.renderRight(80))
-	if !strings.Contains(right, "Daemons: 2 running") {
+	want := i18n.T("props.network_daemons") + ": 2 " + i18n.T("props.network_daemons_running")
+	if !strings.Contains(right, want) {
 		t.Fatalf("renderRight missing running daemon count:\n%s", right)
 	}
 }
@@ -476,6 +830,13 @@ func TestPropsRenderDetailShowsAgentPathInfo(t *testing.T) {
 		baseDir:     networkDir,
 		orchDir:     orchDir,
 		selectedDir: agentDir,
+		selectedRaw: map[string]any{
+			"agent_name": "mimo-1",
+			"nickname":   "Mimo",
+			"agent_id":   "agent-123",
+			"address":    "mimo-1",
+			"state":      "IDLE",
+		},
 	}
 
 	got := ansi.Strip(m.renderDetail())
@@ -487,10 +848,7 @@ func TestPropsRenderDetailShowsAgentPathInfo(t *testing.T) {
 		agentDir,
 		networkDir,
 		orchDir,
-		"mimo-1",
-		"Mimo",
 		"agent-123",
-		"IDLE",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("detail missing %q in:\n%s", want, got)
@@ -500,6 +858,7 @@ func TestPropsRenderDetailShowsAgentPathInfo(t *testing.T) {
 
 func TestPropsRenderDetailShowsDaemonCounts(t *testing.T) {
 	m := PropsModel{
+		detailDaemonWindowState: "available",
 		detailDaemonCounts: fs.DaemonCounts{
 			Running: 1,
 			Total:   3,
@@ -510,7 +869,7 @@ func TestPropsRenderDetailShowsDaemonCounts(t *testing.T) {
 	if !strings.Contains(detail, "running: 1") {
 		t.Fatalf("renderDetail missing running daemon count:\n%s", detail)
 	}
-	if !strings.Contains(detail, "total: 3") {
+	if !strings.Contains(detail, i18n.T("props.detail_daemons_total")+": 3") {
 		t.Fatalf("renderDetail missing total daemon count:\n%s", detail)
 	}
 }
@@ -535,12 +894,12 @@ func TestPropsRenderDetailShowsContextStats(t *testing.T) {
 
 	detail := ansi.Strip(m.renderDetail())
 	for _, want := range []string{
-		"Current context statistics",
+		i18n.T("props.detail_context_detail"),
 		"entries:                  5",
 		"messages:                 system:1  assistant:2  user:2",
 		"text input / output:      1 / 1",
 		"tool calls / results:     2 / 2",
-		"tools in context:",
+		"tools in recent context:",
 		"bash",
 		"calls:2",
 		"results:1",
@@ -561,12 +920,12 @@ func TestPropsLoadDetailKeepsLastHundredLedgerEntries(t *testing.T) {
 	for i := 0; i < 120; i++ {
 		lines = append(lines, fmt.Sprintf(`{"ts":"2026-06-13T03:00:00.%06dZ","input":%d,"output":1,"model":"m%d"}`, i, i+1, i))
 	}
-	if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	m := PropsModel{selectedDir: dir}
-	m.loadDetail()
+	m.applySnapshot(m.loadSnapshot().(propsLoadMsg))
 	if len(m.detailRecent) != detailRecentCalls {
 		t.Fatalf("detailRecent len = %d, want %d", len(m.detailRecent), detailRecentCalls)
 	}
@@ -603,9 +962,10 @@ func TestPropsLoadDetailPopulatesDaemonRecent(t *testing.T) {
 		[]byte(`{"ts":"2026-06-13T03:00:05Z","input":9,"output":2}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeKanbanDispatchLedger(t, dir, "em-1-x")
 
 	m := PropsModel{selectedDir: dir}
-	m.loadDetail()
+	m.applySnapshot(m.loadSnapshot().(propsLoadMsg))
 	if len(m.detailRecent) != 1 {
 		t.Fatalf("detailRecent len = %d, want 1", len(m.detailRecent))
 	}
@@ -637,9 +997,10 @@ func TestPropsRenderDaemonRowsUsesUnknownBackendForTypeInvalidCard(t *testing.T)
 		[]byte(`{"ts":"2026-06-13T03:00:05Z","input":9,"output":2,"model":"glm-4.6","endpoint":"https://z.ai/api"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeKanbanDispatchLedger(t, dir, "em-1-x")
 
 	m := PropsModel{selectedDir: dir}
-	m.loadDetail()
+	m.applySnapshot(m.loadSnapshot().(propsLoadMsg))
 	if len(m.detailDaemonRecent) != 1 {
 		t.Fatalf("detailDaemonRecent len = %d, want 1", len(m.detailDaemonRecent))
 	}
@@ -811,8 +1172,7 @@ func TestPropsRecentLanesShowCacheMissColumn(t *testing.T) {
 	}
 }
 
-func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
-	// The non-detail header must prominently advertise ctrl+d for context detail.
+func TestPropsHeaderAndFooterHaveNoDetailsAffordance(t *testing.T) {
 	m := PropsModel{
 		width:  80,
 		height: 24,
@@ -823,23 +1183,10 @@ func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
 
 	view := ansi.Strip(m.View())
 
-	// The callout line must mention the i18n key text.
-	hint := i18n.T("props.ctrl_d_hint")
-	if !strings.Contains(view, hint) {
-		t.Fatalf("View() header missing ctrl+d callout hint %q:\n%s", hint, view)
-	}
-
-	// Also verify the standard footer line keeps ctrl+d with the renamed label.
-	label := i18n.T("props.detail_open")
-	if !strings.Contains(view, "ctrl+d "+label) {
-		t.Fatalf("View() footer missing 'ctrl+d %s':\n%s", label, view)
-	}
-
-	// When detailOpen, the callout should NOT appear.
-	m.detailOpen = true
-	viewDetail := ansi.Strip(m.View())
-	if strings.Contains(viewDetail, hint) {
-		t.Fatalf("View() detail mode should NOT show callout:\n%s", viewDetail)
+	for _, retired := range []string{"ctrl+d", "Agent Detail", "back to summary"} {
+		if retired != "" && strings.Contains(view, retired) {
+			t.Fatalf("View() still advertises retired Details copy %q:\n%s", retired, view)
+		}
 	}
 }
 
@@ -862,7 +1209,6 @@ func TestPropsDetailShowsCurrentAndLastSessionToolCallStats(t *testing.T) {
 	out := ansi.Strip(m.renderDetail())
 	for _, want := range []string{
 		"Current session API",
-		"api_calls:                 2",
 		"tool_calls:                5",
 		"tool_calls/api_call:       2.50",
 		"Last session API",
@@ -893,12 +1239,9 @@ func TestPropsDetailShowsCurrentAndLastSessionAPIStats(t *testing.T) {
 	out := ansi.Strip(m.renderDetail())
 	for _, want := range []string{
 		"Current session API",
-		"api_calls:                 2",
 		"tokens:                    130",
-		"input / output / thinking: 100 / 20 / 10",
-		"cached / missed:           40 / 60",
-		"cache hit rate:            40.0%",
-		"tokens/api_call:           65",
+		"output / thinking:         20 / 10",
+		"cached:                    40",
 		"transfer full / incremental: 1 / 1",
 		"Last session API",
 		"api_calls:                 1",
@@ -1041,5 +1384,103 @@ func TestPropsRenderDetailNoProviderData(t *testing.T) {
 	// No combined totals when nothing was recorded.
 	if strings.Contains(out, i18n.T("props.detail_combined_totals")) {
 		t.Errorf("should not show combined totals when no data:\n%s", out)
+	}
+}
+
+var benchmarkPropsRenderedBody string
+
+// TestKanbanGuardedTimingProbe is a read-only acceptance probe for an actual
+// agent directory. It is skipped unless both task-specific environment
+// variables are supplied, so ordinary tests never depend on developer state.
+func TestKanbanGuardedTimingProbe(t *testing.T) {
+	baseDir := os.Getenv("LINGTAI_KANBAN_PROBE_BASE_DIR")
+	agentDir := os.Getenv("LINGTAI_KANBAN_PROBE_AGENT_DIR")
+	if baseDir == "" || agentDir == "" {
+		t.Skip("set LINGTAI_KANBAN_PROBE_BASE_DIR and LINGTAI_KANBAN_PROBE_AGENT_DIR")
+	}
+	m := NewPropsModel(baseDir, agentDir, "")
+	m.width = 160
+	m.height = 50
+
+	// Prime executable/page-cache state; the reported load is explicitly warm,
+	// never represented as an OS-cold timing.
+	_ = m.loadSnapshot()
+	loadStarted := time.Now()
+	snapshot, ok := m.loadSnapshot().(propsLoadMsg)
+	if !ok {
+		t.Fatal("loadSnapshot returned an unexpected message")
+	}
+	loadElapsed := time.Since(loadStarted)
+	m.applySnapshot(snapshot)
+	for i := 0; i < 10; i++ {
+		benchmarkPropsRenderedBody = m.renderBody()
+	}
+	samples := make([]time.Duration, 101)
+	for i := range samples {
+		started := time.Now()
+		benchmarkPropsRenderedBody = m.renderBody()
+		samples[i] = time.Since(started)
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	t.Logf("KANBAN_PROBE warm_render_median=%s warm_manual_snapshot_load=%s sources=%d", samples[len(samples)/2], loadElapsed, len(snapshot.readStats))
+	for i, read := range snapshot.readStats {
+		t.Logf("KANBAN_READ index=%d path=%q file_bytes=%d bytes_read=%d complete_lines=%d valid_records=%d dir_entries=%d line_limit=%d byte_limit=%d byte_limited=%t partial_ignored=%t status=%s",
+			i, read.Path, read.FileBytes, read.BytesRead, read.CompleteLines, read.ValidRecords, read.DirectoryEntriesRead,
+			read.LineLimit, read.ByteLimit, read.ByteLimited, read.TrailingPartialIgnored, read.Status)
+	}
+	t.Logf("KANBAN_RUN_IDS count=%d ids=%q", len(snapshot.detailDaemonRunIDs), snapshot.detailDaemonRunIDs)
+}
+
+func BenchmarkPropsRenderBodyCached(b *testing.B) {
+	m := PropsModel{
+		width:  160,
+		height: 50,
+		selectedRaw: map[string]any{
+			"agent_name": "orchestrator", "nickname": "Main", "state": "ACTIVE",
+			"agent_id": "agent-1", "address": "main", "language": "en",
+			"capabilities": []string{"bash", "read", "web"},
+		},
+		selectedLLM:    kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex-pool", Endpoint: "@chatgpt.com"},
+		selectedTokens: fs.TokenTotals{Input: 1_000_000, Output: 20_000, Cached: 900_000, APICalls: 100},
+		tokens:         fs.TokenTotals{Input: 2_000_000, Output: 40_000, Cached: 1_800_000, APICalls: 200},
+		network: fs.Network{
+			Nodes: []fs.AgentNode{
+				{AgentName: "human", Address: "human", IsHuman: true, State: "ACTIVE"},
+				{AgentName: "orchestrator", Address: "main", State: "ACTIVE"},
+				{AgentName: "worker-1", Address: "worker-1", State: "IDLE"},
+				{AgentName: "worker-2", Address: "worker-2", State: "ACTIVE"},
+				{AgentName: "worker-3", Address: "worker-3", State: "IDLE"},
+			},
+			Stats:    fs.NetworkStats{Active: 2, Idle: 2},
+			Activity: fs.NetworkActivity{Status: fs.NetworkStatusActive, RunningDaemons: 2},
+		},
+		detailByProvider:       map[string]fs.TokenTotals{"codex-pool": {Input: 1_000_000, APICalls: 100}},
+		detailDaemonByProvider: map[string]fs.TokenTotals{"claude-p": {Input: 500_000, APICalls: 25}},
+	}
+	m.selectedStatus.Tokens.InputTokens = 10_000
+	m.selectedStatus.Tokens.OutputTokens = 500
+	m.selectedStatus.Tokens.CachedTokens = 9_000
+	m.selectedStatus.Tokens.APICalls = 5
+	for i := 0; i < detailRecentCalls; i++ {
+		m.detailRecent = append(m.detailRecent, fs.LedgerEntry{
+			TS: "2026-08-25T00:00:00Z", Input: 10_000, Output: 500, Cached: 9_000,
+			Model: "gpt-5.6-sol", Endpoint: "https://chatgpt.com/backend-api/codex",
+		})
+	}
+	for i := 0; i < 10; i++ {
+		benchmarkPropsRenderedBody = m.renderBody()
+	}
+
+	samples := make([]time.Duration, 0, b.N)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		started := time.Now()
+		benchmarkPropsRenderedBody = m.renderBody()
+		samples = append(samples, time.Since(started))
+	}
+	b.StopTimer()
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	if len(samples) > 0 {
+		b.ReportMetric(float64(samples[len(samples)/2].Nanoseconds()), "median-ns/render")
 	}
 }

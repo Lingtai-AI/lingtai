@@ -70,6 +70,9 @@ type Network struct {
 	Stats        NetworkStats    `json:"stats"`
 	Activity     NetworkActivity `json:"activity"`
 	Lang         string          `json:"lang"`
+	// AgentDirectoryTruncated is Kanban-only completeness metadata. Generic
+	// builders retain their prior payload/behavior and leave this false.
+	AgentDirectoryTruncated bool `json:"-"`
 }
 
 // MailMessage is the schema for messages written to mailbox/inbox/{uuid}/message.json.

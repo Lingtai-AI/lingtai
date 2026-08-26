@@ -6,20 +6,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Auto-refresh: a single, app-level 1s tick that periodically asks the active
-// view to reload its on-disk data. This generalizes the mail view's existing
-// poll loop (mail.go: tickEvery/tickMsg) to the other reloadable views so the
-// human sees fresh network/agent state without pressing Ctrl+R.
+// Auto-refresh: a single, app-level 1s tick retained for views that may opt in.
+// Kanban is deliberately manual-only and never returns a command here.
 //
 // Design notes:
 //   - One ticker lives on the App, not per-view. The App routes the tick to
 //     whichever view is current. Views never start their own auto tick (mail
 //     is the historical exception and keeps its own loop).
-//   - Each participating view reuses the same reload path as Ctrl+R. Views opt
-//     out for an individual tick when reloading would interrupt the user
-//     (picker open, drill-in/detail/editor open, or in-flight doctor run).
-//   - Ctrl+R remains the manual fallback and is unchanged; the tick simply
-//     calls the same reload path on a timer.
+//   - Kanban refreshes only on entry, selected-agent change, or Ctrl+R.
 
 // autoRefreshInterval is the cadence for the app-level auto-refresh tick. It
 // matches the mail view's poll rate (mail.go: pollRate = 1s) so all reloadable
@@ -39,18 +33,8 @@ func autoRefreshCtrlRMsg() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 }
 
-// autoRefreshActiveView reloads only the kanban/props view. Other Ctrl+R-
-// reloadable screens (/mailbox, /system, /daemons, markdown viewers, pickers,
-// and editors) are intentionally excluded from the 1s auto-refresh loop because
-// reloading them resets or disrupts keyboard selection/scroll state. They keep
-// Ctrl+R as the explicit manual refresh path.
+// autoRefreshActiveView currently has no opted-in root view. In particular,
+// /kanban must not acquire a filesystem command from the one-second tick.
 func (a App) autoRefreshActiveView() (App, tea.Cmd) {
-	switch a.currentView {
-	case appViewProps:
-		// Keep the cheap outer dashboard snapshot live. AutoReloadCmd owns the
-		// picker/detail gates; in particular, the O(number of daemon runs)
-		// detail snapshot is refreshed only on open or explicit Ctrl+R.
-		return a, a.props.AutoReloadCmd()
-	}
 	return a, nil
 }

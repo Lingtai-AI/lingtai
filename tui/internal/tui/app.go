@@ -2005,13 +2005,8 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "props", "kanban":
 		a.currentView = appViewProps
-		// Reload config so a just-toggled auto-refresh setting is honored when
-		// entering the kanban directly, then (re)start the ticker if needed.
-		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
-		a.props.AutoRefresh = a.tuiConfig.AutoRefreshEnabled()
-		a, arCmd := a.startAutoRefresh()
-		return a, tea.Batch(a.props.Init(), a.sendSize(), arCmd)
+		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "daemons":
 		a.currentView = appViewDaemons
 		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)

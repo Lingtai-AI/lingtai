@@ -67,7 +67,22 @@ func normalizeAgentLiveness(nodes []AgentNode) {
 	}
 }
 
+func normalizeKanbanAgentLiveness(nodes []AgentNode, byteLimit int64, stats *[]BoundedReadStats) {
+	threshold := AgentAliveThresholdSec()
+	for i := range nodes {
+		if nodes[i].IsHuman {
+			nodes[i].Alive = true
+			continue
+		}
+		nodes[i].Alive = readKanbanHeartbeat(nodes[i].WorkingDir, threshold, byteLimit, stats)
+	}
+}
+
 func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
+	return computeNetworkActivityWithOptions(nodes, NetworkOptions{})
+}
+
+func computeNetworkActivityWithOptions(nodes []AgentNode, opts NetworkOptions) NetworkActivity {
 	activity := NetworkActivity{Status: NetworkStatusSuspend}
 	var hasIdle bool
 	var hasAsleep bool
@@ -86,8 +101,18 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 		}
 
 		if live {
-			activity.RunningDaemons += CountDaemons(node.WorkingDir).Running
-			if state != "ACTIVE" && hasStatusActivity(node.WorkingDir, time.Now()) {
+			if opts.DaemonDispatchLimit > 0 {
+				activity.RunningDaemons += countKanbanDaemons(node.WorkingDir, opts.DaemonDispatchLimit, opts.JSONLByteLimit, opts.ReadStats).Running
+			} else {
+				activity.RunningDaemons += CountDaemons(node.WorkingDir).Running
+			}
+			statusActive := false
+			if opts.FixedFileByteLimit > 0 {
+				statusActive = hasKanbanStatusActivity(node.WorkingDir, time.Now(), opts.FixedFileByteLimit, opts.ReadStats)
+			} else {
+				statusActive = hasStatusActivity(node.WorkingDir, time.Now())
+			}
+			if state != "ACTIVE" && statusActive {
 				activity.ActiveAgents++
 				hasNonDaemonActive = true
 			}
@@ -132,12 +157,33 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 	return activity
 }
 
+func hasKanbanStatusActivity(agentDir string, now time.Time, byteLimit int64, stats *[]BoundedReadStats) bool {
+	status, mtime, ok := readKanbanNetworkStatus(agentDir, byteLimit, stats)
+	if !ok {
+		return false
+	}
+	if status.ActiveTurn != nil {
+		candidates := []time.Time{mtime}
+		if status.ActiveTurn.StartedAt.OK {
+			candidates = append(candidates, unixSeconds(status.ActiveTurn.StartedAt.Value))
+		}
+		if status.Runtime.LastProgressAt.OK {
+			candidates = append(candidates, unixSeconds(status.Runtime.LastProgressAt.Value))
+		}
+		return within(now, latestStatusFreshnessTime(now, candidates...), networkActiveTurnCap)
+	}
+	if status.Runtime.LastProgressAt.OK {
+		return within(now, latestStatusFreshnessTime(now, unixSeconds(status.Runtime.LastProgressAt.Value)), networkRecentProgressWindow)
+	}
+	return false
+}
+
 type networkStatusSnapshot struct {
 	ActiveTurn *networkActiveTurn `json:"active_turn"`
 	Runtime    struct {
 		State          string             `json:"state"`
 		LastProgressAt tolerantJSONNumber `json:"last_progress_at"`
-			LastApiCallAt  tolerantJSONNumber `json:"last_api_call_at"`
+		LastApiCallAt  tolerantJSONNumber `json:"last_api_call_at"`
 		NoProgressSecs tolerantJSONNumber `json:"no_progress_seconds"`
 		UptimeSeconds  tolerantJSONNumber `json:"uptime_seconds"`
 		StaminaLeft    tolerantJSONNumber `json:"stamina_left"`

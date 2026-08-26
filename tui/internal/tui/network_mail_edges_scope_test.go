@@ -37,8 +37,10 @@ func TestTUINetworkLoadsSkipMailEdges(t *testing.T) {
 			if strings.Contains(line, "fs.BuildNetwork(") {
 				t.Errorf("%s:%d calls fs.BuildNetwork, which scans every inbox message of every agent; use fs.BuildNetworkWithOptions with SkipMailEdges: true", name, i+1)
 			}
-			if strings.Contains(line, "fs.BuildNetworkWithOptions(") && !strings.Contains(line, "SkipMailEdges: true") {
-				t.Errorf("%s:%d builds a network without SkipMailEdges: true", name, i+1)
+			if strings.Contains(line, "fs.BuildNetworkWithOptions(") &&
+				!strings.Contains(line, "SkipMailEdges: true") &&
+				!strings.Contains(line, "KanbanNetworkOptions") {
+				t.Errorf("%s:%d builds a network without SkipMailEdges: true or the complete bounded Kanban profile", name, i+1)
 			}
 		}
 	}

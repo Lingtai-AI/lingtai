@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,38 +15,40 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
-	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
-	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// PropsModel is a full-screen view showing agent properties (left) and network dashboard (right).
+// PropsModel is the single, vertically stacked /kanban screen. Bubble Tea
+// commands own all bounded filesystem reads; rendering consumes only the
+// accepted manual snapshot stored here.
 type PropsModel struct {
 	baseDir   string // .lingtai/ directory (for agent discovery)
 	orchDir   string // admin agent's working dir (default selected)
-	globalDir string // ~/.lingtai-tui/ (for resolving Config.Keys for preset health checks)
+	globalDir string // retained for path presentation/constructor compatibility
 	width     int
 	height    int
 
-	// Left panel: selected agent
-	selectedDir    string         // working dir of the agent shown on left (defaults to orchDir)
-	selectedTokens fs.TokenTotals // cached token ledger for selected agent
+	// Manual snapshot: selected agent status plus bounded network/picker data.
+	selectedDir    string         // working dir of the shown agent (defaults to orchDir)
 	selectedStatus fs.AgentStatus // cached .status.json for selected agent
 	agentDirs      []string       // all discovered agent dirs (for picker)
 	agentNodes     []fs.AgentNode // discovered agents (for picker display)
+	network        fs.Network
+	// requestGeneration is issued only on the Bubble Tea update loop. It
+	// prevents an older completion for the same selected directory from
+	// overwriting a newer Init/Ctrl+R/selection request.
+	requestGeneration uint64
 
-	// Right panel: dashboard snapshot
-	network            fs.Network
-	mailStatsAvailable bool
+	// Snapshot facts are refreshed only on Init, Ctrl+R, and agent selection.
+	// These resolved facts make every render helper independent of the source
+	// files, key/auth configuration, preset directories, and environment files.
+	selectedRaw        map[string]any
+	selectedLLM        kanbanLLMConfig
+	selectedPresetInfo kanbanPresetInfo
+	selectedTokens     fs.TokenTotals
 	tokens             fs.TokenTotals
-	adminStart         string // admin agent's started_at timestamp
-
-	// AutoRefresh reflects whether the app-level 1s auto-refresh is enabled.
-	// It only drives the footer hint (a "live" badge); the actual reloading is
-	// driven by the app tick via AutoReloadCmd. Set by switchToView from
-	// tuiConfig; defaults false so a bare NewPropsModel shows the manual-only
-	// hint.
-	AutoRefresh bool
+	adminStart         string // admin agent's created_at/started_at timestamp
+	mailStatsAvailable bool
 
 	// Scrollable viewport for content
 	viewport viewport.Model
@@ -57,10 +58,7 @@ type PropsModel struct {
 	pickerOpen bool
 	pickerIdx  int
 
-	// Detail view: full-screen breakdown of token usage, split recent
-	// main/daemon calls, MCP servers, and daemon run counts. Toggled
-	// with Ctrl+D. Esc closes detail and returns to the summary.
-	detailOpen                bool
+	// Lower diagnostic snapshot, stacked below Network now on the same screen.
 	detailByProvider          map[string]fs.TokenTotals
 	detailDaemonByProvider    map[string]fs.TokenTotals // daemon token usage by provider/backend
 	detailRecent              []fs.LedgerEntry          // selected main agent recent calls (newest first)
@@ -69,29 +67,33 @@ type PropsModel struct {
 	detailLastSessionStats    fs.SessionTokenStats
 	// detailCurrentSessionToolCalls / detailLastSessionToolCalls hold lifecycle
 	// tool_call counts for the same molt windows as the session API stats.
-	// They are sourced from the events store (fs.SumMoltSessionToolCalls) and
-	// overlaid onto the detail view independently of the token-ledger cache, so
-	// an events-only append invalidates the count even when the ledger is unchanged.
+	// They are sourced from the same bounded 1000-line event tail as session
+	// boundaries and rebuild markers.
 	detailCurrentSessionToolCalls int64
 	detailLastSessionToolCalls    int64
 	detailContextStats            fs.ContextStats
 	detailDaemonCounts            fs.DaemonCounts
-	detailDaemonRunsScanned       int // newest run dirs included in daemon token/call data
-	detailDaemonRunsTotal         int // all run dirs counted without opening every daemon.json
-	detailDaemonRunsTerminal      int // total minus bounded/observed-live nonterminal runs
+	detailDaemonRunsScanned       int // exact recent dispatch run IDs attempted
+	detailDaemonRunsTotal         int // valid dispatches in the recent dispatch window
+	detailDaemonRunsTerminal      int // terminal cards observed in that window
+	detailDaemonWindowState       string
 	detailMCPNames                []string
 	detailRebuilds                []time.Time // psyche_molt times, newest first; rendered as molt separators
 	detailRefreshes               []time.Time // refresh_complete times, newest first; rendered as context-rebuilt separators
+	lastReadStats                 []fs.BoundedReadStats
+	detailDaemonRunIDs            []string
+	selectedTokenRead             fs.BoundedReadStats
+	networkTokenReads             []fs.BoundedReadStats
+	detailEventRead               fs.BoundedReadStats
+	detailContextRead             fs.BoundedReadStats
+	detailDaemonTokenReads        []fs.BoundedReadStats
+	detailSessionCoverage         bool
 }
 
 const (
 	// detailRecentCalls is the number of recent token-ledger calls shown in each
-	// Ctrl+D recent-call lane (main agent on the left, daemons on the right).
+	// lower recent-call lane (main agent first, then daemons).
 	detailRecentCalls = 100
-	// detailRecentDaemonRuns caps daemon cards/ledgers opened by one detail scan.
-	// The complete directory is metadata-scanned for ordering and an exact run-dir
-	// total, but historical run contents outside this window are never opened.
-	detailRecentDaemonRuns = 128
 )
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
@@ -104,75 +106,178 @@ func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 }
 
 type propsLoadMsg struct {
-	network            fs.Network
-	mailStatsAvailable bool
-	tokens             fs.TokenTotals
+	selectedDir    string
+	generation     uint64
+	network        fs.Network
+	selectedStatus fs.AgentStatus
+	agentDirs      []string
+	agentNodes     []fs.AgentNode
+
+	selectedRaw        map[string]any
+	selectedLLM        kanbanLLMConfig
+	selectedPresetInfo kanbanPresetInfo
 	selectedTokens     fs.TokenTotals
-	selectedStatus     fs.AgentStatus
+	tokens             fs.TokenTotals
 	adminStart         string
-	agentDirs          []string
-	agentNodes         []fs.AgentNode
+
+	detailByProvider              map[string]fs.TokenTotals
+	detailDaemonByProvider        map[string]fs.TokenTotals
+	detailRecent                  []fs.LedgerEntry
+	detailDaemonRecent            []fs.DaemonLedgerEntry
+	detailCurrentSessionStats     fs.SessionTokenStats
+	detailLastSessionStats        fs.SessionTokenStats
+	detailCurrentSessionToolCalls int64
+	detailLastSessionToolCalls    int64
+	detailContextStats            fs.ContextStats
+	detailDaemonCounts            fs.DaemonCounts
+	detailDaemonRunsScanned       int
+	detailDaemonRunsTotal         int
+	detailDaemonRunsTerminal      int
+	detailDaemonWindowState       string
+	detailDaemonRunIDs            []string
+	detailMCPNames                []string
+	detailRebuilds                []time.Time
+	detailRefreshes               []time.Time
+	readStats                     []fs.BoundedReadStats
+	selectedTokenRead             fs.BoundedReadStats
+	networkTokenReads             []fs.BoundedReadStats
+	detailEventRead               fs.BoundedReadStats
+	detailContextRead             fs.BoundedReadStats
+	detailDaemonTokenReads        []fs.BoundedReadStats
+	detailSessionCoverage         bool
 }
 
-func (m PropsModel) loadData() tea.Msg {
-	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
-
-	var dirs []string
-	for _, n := range net.Nodes {
-		if !n.IsHuman && n.WorkingDir != "" {
-			dirs = append(dirs, n.WorkingDir)
+func (m PropsModel) loadSnapshot() tea.Msg {
+	msg := propsLoadMsg{selectedDir: m.selectedDir, generation: m.requestGeneration}
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.KanbanNetworkOptions(&msg.readStats))
+	msg.network = net
+	msg.agentNodes = net.Nodes
+	for _, node := range net.Nodes {
+		if node.WorkingDir != "" {
+			msg.agentDirs = append(msg.agentDirs, node.WorkingDir)
 		}
 	}
-	totals := fs.AggregateTokens(dirs)
-	selectedTokens := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
-	selectedStatus := fs.ReadStatus(m.selectedDir)
 
-	var adminStart string
-	if raw, err := fs.ReadAgentRaw(m.orchDir); err == nil {
-		if v, ok := raw["created_at"].(string); ok && v != "" {
-			adminStart = v
-		} else if v, ok := raw["started_at"].(string); ok && v != "" {
-			adminStart = v
+	agentRaw := map[string]any{}
+	initRaw := map[string]any{}
+	if m.selectedDir != "" {
+		if loaded, read, err := fs.ReadKanbanAgentRaw(m.selectedDir); err == nil {
+			agentRaw = loaded
+			msg.readStats = append(msg.readStats, read)
+		} else {
+			msg.readStats = append(msg.readStats, read)
+		}
+		if loaded, reads, err := fs.ReadKanbanInitManifest(m.selectedDir); err == nil {
+			initRaw = loaded
+			msg.readStats = append(msg.readStats, reads...)
+		} else {
+			msg.readStats = append(msg.readStats, reads...)
+		}
+		status, statusRead := fs.ReadKanbanStatus(m.selectedDir)
+		msg.selectedStatus = status
+		msg.readStats = append(msg.readStats, statusRead)
+	}
+	msg.selectedRaw = mergeKanbanAgentRaw(agentRaw, initRaw)
+	msg.selectedLLM = resolveKanbanLLMConfig(agentRaw, initRaw)
+	msg.selectedPresetInfo = resolveKanbanPresetInfo(initRaw)
+
+	adminRaw := agentRaw
+	if m.orchDir != "" && m.orchDir != m.selectedDir {
+		if loaded, read, err := fs.ReadKanbanAgentRaw(m.orchDir); err == nil {
+			adminRaw = loaded
+			msg.readStats = append(msg.readStats, read)
+		} else {
+			msg.readStats = append(msg.readStats, read)
 		}
 	}
-
-	var allDirs []string
-	for _, n := range net.Nodes {
-		allDirs = append(allDirs, n.WorkingDir)
+	if value, ok := adminRaw["created_at"].(string); ok && value != "" {
+		msg.adminStart = value
+	} else if value, ok := adminRaw["started_at"].(string); ok && value != "" {
+		msg.adminStart = value
 	}
 
-	return propsLoadMsg{
-		network:            net,
-		mailStatsAvailable: false,
-		tokens:             totals,
-		selectedTokens:     selectedTokens,
-		selectedStatus:     selectedStatus,
-		adminStart:         adminStart,
-		agentDirs:          allDirs,
-		agentNodes:         net.Nodes,
+	if m.selectedDir == "" {
+		return msg
 	}
+
+	selectedTokenLoaded := false
+	var selectedWindow fs.KanbanTokenWindow
+	for _, node := range net.Nodes {
+		if node.IsHuman || node.WorkingDir == "" {
+			continue
+		}
+		window := fs.ReadKanbanTokenWindow(filepath.Join(node.WorkingDir, "logs", "token_ledger.jsonl"), detailRecentCalls)
+		msg.readStats = append(msg.readStats, window.Read)
+		msg.networkTokenReads = append(msg.networkTokenReads, window.Read)
+		msg.tokens.Input += window.Totals.Input
+		msg.tokens.Output += window.Totals.Output
+		msg.tokens.Thinking += window.Totals.Thinking
+		msg.tokens.Cached += window.Totals.Cached
+		msg.tokens.APICalls += window.Totals.APICalls
+		if node.WorkingDir == m.selectedDir {
+			selectedWindow = window
+			selectedTokenLoaded = true
+		}
+	}
+	if !selectedTokenLoaded {
+		selectedWindow = fs.ReadKanbanTokenWindow(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"), detailRecentCalls)
+		msg.readStats = append(msg.readStats, selectedWindow.Read)
+	}
+	msg.selectedTokens = selectedWindow.Totals
+	msg.selectedTokenRead = selectedWindow.Read
+	msg.detailByProvider = selectedWindow.ByProvider
+	msg.detailRecent = selectedWindow.Recent
+
+	events := fs.ReadKanbanEventWindow(m.selectedDir, detailRecentCalls)
+	msg.readStats = append(msg.readStats, events.Read)
+	msg.detailEventRead = events.Read
+	sessionStats, sessionCoverage := fs.KanbanSessionTokenStats(selectedWindow, events)
+	msg.detailSessionCoverage = sessionCoverage
+	msg.detailCurrentSessionStats = sessionStats.Current
+	msg.detailLastSessionStats = sessionStats.Last
+	if sessionCoverage {
+		msg.detailCurrentSessionToolCalls = events.ToolCalls.Current
+		msg.detailLastSessionToolCalls = events.ToolCalls.Last
+	}
+	msg.detailRebuilds = events.Rebuilds
+	msg.detailRefreshes = events.Refreshes
+
+	daemonDetail := fs.ReadKanbanDaemonDetailSnapshot(m.selectedDir, detailRecentCalls, &msg.readStats)
+	msg.detailDaemonByProvider = daemonDetail.ByProvider
+	msg.detailDaemonRecent = daemonDetail.Recent
+	msg.detailDaemonCounts = daemonDetail.Counts
+	msg.detailDaemonRunsScanned = daemonDetail.ScannedRuns
+	msg.detailDaemonRunsTotal = daemonDetail.TotalRuns
+	msg.detailDaemonRunsTerminal = daemonDetail.TerminalRuns
+	msg.detailDaemonWindowState = daemonDetail.WindowState
+	msg.detailDaemonRunIDs = daemonDetail.RunIDs
+	msg.detailDaemonTokenReads = daemonDetail.TokenReads
+	contextStats, contextRead := fs.ReadKanbanContextStats(m.selectedDir)
+	msg.detailContextStats = contextStats
+	msg.detailContextRead = contextRead
+	msg.readStats = append(msg.readStats, contextRead)
+
+	if mcp, ok := initRaw["mcp"].(map[string]interface{}); ok {
+		for name := range mcp {
+			if len(msg.detailMCPNames) >= fs.KanbanReadLimit {
+				break
+			}
+			msg.detailMCPNames = append(msg.detailMCPNames, name)
+		}
+		sort.Strings(msg.detailMCPNames)
+	}
+	return msg
 }
 
-func (m PropsModel) Init() tea.Cmd { return m.loadData }
-
-// AutoReloadCmd implements autoReloadable: on the app-level 1s tick, reload the
-// kanban dashboard from disk so network/token/status data stays live without a
-// manual Ctrl+R. It returns the same command as Ctrl+R (loadData), which
-// updates fields in place and re-renders without resetting scroll, cursor, or
-// folder state.
-//
-// Returns nil while the agent picker or Ctrl+D detail pane is open. Detail is
-// intentionally a point-in-time diagnostic: opening it, changing agent, or
-// explicit Ctrl+R refreshes its O(number of runs) data, never the 1s tick.
-func (m PropsModel) AutoReloadCmd() tea.Cmd {
-	if m.pickerOpen || m.detailOpen {
-		return nil
-	}
-	return m.loadData
+func (m *PropsModel) issueSnapshot() tea.Cmd {
+	m.requestGeneration++
+	return m.loadSnapshot
 }
 
-// propsHeaderLines is the number of lines used by the header (title + separator + optional callout).
-const propsHeaderLines = 3
+func (m *PropsModel) Init() tea.Cmd { return m.issueSnapshot() }
+
+// propsHeaderLines is the number of lines used by the header (title + separator).
+const propsHeaderLines = 2
 
 // propsFooterLines is the number of lines used by the footer (separator + hints).
 const propsFooterLines = 2
@@ -199,14 +304,10 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.syncViewportContent()
 
 	case propsLoadMsg:
-		m.network = msg.network
-		m.mailStatsAvailable = msg.mailStatsAvailable
-		m.tokens = msg.tokens
-		m.selectedTokens = msg.selectedTokens
-		m.selectedStatus = msg.selectedStatus
-		m.adminStart = msg.adminStart
-		m.agentDirs = msg.agentDirs
-		m.agentNodes = msg.agentNodes
+		if msg.selectedDir != m.selectedDir || msg.generation != m.requestGeneration {
+			return m, nil
+		}
+		m.applySnapshot(msg)
 		m.syncViewportContent()
 
 	case tea.MouseWheelMsg:
@@ -221,23 +322,9 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "esc", "q":
-			// Detail view first, then exit.
-			if m.detailOpen {
-				m.detailOpen = false
-				m.viewport.GotoTop()
-				m.syncViewportContent()
-				return m, nil
-			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "ctrl+r":
-			// Reload the cheap dashboard data. Detail is a point-in-time
-			// diagnostic, so only an explicit refresh (or reopening it) pays for
-			// its bounded, freshness-keyed filesystem snapshot.
-			if m.detailOpen {
-				m.loadDetail()
-				m.syncViewportContent()
-			}
-			return m, m.loadData
+			return m, m.issueSnapshot()
 		case "ctrl+t":
 			m.pickerOpen = true
 			for i, n := range m.agentNodes {
@@ -245,17 +332,6 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 					m.pickerIdx = i
 					break
 				}
-			}
-			m.syncViewportContent()
-			return m, nil
-		case "ctrl+d":
-			// Toggle detail view. Reload the per-provider breakdown
-			// from disk on every open so the data is fresh — these
-			// reads are cheap (small local ledger, init, and daemon files).
-			m.detailOpen = !m.detailOpen
-			if m.detailOpen {
-				m.loadDetail()
-				m.viewport.GotoTop()
 			}
 			m.syncViewportContent()
 			return m, nil
@@ -268,67 +344,55 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 	return m, nil
 }
 
-// loadDetail populates the detail-view caches from disk for the
-// currently-selected agent. Called every time the detail view is
-// opened so the user sees fresh numbers.
-func (m *PropsModel) loadDetail() {
-	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
-	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, detailRecentCalls)
-	sessionStats := fs.SumMoltSessionTokenLedger(m.selectedDir)
-	m.detailCurrentSessionStats = sessionStats.Current
-	m.detailLastSessionStats = sessionStats.Last
-	// Tool-call counts come from the events store, not the token ledger, so
-	// they are fetched with their own (events-keyed) freshness and overlaid
-	// onto the session stats here. The windows are resolved identically to
-	// SumMoltSessionTokenLedger, so the counts align with the API rows.
-	toolCounts := fs.SumMoltSessionToolCalls(m.selectedDir)
-	m.detailCurrentSessionToolCalls = toolCounts.Current
-	m.detailLastSessionToolCalls = toolCounts.Last
-	// The daemon snapshot opens only the newest run window. It memoizes
-	// unchanged cards/ledgers, forces a live run refresh when its heartbeat
-	// changes, and returns the all-directory total from the same cached listing.
-	// Per-run ledgers remain authoritative; CLI/legacy card snapshots fill in
-	// when a selected run has no per-call ledger.
-	daemonDetail := fs.ReadDaemonDetailSnapshot(m.selectedDir, detailRecentDaemonRuns, detailRecentCalls)
-	m.detailDaemonByProvider = daemonDetail.ByProvider
-	m.detailDaemonRecent = daemonDetail.Recent
-	m.detailDaemonCounts = daemonDetail.Counts
-	m.detailDaemonRunsScanned = daemonDetail.ScannedRuns
-	m.detailDaemonRunsTotal = daemonDetail.TotalRuns
-	m.detailDaemonRunsTerminal = daemonDetail.TerminalRuns
-	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
-	// Boundary timestamps to mark in the main-agent ledger lane. Best-effort:
-	// empty when no markers are available. Molt and /refresh reconstructions
-	// are separate sources rendered with distinct labels.
-	m.detailRebuilds = fs.RecentRebuildTimes(m.selectedDir, detailRecentCalls)
-	m.detailRefreshes = fs.RecentRefreshCompleteTimes(m.selectedDir, detailRecentCalls)
-
-	// MCP names from init.json's mcp block.
-	m.detailMCPNames = nil
-	if initRaw, err := fs.ReadInitManifest(m.selectedDir); err == nil {
-		if mcp, ok := initRaw["mcp"].(map[string]interface{}); ok {
-			for name := range mcp {
-				m.detailMCPNames = append(m.detailMCPNames, name)
-			}
-			sort.Strings(m.detailMCPNames)
-		}
-	}
-
+func (m *PropsModel) applySnapshot(msg propsLoadMsg) {
+	m.network = msg.network
+	m.mailStatsAvailable = false
+	m.selectedStatus = msg.selectedStatus
+	m.agentDirs = msg.agentDirs
+	m.agentNodes = msg.agentNodes
+	m.selectedRaw = msg.selectedRaw
+	m.selectedLLM = msg.selectedLLM
+	m.selectedPresetInfo = msg.selectedPresetInfo
+	m.selectedTokens = msg.selectedTokens
+	m.tokens = msg.tokens
+	m.adminStart = msg.adminStart
+	m.detailByProvider = msg.detailByProvider
+	m.detailDaemonByProvider = msg.detailDaemonByProvider
+	m.detailRecent = msg.detailRecent
+	m.detailDaemonRecent = msg.detailDaemonRecent
+	m.detailCurrentSessionStats = msg.detailCurrentSessionStats
+	m.detailLastSessionStats = msg.detailLastSessionStats
+	m.detailCurrentSessionToolCalls = msg.detailCurrentSessionToolCalls
+	m.detailLastSessionToolCalls = msg.detailLastSessionToolCalls
+	m.detailContextStats = msg.detailContextStats
+	m.detailDaemonCounts = msg.detailDaemonCounts
+	m.detailDaemonRunsScanned = msg.detailDaemonRunsScanned
+	m.detailDaemonRunsTotal = msg.detailDaemonRunsTotal
+	m.detailDaemonRunsTerminal = msg.detailDaemonRunsTerminal
+	m.detailDaemonWindowState = msg.detailDaemonWindowState
+	m.detailDaemonRunIDs = msg.detailDaemonRunIDs
+	m.detailMCPNames = msg.detailMCPNames
+	m.detailRebuilds = msg.detailRebuilds
+	m.detailRefreshes = msg.detailRefreshes
+	m.lastReadStats = msg.readStats
+	m.selectedTokenRead = msg.selectedTokenRead
+	m.networkTokenReads = msg.networkTokenReads
+	m.detailEventRead = msg.detailEventRead
+	m.detailContextRead = msg.detailContextRead
+	m.detailDaemonTokenReads = msg.detailDaemonTokenReads
+	m.detailSessionCoverage = msg.detailSessionCoverage
 }
 
-// syncViewportContent re-renders left+right panels into the viewport.
+// syncViewportContent renders either the picker or the one stacked kanban.
 func (m *PropsModel) syncViewportContent() {
 	if !m.ready {
 		return
 	}
-	switch {
-	case m.pickerOpen:
+	if m.pickerOpen {
 		m.viewport.SetContent(m.renderPicker())
-	case m.detailOpen:
-		m.viewport.SetContent(m.renderDetail())
-	default:
-		m.viewport.SetContent(m.renderBody())
+		return
 	}
+	m.viewport.SetContent(m.renderBody())
 }
 
 func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
@@ -349,14 +413,14 @@ func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
 	case "enter":
 		if m.pickerIdx < len(m.agentNodes) {
 			m.selectedDir = m.agentNodes[m.pickerIdx].WorkingDir
-			m.selectedTokens = fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
-			m.selectedStatus = fs.ReadStatus(m.selectedDir)
-			if m.detailOpen {
-				m.loadDetail()
-			}
+			m.selectedStatus = fs.AgentStatus{}
+			// Never label the previous agent's cached facts as the new selection
+			// while its asynchronous snapshots are still in flight.
+			m.applySnapshot(propsLoadMsg{})
 		}
 		m.pickerOpen = false
 		m.syncViewportContent()
+		return m, m.issueSnapshot()
 	}
 	return m, nil
 }
@@ -395,7 +459,7 @@ type kanbanLLMConfig struct {
 type kanbanPresetInfo struct {
 	DefaultRef string
 	ActiveRef  string
-	Allowed    []preset.ResolvedRef
+	Allowed    []string
 }
 
 func boundedKanbanText(v any, limit int) (string, bool) {
@@ -540,7 +604,10 @@ func mergeKanbanAgentRaw(agentRaw, initRaw map[string]any) map[string]any {
 	return merged
 }
 
-func (m PropsModel) resolveKanbanPresetInfo(raw map[string]any) kanbanPresetInfo {
+// resolveKanbanPresetInfo presents only configured manifest references. It
+// deliberately does not resolve keys, auth, OAuth pools, provider eligibility,
+// or preset files, and therefore makes no health/availability claim.
+func resolveKanbanPresetInfo(raw map[string]any) kanbanPresetInfo {
 	block, _ := raw["preset"].(map[string]any)
 	info := kanbanPresetInfo{}
 	if block == nil {
@@ -548,144 +615,47 @@ func (m PropsModel) resolveKanbanPresetInfo(raw map[string]any) kanbanPresetInfo
 	}
 	info.DefaultRef, _ = block["default"].(string)
 	info.ActiveRef, _ = block["active"].(string)
-	allowed, _ := block["allowed"].([]any)
-	refs := make([]string, 0, len(allowed))
-	for _, entry := range allowed {
-		if ref, ok := entry.(string); ok && strings.TrimSpace(ref) != "" {
-			refs = append(refs, ref)
+	switch allowed := block["allowed"].(type) {
+	case []any:
+		for _, entry := range allowed {
+			if ref, ok := entry.(string); ok && strings.TrimSpace(ref) != "" && len(info.Allowed) < fs.KanbanReadLimit {
+				info.Allowed = append(info.Allowed, ref)
+			}
+		}
+	case []string:
+		for _, ref := range allowed {
+			if strings.TrimSpace(ref) != "" && len(info.Allowed) < fs.KanbanReadLimit {
+				info.Allowed = append(info.Allowed, ref)
+			}
 		}
 	}
-	if len(refs) == 0 {
-		return info
-	}
-	keys, _ := config.ResolveKeys(m.globalDir)
-	poolEligible, poolEligibleModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
-	auth := preset.AuthState{
-		CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
-		CodexAuthDir:              m.globalDir,
-		CodexPoolEligible:         poolEligible,
-		CodexPoolEligibleModels:   poolEligibleModels,
-		CodexPoolFallbackEligible: poolFallback,
-		ClaudeCodeAuthConfigured:  claudeCodeAuthConfigured(),
-	}
-	info.Allowed = preset.ResolveRefsWithAuth(refs, keys, auth)
 	return info
 }
 
-func presetHealthCounts(info kanbanPresetInfo) (healthy, broken int) {
-	for _, resolved := range info.Allowed {
-		if resolved.Exists && resolved.HasKey {
-			healthy++
-		} else {
-			broken++
-		}
-	}
-	return healthy, broken
-}
-
 func (m PropsModel) renderBody() string {
-	leftW := m.width/2 - 1
-	rightW := m.width - leftW - 1
-	if leftW < 20 {
-		leftW = 20
-	}
-	if rightW < 20 {
-		rightW = 20
-	}
-	// Safety: don't exceed terminal width
-	if leftW+1+rightW > m.width && m.width > 1 {
-		rightW = m.width - leftW - 1
-		if rightW < 0 {
-			rightW = 0
-		}
-	}
-
-	leftContent := m.renderLeft(leftW)
-	rightContent := m.renderRight(rightW)
-
-	leftLines := strings.Split(leftContent, "\n")
-	rightLines := strings.Split(rightContent, "\n")
-
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
-	}
-	for len(leftLines) < maxLines {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < maxLines {
-		rightLines = append(rightLines, "")
-	}
-
-	sep := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
-
-	// Pad to viewport height so the separator column runs full-screen
-	vpHeight := m.height - propsHeaderLines - propsFooterLines
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-	for len(leftLines) < vpHeight {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < vpHeight {
-		rightLines = append(rightLines, "")
-	}
-	if len(leftLines) > len(rightLines) {
-		for len(rightLines) < len(leftLines) {
-			rightLines = append(rightLines, "")
-		}
-	} else {
-		for len(leftLines) < len(rightLines) {
-			leftLines = append(leftLines, "")
-		}
-	}
-
-	var body strings.Builder
-	for i := 0; i < len(leftLines); i++ {
-		l := padToWidth(leftLines[i], leftW)
-		body.WriteString(l + sep + rightLines[i] + "\n")
-	}
-
-	return strings.TrimRight(body.String(), "\n")
+	// Exact important-first order: Agent now, Current session (both emitted by
+	// renderLeft), Network now, then every non-duplicated diagnostic section.
+	return strings.Join([]string{
+		m.renderLeft(m.width),
+		m.renderRight(m.width),
+		m.renderDetail(),
+	}, "\n")
 }
 
 func (m PropsModel) View() string {
-	title := i18n.T("props.title")
-	if m.detailOpen {
-		title = i18n.T("props.detail_title")
-	}
-	header := StyleTitle.Render("  "+title) + "\n" + strings.Repeat("\u2500", m.width)
-	if !m.detailOpen {
-		header += "\n" + "  " + StyleAccent.Render("⎔ "+i18n.T("props.ctrl_d_hint"))
-	} else {
-		header += "\n"
-	}
+	header := StyleTitle.Render("  "+i18n.T("props.title")) + "\n" + strings.Repeat("\u2500", m.width)
 
 	scrollHint := ""
 	if m.ready && !m.viewport.AtBottom() {
 		scrollHint = " " + RuneBullet + " ↑↓ scroll"
 	}
 
-	// Refresh hint: a "live" badge when auto-refresh is on, plus the ctrl+r
-	// manual fallback that exists either way. Consolidated here so the kanban
-	// has a single source of truth for the reload hint (supersedes #369, which
-	// added a bare "ctrl+r reload" hint before auto-refresh existed).
 	refreshHint := i18n.T("props.ctrl_r_reload")
-	if m.AutoRefresh {
-		refreshHint = i18n.T("hints.auto_refresh_live") + " " + RuneBullet + " " + refreshHint
-	}
 
-	var footerLine string
-	if m.detailOpen {
-		footerLine = "  " + refreshHint + " " + RuneBullet +
-			" esc " + i18n.T("props.detail_back_to_summary") + scrollHint
-	} else {
-		footerLine = "  " + refreshHint + " " + RuneBullet +
-			" " + i18n.T("hints.props_off") + " " + RuneBullet +
-			" esc " + i18n.T("manage.back") + " " + RuneBullet +
-			" " + i18n.T("hints.props_select") + " " + RuneBullet +
-			" ctrl+d " + i18n.T("props.detail_open") + scrollHint
-	}
+	footerLine := "  " + refreshHint + " " + RuneBullet +
+		" " + i18n.T("hints.props_off") + " " + RuneBullet +
+		" esc " + i18n.T("manage.back") + " " + RuneBullet +
+		" " + i18n.T("hints.props_select") + scrollHint
 	footer := strings.Repeat("\u2500", m.width) + "\n" + StyleFaint.Render(footerLine)
 
 	return header + "\n" + PaintViewportBG(m.viewport.View(), m.width) + "\n" + footer
@@ -706,19 +676,30 @@ func (m PropsModel) renderLeft(maxW int) string {
 
 	var lines []string
 
-	agentRaw, err := fs.ReadAgentRaw(m.selectedDir)
-	if err != nil {
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.no_data")))
-		return strings.Join(lines, "\n")
-	}
-	initRaw, _ := fs.ReadInitManifest(m.selectedDir)
-	raw := mergeKanbanAgentRaw(agentRaw, initRaw)
-	llm := resolveKanbanLLMConfig(agentRaw, initRaw)
-	presetInfo := m.resolveKanbanPresetInfo(raw)
+	raw := m.selectedRaw
+	llm := m.selectedLLM
+	presetInfo := m.selectedPresetInfo
+	selectedNode, hasSelectedNode := m.selectedAgentNode()
 
 	renderFields := func(fields []propsField) {
 		for _, f := range fields {
 			v, ok := raw[f.key]
+			if hasSelectedNode {
+				switch f.key {
+				case "agent_name":
+					if selectedNode.AgentName != "" {
+						v, ok = selectedNode.AgentName, true
+					}
+				case "nickname":
+					if selectedNode.Nickname != "" {
+						v, ok = selectedNode.Nickname, true
+					}
+				case "state":
+					if selectedNode.State != "" {
+						v, ok = selectedNode.State, true
+					}
+				}
+			}
 			if !ok || v == nil {
 				continue
 			}
@@ -745,6 +726,9 @@ func (m PropsModel) renderLeft(maxW int) string {
 	}
 
 	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_agent_now")), "")
+	if len(raw) == 0 && !hasSelectedNode {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.no_data")))
+	}
 	renderFields([]propsField{
 		{"agent_name", i18n.T("props.name")},
 		{"nickname", i18n.T("props.nickname")},
@@ -763,12 +747,8 @@ func (m PropsModel) renderLeft(maxW int) string {
 	appendRow(i18n.T("props.endpoint"), llm.Endpoint)
 	appendRow(i18n.T("props.preset_active"), refDisplayName(presetInfo.ActiveRef))
 	if len(presetInfo.Allowed) > 0 {
-		healthy, broken := presetHealthCounts(presetInfo)
-		parts := []string{i18n.TF("props.preset_health_healthy", healthy)}
-		if broken > 0 {
-			parts = append(parts, i18n.TF("props.preset_health_broken", broken))
-		}
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+": ")+valueStyle.Render(strings.Join(parts, " · ")))
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+": ")+
+			valueStyle.Render(i18n.TF("props.preset_configured_count", len(presetInfo.Allowed))))
 	}
 
 	// Context window (from cached .status.json)
@@ -788,9 +768,9 @@ func (m PropsModel) renderLeft(maxW int) string {
 	// The primary deliberately shows an absolute cache miss only; no default
 	// cache-miss budget exists in the published status/manifest contract.
 	session := m.selectedStatus.Tokens
+	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_current_session")))
 	if session.InputTokens > 0 || session.OutputTokens > 0 || session.ThinkingTokens > 0 || session.CachedTokens > 0 || session.APICalls > 0 {
 		tokens := session.InputTokens + session.OutputTokens + session.ThinkingTokens
-		lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.section_current_session")))
 		if session.Estimated {
 			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
 			lines = append(lines, "  "+warnStyle.Render(i18n.T("props.estimated_usage_warning")))
@@ -805,54 +785,89 @@ func (m PropsModel) renderLeft(maxW int) string {
 		if session.APICalls > 0 {
 			appendRow(i18n.T("props.session_tokens_per_api_call"), formatComma(avgPerCall(tokens, session.APICalls)))
 		}
+	} else {
+		lines = append(lines, "", "  "+labelStyle.Render(i18n.T("props.no_data")))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-// renderSoulFlowValue renders the /kanban "soul flow" line as an on/off
-// status rather than a raw delay number. The enable control is the env
-// opt-in (LINGTAI_SOUL_FLOW_ENABLED in the agent's env_file), not
-// soul.delay. When enabled we surface soul.delay as cadence (falling back
-// to a localized "default cadence" when the manifest omits it, since the
-// kernel applies its own default); when disabled we say so and point the
-// reader at the opt-in var and the soul-manual tool.
-func (m PropsModel) renderSoulFlowValue(raw map[string]interface{}, valueStyle, labelStyle lipgloss.Style) string {
-	enabled := config.SoulFlowEnabledInEnvFile(m.soulFlowEnvPath(raw))
-
-	if !enabled {
-		// disabled — localized "disabled · opt in via <var> · see soul-manual"
-		return valueStyle.Render(i18n.T("props.soul_flow_disabled")) +
-			labelStyle.Render(i18n.TF("props.soul_flow_disabled_hint", config.SoulFlowEnabledEnvVar))
-	}
-
-	// enabled — show cadence. soul_delay is the flattened soul.delay.
-	cadence := i18n.T("props.soul_flow_cadence_default")
-	if v, ok := raw["soul_delay"]; ok && v != nil {
-		if s := fmt.Sprintf("%v", v); s != "" {
-			cadence = i18n.TF("props.soul_flow_cadence", s)
+func (m PropsModel) selectedAgentNode() (fs.AgentNode, bool) {
+	for _, node := range m.agentNodes {
+		if node.WorkingDir == m.selectedDir {
+			return node, true
 		}
 	}
-	return valueStyle.Render(i18n.T("props.soul_flow_enabled")) +
-		labelStyle.Render(" · "+cadence) +
-		labelStyle.Render(i18n.T("props.soul_flow_manual_hint"))
+	return fs.AgentNode{}, false
 }
 
-// soulFlowEnvPath resolves the .env file that governs this agent's soul-flow
-// opt-in: the agent's init.json env_file if present (the seam the kernel
-// actually loads), else the global .env under m.globalDir. env_file is
-// normally an absolute path, but tolerate a leading ~ just in case.
-func (m PropsModel) soulFlowEnvPath(raw map[string]interface{}) string {
-	ef, ok := raw["env_file"].(string)
-	if !ok || ef == "" {
-		return config.EnvFilePath(m.globalDir)
-	}
-	if strings.HasPrefix(ef, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			ef = filepath.Join(home, strings.TrimPrefix(ef, "~"))
+func combineKanbanSourceStates(states ...string) string {
+	counts := map[string]int{}
+	total := 0
+	for _, state := range states {
+		if state != "" {
+			counts[state]++
+			total++
 		}
 	}
-	return ef
+	if len(counts) == 0 {
+		return ""
+	}
+	if counts[fs.KanbanSourcePartial] > 0 {
+		return fs.KanbanSourcePartial
+	}
+	bad := counts[fs.KanbanSourceUnavailable] + counts[fs.KanbanSourceMalformed]
+	if bad > 0 && bad < total {
+		return fs.KanbanSourcePartial
+	}
+	if counts[fs.KanbanSourceUnavailable] > 0 {
+		if len(counts) == 1 {
+			return fs.KanbanSourceUnavailable
+		}
+		return fs.KanbanSourcePartial
+	}
+	if counts[fs.KanbanSourceMalformed] > 0 {
+		if len(counts) == 1 {
+			return fs.KanbanSourceMalformed
+		}
+		return fs.KanbanSourcePartial
+	}
+	if counts[fs.KanbanSourceRecent] > 0 {
+		return fs.KanbanSourceRecent
+	}
+	if counts[fs.KanbanSourceAvailable] > 0 {
+		return fs.KanbanSourceAvailable
+	}
+	return fs.KanbanSourceEmpty
+}
+
+func combineKanbanReads(reads []fs.BoundedReadStats) string {
+	states := make([]string, 0, len(reads))
+	for _, read := range reads {
+		states = append(states, fs.KanbanReadState(read))
+	}
+	return combineKanbanSourceStates(states...)
+}
+
+func kanbanSourceTruth(state, source, empty string) string {
+	switch state {
+	case fs.KanbanSourceUnavailable:
+		return i18n.TF("props.window_unavailable", source)
+	case fs.KanbanSourceMalformed:
+		return i18n.TF("props.window_malformed", source)
+	case fs.KanbanSourcePartial:
+		return i18n.TF("props.window_partial", source)
+	case fs.KanbanSourceRecent:
+		return i18n.TF("props.window_recent", source)
+	case fs.KanbanSourceAvailable, fs.KanbanSourceEmpty, "":
+		return empty
+	default:
+		return ""
+	}
+}
+
+func tokenTotalsEmpty(t fs.TokenTotals) bool {
+	return t.Input == 0 && t.Output == 0 && t.Thinking == 0 && t.Cached == 0 && t.APICalls == 0
 }
 
 func (m PropsModel) renderRight(maxW int) string {
@@ -874,10 +889,17 @@ func (m PropsModel) renderRight(maxW int) string {
 			agentCount++
 		}
 	}
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_total")+": ")+
+	totalLabel := i18n.T("props.network_total")
+	if m.network.AgentDirectoryTruncated {
+		totalLabel = i18n.T("props.network_bounded_subset")
+	}
+	lines = append(lines, "  "+labelStyle.Render(totalLabel+": ")+
 		valueStyle.Render(fmt.Sprintf("%d", totalAgents))+
 		labelStyle.Render(fmt.Sprintf("  (%d %s, %d %s)",
 			agentCount, i18n.T("props.network_agents"), humanCount, i18n.T("props.network_humans"))))
+	if m.network.AgentDirectoryTruncated {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_subset_notice")))
+	}
 
 	var stateParts []string
 	if stats.Active > 0 {
@@ -901,9 +923,13 @@ func (m PropsModel) renderRight(maxW int) string {
 		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.suspended"), stats.Suspended)))
 	}
 	if len(stateParts) > 0 {
-		lines = append(lines, "  "+strings.Join(stateParts, "  "))
+		stateLine := strings.Join(stateParts, "  ")
+		if m.network.AgentDirectoryTruncated {
+			stateLine = labelStyle.Render(i18n.T("props.network_subset_states")+": ") + stateLine
+		}
+		lines = append(lines, "  "+stateLine)
 	}
-	if m.network.Activity.Status != "" {
+	if m.network.Activity.Status != "" && !m.network.AgentDirectoryTruncated {
 		c := lipgloss.NewStyle().Foreground(NetworkActivityColor(m.network.Activity.Status))
 		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(m.network.Activity.Status)))
 	}
@@ -913,7 +939,9 @@ func (m PropsModel) renderRight(maxW int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderDetail preserves the full diagnostic dashboard behind Ctrl+D.
+// renderDetail renders the retained lower diagnostic sections in the same
+// scrollable pane. Despite the historical helper name, it is not a separate
+// mode and performs no filesystem/config/auth reads.
 func (m PropsModel) renderDetail() string {
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
@@ -922,17 +950,9 @@ func (m PropsModel) renderDetail() string {
 
 	var lines []string
 
-	agentRaw := map[string]any{}
-	if loaded, err := fs.ReadAgentRaw(m.selectedDir); err == nil {
-		agentRaw = loaded
-	}
-	initRaw := map[string]any{}
-	if loaded, err := fs.ReadInitManifest(m.selectedDir); err == nil {
-		initRaw = loaded
-	}
-	raw := mergeKanbanAgentRaw(agentRaw, initRaw)
-	llm := resolveKanbanLLMConfig(agentRaw, initRaw)
-	presetInfo := m.resolveKanbanPresetInfo(raw)
+	raw := m.selectedRaw
+	llm := m.selectedLLM
+	presetInfo := m.selectedPresetInfo
 
 	appendSection := func(title string) {
 		lines = append(lines, "", "  "+sectionStyle.Render(title), "")
@@ -957,15 +977,12 @@ func (m PropsModel) renderDetail() string {
 	}
 
 	appendSection(i18n.T("props.detail_identity_runtime"))
-	appendRawRow("agent_name", i18n.T("props.name"))
-	appendRawRow("nickname", i18n.T("props.nickname"))
 	appendRawRow("agent_id", i18n.T("props.id"))
-	appendRawRow("state", i18n.T("props.state"))
 	appendRawRow("address", i18n.T("props.address"))
 	appendRawRow("language", i18n.T("props.language"))
 	appendRawRow("started_at", i18n.T("props.started_at"))
 	appendRawRow("combo", i18n.T("props.combo"))
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.soul_flow")+": ")+m.renderSoulFlowValue(raw, valueStyle, labelStyle))
+	appendRawRow("soul_delay", i18n.T("props.soul_flow"))
 	appendRawRow("molt_count", i18n.T("props.molt_count"))
 	appendRawRow("max_turns", i18n.T("props.max_turns"))
 	appendRawRow("max_rpm", i18n.T("props.max_rpm"))
@@ -976,10 +993,6 @@ func (m PropsModel) renderDetail() string {
 	}
 
 	appendSection(i18n.T("props.detail_llm_configuration"))
-	appendDetailRow(i18n.T("props.model"), llm.Model)
-	appendDetailRow(i18n.T("props.provider"), llm.Provider)
-	appendDetailRow(i18n.T("props.service_tier"), llm.ServiceTier)
-	appendDetailRow(i18n.T("props.thinking_effort"), llm.Thinking)
 	appendDetailRow(i18n.T("props.base_url"), llm.BaseURL)
 	appendDetailRow(i18n.T("props.api_compat"), llm.APICompat)
 	appendDetailRow(i18n.T("props.api_key_env"), llm.APIKeyEnv)
@@ -987,28 +1000,13 @@ func (m PropsModel) renderDetail() string {
 	appendDetailRow(i18n.T("props.context_limit"), llm.ContextLimit)
 
 	appendSection(i18n.T("props.detail_presets_capabilities_admin"))
-	appendDetailRow(i18n.T("props.preset_active"), refDisplayName(presetInfo.ActiveRef))
 	appendDetailRow(i18n.T("props.preset_default"), refDisplayName(presetInfo.DefaultRef))
 	if len(presetInfo.Allowed) > 0 {
 		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
-		for _, resolved := range presetInfo.Allowed {
-			marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")
-			if !resolved.Exists || !resolved.HasKey {
-				marker = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("✗")
-			}
-			tag := ""
-			switch resolved.Source {
-			case preset.SourceTemplate:
-				tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_template")+")")
-			case preset.SourceSaved:
-				tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_saved")+")")
-			}
-			name := resolved.Name
-			if name == "" {
-				name = resolved.Ref
-			}
-			lines = append(lines, "    "+marker+" "+valueStyle.Render(name)+tag)
+		for _, ref := range presetInfo.Allowed {
+			lines = append(lines, "    "+valueStyle.Render(refDisplayName(ref)))
 		}
+		lines = append(lines, "    "+subtleStyle.Render(i18n.T("props.preset_refs_not_checked")))
 	}
 	if caps, ok := raw["capabilities"]; ok && caps != nil {
 		capsJSON, _ := json.Marshal(caps)
@@ -1040,15 +1038,41 @@ func (m PropsModel) renderDetail() string {
 	appendSection(i18n.T("props.detail_context_detail"))
 	ctx := m.selectedStatus.Tokens.Context
 	if ctx.WindowSize > 0 {
-		appendDetailRow(i18n.T("props.context_usage"), fmt.Sprintf("%s / %s (%.1f%%)",
-			formatComma(int64(ctx.TotalTokens)), formatComma(int64(ctx.WindowSize)), ctx.UsagePct))
 		appendDetailRow(i18n.T("props.context_system"), formatComma(int64(ctx.SystemTokens)))
 		appendDetailRow(i18n.T("props.context_tools"), formatComma(int64(ctx.ToolsTokens)))
 		appendDetailRow(i18n.T("props.context_history"), formatComma(int64(ctx.HistoryTokens)))
 	}
+	contextState := fs.KanbanReadState(m.detailContextRead)
+	if notice := kanbanSourceTruth(contextState, i18n.T("props.source_context_history"), i18n.T("props.context_window_empty")); notice != "" && contextState != fs.KanbanSourceAvailable {
+		lines = append(lines, "  "+subtleStyle.Render(notice))
+	}
+	if m.detailContextStats.Entries > 0 {
+		stats := m.detailContextStats
+		lines = append(lines, "    "+labelStyle.Render("entries:                  ")+
+			valueStyle.Render(fmt.Sprintf("%d", stats.Entries)))
+		lines = append(lines, "    "+labelStyle.Render("messages:                 ")+
+			valueStyle.Render(fmt.Sprintf("system:%d  assistant:%d  user:%d", stats.SystemMessages, stats.AssistantMessages, stats.UserMessages)))
+		lines = append(lines, "    "+labelStyle.Render("text input / output:      ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.TextInputs, stats.TextOutputs)))
+		lines = append(lines, "    "+labelStyle.Render("tool calls / results:     ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.ToolCalls, stats.ToolResults)))
+		if len(stats.ToolCounts) > 0 {
+			lines = append(lines, "", "    "+labelStyle.Render("tools in recent context:"))
+			for _, tc := range stats.ToolCounts {
+				lines = append(lines, fmt.Sprintf("      %-14s calls:%s  results:%s",
+					valueStyle.Render(tc.Name), formatComma(int64(tc.Calls)), formatComma(int64(tc.Results))))
+			}
+		}
+	}
 
+	// Selected-agent token/provider/session data all come from one bounded
+	// 1000-line token tail and one bounded 1000-line event tail.
+	appendSection(i18n.T("props.detail_recent_token_usage"))
+	selectedTokenState := fs.KanbanReadState(m.selectedTokenRead)
+	if notice := kanbanSourceTruth(selectedTokenState, i18n.T("props.source_token_ledger"), i18n.T("props.detail_no_tokens")); notice != "" && selectedTokenState != fs.KanbanSourceAvailable {
+		lines = append(lines, "  "+subtleStyle.Render(notice))
+	}
 	if m.selectedTokens.APICalls > 0 {
-		appendSection(i18n.T("props.detail_agent_lifetime_usage"))
 		appendDetailRow("input", formatComma(m.selectedTokens.Input))
 		appendDetailRow("output", formatComma(m.selectedTokens.Output))
 		appendDetailRow("thinking", formatComma(m.selectedTokens.Thinking))
@@ -1059,7 +1083,28 @@ func (m PropsModel) renderDetail() string {
 		appendDetailRow("cached", cached)
 		appendDetailRow("api_calls", formatComma(m.selectedTokens.APICalls))
 	}
+	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.detail_main_tokens_by_provider")), "")
+	mainEmpty := kanbanSourceTruth(selectedTokenState, i18n.T("props.source_token_ledger"), i18n.T("props.detail_no_tokens"))
+	lines = appendProviderRows(lines, m.detailByProvider, mainEmpty, labelStyle, valueStyle, subtleStyle)
+	sessionCoverage := m.detailSessionCoverage
+	if m.detailEventRead.Status == "" && (m.detailCurrentSessionStats.APICalls > 0 || m.detailLastSessionStats.APICalls > 0) {
+		// Compatibility for explicitly constructed in-memory presentation tests;
+		// real snapshots always carry detailEventRead.
+		sessionCoverage = true
+	}
+	if sessionCoverage {
+		lines = appendCurrentSessionDiagnostics(lines, m.detailCurrentSessionStats, m.detailCurrentSessionToolCalls, sectionStyle, labelStyle, valueStyle)
+		lines = appendSessionAPIStats(lines, i18n.T("props.detail_last_session_recent"), m.detailLastSessionStats, m.detailLastSessionToolCalls, sectionStyle, labelStyle, valueStyle)
+	} else if m.selectedTokens.APICalls > 0 {
+		eventState := fs.KanbanReadState(m.detailEventRead)
+		if notice := kanbanSourceTruth(eventState, i18n.T("props.source_event_log"), ""); notice != "" {
+			lines = append(lines, "  "+subtleStyle.Render(notice))
+		}
+		lines = append(lines, "  "+subtleStyle.Render(i18n.T("props.session_partitions_omitted")), "")
+	}
 
+	// Network totals aggregate at most the recent 1000 token-ledger lines per
+	// bounded agent, and topology/contact sources use the same 1000 profile.
 	appendSection(i18n.T("props.detail_network_history_topology"))
 	if m.adminStart != "" {
 		appendDetailRow(i18n.T("props.network_created"), formatKanbanTimestamp(m.adminStart))
@@ -1068,15 +1113,21 @@ func (m PropsModel) renderDetail() string {
 		}
 	}
 	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.total_tokens")+":"))
-	lines = append(lines, "    "+labelStyle.Render("Input:    ")+valueStyle.Render(formatComma(m.tokens.Input)))
-	lines = append(lines, "    "+labelStyle.Render("Output:   ")+valueStyle.Render(formatComma(m.tokens.Output)))
-	lines = append(lines, "    "+labelStyle.Render("Thinking: ")+valueStyle.Render(formatComma(m.tokens.Thinking)))
-	networkCached := formatComma(m.tokens.Cached)
-	if m.tokens.Input > 0 {
-		networkCached += fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.tokens.Cached)/float64(m.tokens.Input))
+	networkTokenState := combineKanbanReads(m.networkTokenReads)
+	if notice := kanbanSourceTruth(networkTokenState, i18n.T("props.source_network_token_ledgers"), i18n.T("props.detail_no_tokens")); notice != "" && networkTokenState != fs.KanbanSourceAvailable {
+		lines = append(lines, "    "+subtleStyle.Render(notice))
 	}
-	lines = append(lines, "    "+labelStyle.Render("Cached:   ")+valueStyle.Render(networkCached))
-	appendDetailRow(i18n.T("props.total_api_calls"), formatComma(m.tokens.APICalls))
+	if networkTokenState != fs.KanbanSourceUnavailable && networkTokenState != fs.KanbanSourceMalformed || !tokenTotalsEmpty(m.tokens) {
+		lines = append(lines, "    "+labelStyle.Render("Input:    ")+valueStyle.Render(formatComma(m.tokens.Input)))
+		lines = append(lines, "    "+labelStyle.Render("Output:   ")+valueStyle.Render(formatComma(m.tokens.Output)))
+		lines = append(lines, "    "+labelStyle.Render("Thinking: ")+valueStyle.Render(formatComma(m.tokens.Thinking)))
+		networkCached := formatComma(m.tokens.Cached)
+		if m.tokens.Input > 0 {
+			networkCached += fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.tokens.Cached)/float64(m.tokens.Input))
+		}
+		lines = append(lines, "    "+labelStyle.Render("Cached:   ")+valueStyle.Render(networkCached))
+		appendDetailRow(i18n.T("props.total_api_calls"), formatComma(m.tokens.APICalls))
+	}
 	if m.mailStatsAvailable {
 		appendDetailRow(i18n.T("props.total_mails"), fmt.Sprintf("%d", m.network.Stats.TotalMails))
 	}
@@ -1086,21 +1137,44 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, tree...)
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_main_tokens_by_provider")))
-	lines = append(lines, "")
-	lines = appendProviderRows(lines, m.detailByProvider, labelStyle, valueStyle, subtleStyle)
-
-	lines = append(lines, "")
-	daemonTokenTitle := i18n.T("props.detail_daemon_tokens_by_provider")
-	if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
-		daemonTokenTitle += fmt.Sprintf(" (latest %d/%d runs)", m.detailDaemonRunsScanned, m.detailDaemonRunsTotal)
+	// Configured MCP names and daemon facts share the lower recent daemon
+	// window. No daemon directory listing is represented as a whole-directory total.
+	appendSection(i18n.T("props.detail_daemons"))
+	if len(m.detailMCPNames) > 0 {
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.detail_mcp")+":"))
+		for _, name := range m.detailMCPNames {
+			lines = append(lines, "    "+valueStyle.Render(name))
+		}
 	}
-	lines = append(lines, "  "+sectionStyle.Render(daemonTokenTitle))
-	lines = append(lines, "")
-	lines = appendProviderRows(lines, m.detailDaemonByProvider, labelStyle, valueStyle, subtleStyle)
+	switch m.detailDaemonWindowState {
+	case fs.KanbanSourceAvailable, fs.KanbanSourceRecent, fs.KanbanSourcePartial:
+		if notice := kanbanSourceTruth(m.detailDaemonWindowState, i18n.T("props.source_dispatch_ledger"), ""); notice != "" {
+			lines = append(lines, "  "+subtleStyle.Render(notice))
+		}
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.detail_daemons_running")+": ")+
+			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Running)))
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.detail_daemons_terminal")+": ")+
+			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonRunsTerminal)))
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
+			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
+	case fs.KanbanSourceEmpty, "":
+		lines = append(lines, "  "+subtleStyle.Render(i18n.T("props.daemon_window_empty")))
+	case fs.KanbanSourceMalformed:
+		lines = append(lines, "  "+subtleStyle.Render(i18n.TF("props.window_malformed", i18n.T("props.source_dispatch_ledger"))))
+	default:
+		lines = append(lines, "  "+subtleStyle.Render(i18n.TF("props.window_unavailable", i18n.T("props.source_dispatch_ledger"))))
+	}
+	lines = append(lines, "", "  "+sectionStyle.Render(i18n.T("props.detail_daemon_tokens_by_provider")), "")
+	daemonStates := []string{m.detailDaemonWindowState}
+	for _, read := range m.detailDaemonTokenReads {
+		daemonStates = append(daemonStates, fs.KanbanReadState(read))
+	}
+	daemonTokenState := combineKanbanSourceStates(daemonStates...)
+	daemonEmpty := kanbanSourceTruth(daemonTokenState, i18n.T("props.source_daemon_ledgers"), i18n.T("props.detail_no_tokens"))
+	lines = appendProviderRows(lines, m.detailDaemonByProvider, daemonEmpty, labelStyle, valueStyle, subtleStyle)
 
-	// Combined totals: arithmetic sum of main-provider and daemon provider/backend rows.
+	// Combined recent-window totals: arithmetic sum of the selected main-agent
+	// tail and the per-run tails selected by the recent dispatch ledger.
 	combined := make(map[string]fs.TokenTotals)
 	for name, t := range m.detailByProvider {
 		combined[name] = t
@@ -1116,11 +1190,7 @@ func (m PropsModel) renderDetail() string {
 	}
 	if len(combined) > 0 {
 		lines = append(lines, "")
-		combinedTitle := i18n.T("props.detail_combined_totals")
-		if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
-			combinedTitle += " (main + recent daemon window)"
-		}
-		lines = append(lines, "  "+sectionStyle.Render(combinedTitle))
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_combined_totals")))
 		lines = append(lines, "")
 		var tot fs.TokenTotals
 		for _, t := range combined {
@@ -1145,61 +1215,6 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Molt-session API/cache statistics.
-	lines = appendSessionAPIStats(lines, "Current session API", m.detailCurrentSessionStats, m.detailCurrentSessionToolCalls, sectionStyle, labelStyle, valueStyle)
-	lines = appendSessionAPIStats(lines, "Last session API", m.detailLastSessionStats, m.detailLastSessionToolCalls, sectionStyle, labelStyle, valueStyle)
-
-	// Current retained context statistics.
-	if m.detailContextStats.Entries > 0 {
-		stats := m.detailContextStats
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_context_stats")))
-		lines = append(lines, "")
-		lines = append(lines, "    "+labelStyle.Render("entries:                  ")+
-			valueStyle.Render(fmt.Sprintf("%d", stats.Entries)))
-		lines = append(lines, "    "+labelStyle.Render("messages:                 ")+
-			valueStyle.Render(fmt.Sprintf("system:%d  assistant:%d  user:%d", stats.SystemMessages, stats.AssistantMessages, stats.UserMessages)))
-		lines = append(lines, "    "+labelStyle.Render("text input / output:      ")+
-			valueStyle.Render(fmt.Sprintf("%d / %d", stats.TextInputs, stats.TextOutputs)))
-		lines = append(lines, "    "+labelStyle.Render("tool calls / results:     ")+
-			valueStyle.Render(fmt.Sprintf("%d / %d", stats.ToolCalls, stats.ToolResults)))
-		if len(stats.ToolCounts) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, "    "+labelStyle.Render("tools in context:"))
-			for _, tc := range stats.ToolCounts {
-				lines = append(lines, fmt.Sprintf("      %-14s calls:%s  results:%s",
-					valueStyle.Render(tc.Name),
-					formatComma(int64(tc.Calls)),
-					formatComma(int64(tc.Results)),
-				))
-			}
-		}
-		lines = append(lines, "")
-	}
-
-	// MCP servers.
-	if len(m.detailMCPNames) > 0 {
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_mcp")))
-		lines = append(lines, "")
-		for _, name := range m.detailMCPNames {
-			lines = append(lines, "    "+valueStyle.Render(name))
-		}
-		lines = append(lines, "")
-	}
-
-	// Daemon run counts.
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
-	lines = append(lines, "")
-	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_running")+": ")+
-		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Running)))
-	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_terminal")+": ")+
-		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonRunsTerminal)))
-	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
-		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
-	if m.detailDaemonRunsTotal > m.detailDaemonRunsScanned {
-		lines = append(lines, "    "+subtleStyle.Render(fmt.Sprintf("running state checked in latest %d runs; total is directory-wide", m.detailDaemonRunsScanned)))
-	}
-	lines = append(lines, "")
-
 	// Raw recent token-ledger lanes are useful for diagnosis but visually noisy,
 	// so they come last after the higher-signal provider totals, context, MCP,
 	// and daemon-count summaries.
@@ -1211,7 +1226,7 @@ func (m PropsModel) renderDetail() string {
 // renderRecentCallLanes renders the lower diagnostic ledger section in a
 // single-column order: selected main-agent calls first, then stacked daemon
 // calls. Raw ledgers are intentionally below the higher-signal summaries in
-// renderDetail.
+// the lower diagnostic renderer.
 func (m PropsModel) renderRecentCallLanes() []string {
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 
@@ -1328,14 +1343,16 @@ func isReconstructLedgerEntry(entry fs.LedgerEntry) bool {
 
 // renderMainCallRows renders the selected agent's recent per-call ledger
 // entries (newest first). Rows deliberately avoid truncating model/endpoint
-// fields so detail mode can preserve raw diagnostic evidence.
+// fields so the lower ledger can preserve raw diagnostic evidence.
 func (m PropsModel) renderMainCallRows() []string {
 	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	if len(m.detailRecent) == 0 {
-		return []string{"  " + subtleStyle.Render(i18n.T("props.detail_recent_empty"))}
+		state := fs.KanbanReadState(m.selectedTokenRead)
+		message := kanbanSourceTruth(state, i18n.T("props.source_token_ledger"), i18n.T("props.detail_recent_empty"))
+		return []string{"  " + subtleStyle.Render(message)}
 	}
 
 	headerLine := fmt.Sprintf("  %-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
@@ -1404,7 +1421,13 @@ func (m PropsModel) renderDaemonCallRows() []string {
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
 	if len(m.detailDaemonRecent) == 0 {
-		return []string{"  " + subtleStyle.Render(i18n.T("props.detail_recent_daemons_empty"))}
+		states := []string{m.detailDaemonWindowState}
+		for _, read := range m.detailDaemonTokenReads {
+			states = append(states, fs.KanbanReadState(read))
+		}
+		state := combineKanbanSourceStates(states...)
+		message := kanbanSourceTruth(state, i18n.T("props.source_daemon_ledgers"), i18n.T("props.detail_recent_daemons_empty"))
+		return []string{"  " + subtleStyle.Render(message)}
 	}
 
 	lines := []string{
@@ -1722,7 +1745,7 @@ func formatDuration(d time.Duration) string {
 // appendProviderRows renders a per-provider/backend token usage table for the
 // given byProvider map. Returns the lines slice with rows appended. Used for
 // both main-agent and daemon provider/backend breakdowns.
-func appendProviderRows(lines []string, byProvider map[string]fs.TokenTotals, labelStyle, valueStyle, subtleStyle lipgloss.Style) []string {
+func appendProviderRows(lines []string, byProvider map[string]fs.TokenTotals, emptyMessage string, labelStyle, valueStyle, subtleStyle lipgloss.Style) []string {
 	// Compute total spend across providers for the share bar.
 	var grandSpend int64
 	for _, t := range byProvider {
@@ -1747,7 +1770,10 @@ func appendProviderRows(lines []string, byProvider map[string]fs.TokenTotals, la
 	})
 
 	if len(rows) == 0 {
-		return append(lines, "  "+subtleStyle.Render(i18n.T("props.detail_no_tokens")))
+		if emptyMessage == "" {
+			emptyMessage = i18n.T("props.detail_no_tokens")
+		}
+		return append(lines, "  "+subtleStyle.Render(emptyMessage))
 	}
 	for _, r := range rows {
 		pct := 0.0
@@ -1796,6 +1822,34 @@ func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenSt
 		valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
 	lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
 		valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
+	lines = append(lines, "    "+labelStyle.Render("tool_calls/api_call:       ")+
+		valueStyle.Render(fmt.Sprintf("%.2f", float64(toolCalls)/float64(stats.APICalls))))
+	if stats.HasCodexTransferMode {
+		lines = append(lines, "    "+labelStyle.Render("transfer full / incremental: ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexFull, stats.CodexIncremental)))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
+// appendCurrentSessionDiagnostics omits rows already shown in Current session
+// above (api_calls, cache miss/rate, input, and tokens/api_call) while retaining
+// the old lower layer's additional session evidence.
+func appendCurrentSessionDiagnostics(lines []string, stats fs.SessionTokenStats, toolCalls int64, sectionStyle, labelStyle, valueStyle lipgloss.Style) []string {
+	if stats.APICalls <= 0 {
+		return lines
+	}
+	tokens := stats.Input + stats.Output + stats.Thinking
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_current_session_recent")))
+	lines = append(lines, "")
+	lines = append(lines, "    "+labelStyle.Render("tool_calls:                ")+
+		valueStyle.Render(fmt.Sprintf("%d", toolCalls)))
+	lines = append(lines, "    "+labelStyle.Render("tokens:                    ")+
+		valueStyle.Render(formatComma(tokens)))
+	lines = append(lines, "    "+labelStyle.Render("output / thinking:         ")+
+		valueStyle.Render(fmt.Sprintf("%s / %s", formatComma(stats.Output), formatComma(stats.Thinking))))
+	lines = append(lines, "    "+labelStyle.Render("cached:                    ")+
+		valueStyle.Render(formatComma(stats.Cached)))
 	lines = append(lines, "    "+labelStyle.Render("tool_calls/api_call:       ")+
 		valueStyle.Render(fmt.Sprintf("%.2f", float64(toolCalls)/float64(stats.APICalls))))
 	if stats.HasCodexTransferMode {
