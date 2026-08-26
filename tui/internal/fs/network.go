@@ -7,7 +7,31 @@ import (
 
 // NetworkOptions selects optional work while building a network snapshot.
 type NetworkOptions struct {
-	SkipMailEdges bool
+	SkipMailEdges       bool
+	AgentEntryLimit     int
+	TopologyRecordLimit int
+	ContactRecordLimit  int
+	DaemonDispatchLimit int
+	FixedFileByteLimit  int64
+	JSONLByteLimit      int64
+	ReadStats           *[]BoundedReadStats
+}
+
+// KanbanNetworkOptions is the complete bounded/manual-refresh profile. Keeping
+// it here makes the SkipMailEdges and 1000-record guarantees reviewable at one
+// call site while preserving zero-value, whole-source behavior for Portal and
+// other existing callers.
+func KanbanNetworkOptions(stats *[]BoundedReadStats) NetworkOptions {
+	return NetworkOptions{
+		SkipMailEdges:       true,
+		AgentEntryLimit:     KanbanReadLimit,
+		TopologyRecordLimit: KanbanReadLimit,
+		ContactRecordLimit:  KanbanReadLimit,
+		DaemonDispatchLimit: KanbanReadLimit,
+		FixedFileByteLimit:  KanbanFixedFileByteLimit,
+		JSONLByteLimit:      KanbanJSONLByteLimit,
+		ReadStats:           stats,
+	}
 }
 
 func BuildNetwork(baseDir string) (Network, error) {
@@ -15,12 +39,23 @@ func BuildNetwork(baseDir string) (Network, error) {
 }
 
 func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, error) {
-	nodes, err := DiscoverAgents(baseDir)
+	var nodes []AgentNode
+	agentDirectoryComplete := false
+	var err error
+	if opts.AgentEntryLimit > 0 {
+		nodes, agentDirectoryComplete, err = discoverKanbanAgents(baseDir, opts.AgentEntryLimit, opts.FixedFileByteLimit, opts.ReadStats)
+	} else {
+		nodes, err = DiscoverAgents(baseDir)
+	}
 	if err != nil {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
 	}
 
-	normalizeAgentLiveness(nodes)
+	if opts.FixedFileByteLimit > 0 {
+		normalizeKanbanAgentLiveness(nodes, opts.FixedFileByteLimit, opts.ReadStats)
+	} else {
+		normalizeAgentLiveness(nodes)
+	}
 
 	nodeIndex := make(map[string]bool)
 	for _, n := range nodes {
@@ -29,9 +64,18 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 
 	var avatarEdges []AvatarEdge
 	for _, n := range nodes {
-		edges, childDirs := ReadLedger(n.WorkingDir)
+		var edges []AvatarEdge
+		var childDirs []string
+		if opts.TopologyRecordLimit > 0 {
+			edges, childDirs = readKanbanLedger(n.WorkingDir, baseDir, opts.TopologyRecordLimit, opts.JSONLByteLimit, opts.ReadStats)
+		} else {
+			edges, childDirs = ReadLedger(n.WorkingDir)
+		}
 		avatarEdges = append(avatarEdges, edges...)
 		for _, cd := range childDirs {
+			if opts.AgentEntryLimit > 0 && len(nodes) >= opts.AgentEntryLimit {
+				break
+			}
 			if !nodeIndex[cd] {
 				relCD := RelativizeAddress(cd, baseDir)
 				nodes = append(nodes, AgentNode{
@@ -46,7 +90,11 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 
 	var contactEdges []ContactEdge
 	for _, n := range nodes {
-		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
+		if opts.ContactRecordLimit > 0 {
+			contactEdges = append(contactEdges, readKanbanContacts(n.WorkingDir, opts.ContactRecordLimit, opts.FixedFileByteLimit, opts.ReadStats)...)
+		} else {
+			contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
+		}
 	}
 
 	// Count from inbox only — sent would double-count. Live snapshots can
@@ -56,7 +104,7 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 		mailEdges = buildMailEdges(nodes, baseDir)
 	}
 	stats := computeStats(nodes, mailEdges)
-	activity := computeNetworkActivity(nodes)
+	activity := computeNetworkActivityWithOptions(nodes, opts)
 
 	// Relativize all edge addresses so they match AgentNode.Address format
 	for i := range avatarEdges {
@@ -69,12 +117,13 @@ func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, erro
 	}
 
 	return Network{
-		Nodes:        nodes,
-		AvatarEdges:  avatarEdges,
-		ContactEdges: contactEdges,
-		MailEdges:    mailEdges,
-		Stats:        stats,
-		Activity:     activity,
+		Nodes:                   nodes,
+		AvatarEdges:             avatarEdges,
+		ContactEdges:            contactEdges,
+		MailEdges:               mailEdges,
+		Stats:                   stats,
+		Activity:                activity,
+		AgentDirectoryTruncated: opts.AgentEntryLimit > 0 && !agentDirectoryComplete,
 	}, nil
 }
 

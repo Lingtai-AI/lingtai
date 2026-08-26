@@ -9,13 +9,8 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
 
-// Auto-refresh contract:
-//   - Enabled by default; only an explicit opt-out persists a key.
-//   - The kanban (props) summary opts into the 1s tick via AutoReloadCmd, but
-//     skips while the picker or expensive detail pane is open.
-//   - The app-level tick drives a reload when enabled and re-arms; when
-//     disabled it drops without re-arming. Ctrl+R is untouched (covered by
-//     ctrl_r_refresh_test.go).
+// Auto-refresh remains a global setting, but /kanban never opts into its tick.
+// Kanban reloads only on entry, agent selection, or explicit Ctrl+R.
 
 func TestAutoRefreshEnabledByDefault(t *testing.T) {
 	dir := t.TempDir()
@@ -55,30 +50,7 @@ func TestAutoRefreshPersistenceRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPropsAutoReloadCmd(t *testing.T) {
-	m := NewPropsModel(t.TempDir(), t.TempDir(), t.TempDir())
-
-	// Normal state: a reload command is returned.
-	if m.AutoReloadCmd() == nil {
-		t.Fatal("props AutoReloadCmd should return a reload command in the normal state")
-	}
-
-	// Picker open: skip the tick so we don't reload mid-selection.
-	m.pickerOpen = true
-	if m.AutoReloadCmd() != nil {
-		t.Fatal("props AutoReloadCmd should be nil while the agent picker is open")
-	}
-	m.pickerOpen = false
-
-	// Detail pane open: never attach its O(number of daemon runs) snapshot to
-	// the 1s app tick. Opening the pane and explicit Ctrl+R refresh it.
-	m.detailOpen = true
-	if m.AutoReloadCmd() != nil {
-		t.Fatal("props AutoReloadCmd should skip while the Ctrl+D detail layer is open")
-	}
-}
-
-func TestAppAutoRefreshTickReloadsAndRearms(t *testing.T) {
+func TestAppAutoRefreshTickRearmsWithoutKanbanReload(t *testing.T) {
 	a := App{
 		currentView: appViewProps,
 		props:       NewPropsModel(t.TempDir(), t.TempDir(), t.TempDir()),
@@ -86,41 +58,41 @@ func TestAppAutoRefreshTickReloadsAndRearms(t *testing.T) {
 	}
 	updated, cmd := a.Update(autoRefreshTickMsg{})
 	if cmd == nil {
-		t.Fatal("enabled auto-refresh tick on props should return a (reload+rearm) batch")
+		t.Fatal("enabled global auto-refresh tick should re-arm")
 	}
 	if ua, ok := updated.(App); ok && !ua.autoRefreshArmed {
 		t.Fatal("auto-refresh tick should keep the ticker armed while enabled")
 	}
 }
 
-func TestAppAutoRefreshTickLeavesKanbanDetailSnapshotAlone(t *testing.T) {
+func TestAppAutoRefreshTickLeavesKanbanSnapshotAlone(t *testing.T) {
 	a := App{
 		currentView: appViewProps,
 		props:       NewPropsModel(t.TempDir(), t.TempDir(), t.TempDir()),
 		tuiConfig:   config.DefaultTUIConfig(),
 	}
-	a.props.detailOpen = true
+	a.props.detailContextStats.Entries = 17
 	updated, cmd := a.Update(autoRefreshTickMsg{})
 	if cmd == nil {
-		t.Fatal("enabled auto-refresh tick should still re-arm while detail is open")
+		t.Fatal("enabled global auto-refresh tick should re-arm")
 	}
 	ua, ok := updated.(App)
 	if !ok {
 		t.Fatal("auto-refresh tick should return an App")
 	}
-	if !ua.props.detailOpen {
-		t.Fatal("auto-refresh should not close the kanban Ctrl+D detail layer")
+	if ua.props.detailContextStats.Entries != 17 {
+		t.Fatal("global tick must preserve the cached Kanban snapshot")
 	}
 	if _, reloadCmd := ua.autoRefreshActiveView(); reloadCmd != nil {
-		t.Fatal("auto-refresh must not reload the expensive open detail snapshot")
+		t.Fatal("kanban must not receive a one-second reload command")
 	}
 }
 
-func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
+func TestAutoRefreshActiveViewNeverReloadsKanban(t *testing.T) {
 	dir := t.TempDir()
 	kanban := App{currentView: appViewProps, props: NewPropsModel(dir, dir, dir), tuiConfig: config.DefaultTUIConfig()}
-	if _, cmd := kanban.autoRefreshActiveView(); cmd == nil {
-		t.Fatal("kanban auto-refresh should return the same reload command as Ctrl+R")
+	if _, cmd := kanban.autoRefreshActiveView(); cmd != nil {
+		t.Fatal("kanban is manual-refresh only")
 	}
 
 	// Interactive / markdown / picker-heavy views must not auto-refresh every

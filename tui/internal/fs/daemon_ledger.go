@@ -71,6 +71,12 @@ type DaemonDetailSnapshot struct {
 	ScannedRuns  int
 	TotalRuns    int
 	TerminalRuns int // total minus scanned running and queued runs
+	// Kanban-only recent-dispatch evidence. Legacy directory-based callers
+	// leave these zero-valued.
+	DispatchRead BoundedReadStats
+	TokenReads   []BoundedReadStats
+	RunIDs       []string
+	WindowState  string // available, empty, recent, partial, malformed, or unavailable
 }
 
 // ReadDaemonDetailSnapshot reads only the newest recentRunN run directories

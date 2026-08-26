@@ -34,7 +34,7 @@ func TestPropsCtrlRTriggersReload(t *testing.T) {
 	}
 }
 
-func TestPropsDetailCtrlRRefreshesSnapshot(t *testing.T) {
+func TestPropsCtrlRRefreshesHeavySnapshotAsynchronously(t *testing.T) {
 	agentDir := t.TempDir()
 	logsDir := filepath.Join(agentDir, "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -46,13 +46,20 @@ func TestPropsDetailCtrlRRefreshesSnapshot(t *testing.T) {
 	}
 
 	m := NewPropsModel(t.TempDir(), agentDir, t.TempDir())
-	m.detailOpen = true
 	updated, cmd := m.Update(ctrlR())
 	if cmd == nil {
-		t.Fatal("PropsModel detail ctrl+r returned nil outer reload command")
+		t.Fatal("PropsModel ctrl+r returned nil reload batch")
 	}
-	if len(updated.detailRecent) != 1 || updated.detailRecent[0].Input != 7 {
-		t.Fatalf("detail ctrl+r did not refresh the snapshot: %+v", updated.detailRecent)
+	if len(updated.detailRecent) != 0 {
+		t.Fatalf("ctrl+r performed heavy work synchronously inside Update: %+v", updated.detailRecent)
+	}
+	result := cmd()
+	snapshot, ok := result.(propsLoadMsg)
+	if !ok {
+		t.Fatalf("ctrl+r command returned %T, want one propsLoadMsg", result)
+	}
+	if len(snapshot.detailRecent) != 1 || snapshot.detailRecent[0].Input != 7 {
+		t.Fatalf("ctrl+r command did not produce the bounded ledger snapshot: %+v", snapshot.detailRecent)
 	}
 }
 
