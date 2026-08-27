@@ -1,10 +1,14 @@
 package headless
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
@@ -17,6 +21,10 @@ import (
 const defaultReadyTimeout = 10 * time.Second
 
 var (
+	createProject           = process.CreateProject
+	registerProject         = config.Register
+	saveRecipeState         = preset.SaveRecipeState
+	runtimeReady            = config.RuntimeReady
 	launchAgent             = process.LaunchAgent
 	findAgentProcesses      = process.FindAgentProcesses
 	terminateAgentProcesses = process.TerminateAgentProcesses
@@ -24,6 +32,11 @@ var (
 	readySleep              = time.Sleep
 	readyPollInterval       = 200 * time.Millisecond
 	processExitGrace        = 2 * time.Second
+	// Package-local defaults keep focused tests coordinated with the actual
+	// acquisition/release boundary without changing the headless public surface.
+	acquireSpawnSerializationLock       = fs.AcquireExclusiveFileLock
+	releaseSpawnSerializationLock       = func(lock *fs.ExclusiveFileLock) error { return lock.Release() }
+	beforeSpawnSerializationLockAcquire = func() {}
 )
 
 // SpawnOpts holds the parsed flags for the spawn subcommand.
@@ -81,6 +94,24 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		return 1
 	}
 
+	// Serialize cooperating headless creators for this root before the .lingtai
+	// precheck. The persistent sibling sidecar keeps the kernel target empty.
+	beforeSpawnSerializationLockAcquire()
+	spawnLock, err := acquireSpawnSerializationLock(spawnSerializationLockPath(opts.Dir))
+	if err != nil {
+		WriteError(stderr, "cannot acquire project serialization lock: "+err.Error(), "init_failed")
+		return 1
+	}
+	releaseSpawnLock := func() error {
+		if spawnLock == nil {
+			return nil
+		}
+		lock := spawnLock
+		spawnLock = nil
+		return releaseSpawnSerializationLock(lock)
+	}
+	defer func() { _ = releaseSpawnLock() }()
+
 	// Validate: target must not already have .lingtai/
 	lingtaiDir := filepath.Join(opts.Dir, ".lingtai")
 	if _, err := os.Stat(lingtaiDir); err == nil {
@@ -112,7 +143,7 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	// creates/repairs/upgrades) — a not-ready runtime surfaces as an
 	// actionable error instead of a silent install.
 	if !opts.SkipLaunch {
-		if err := config.RuntimeReady(globalDir); err != nil {
+		if err := runtimeReady(globalDir); err != nil {
 			WriteError(stderr, err.Error(), "bootstrap_failed")
 			return 1
 		}
@@ -139,25 +170,77 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	if lang == "" {
 		lang = "en"
 	}
-
-	// Initialize project (.lingtai/, human dir, meta.json)
-	if err := process.InitProject(lingtaiDir); err != nil {
-		WriteError(stderr, "project init failed: "+err.Error(), "init_failed")
+	presetPath, err := selectedPresetFile(p)
+	if err != nil {
+		WriteError(stderr, "cannot resolve selected preset: "+err.Error(), "init_failed")
 		return 1
 	}
 
-	// Populate bundled library skills
+	// The kernel's create contract takes covenant contents only through a file.
+	// Materialize the selected TUI covenant in a new, TUI-owned input and remove
+	// only that input after the child has reached a terminal result.
+	covenantFile, err := materializeSpawnCovenant(globalDir, lang)
+	if err != nil {
+		WriteError(stderr, "cannot prepare covenant input: "+err.Error(), "init_failed")
+		return 1
+	}
+	createResult, createErr := createProject(context.Background(), config.LingtaiCmd(globalDir), process.ProjectCreateRequest{
+		Dir:          opts.Dir,
+		AgentName:    agentName,
+		Preset:       presetPath,
+		CovenantFile: covenantFile,
+	})
+	cleanupErr := os.Remove(covenantFile)
+	if createErr != nil {
+		writeProjectCreateFailure(stderr, createErr)
+		return 1
+	}
+
+	// Keep the kernel's canonical preset reference as trusted create state even
+	// though the public SpawnOutput preserves its existing selected-preset field.
+	// The adapter already validates this protocol; this guard keeps an injected
+	// or future adapter from registering or launching a partial exit-0 result.
+	canonicalPresetRef := createResult.PresetRef
+	if canonicalPresetRef == "" || !filepath.IsAbs(canonicalPresetRef) {
+		writeProjectCreateFailure(stderr, &process.ProjectCreateError{
+			Kind:     process.ProjectCreateTransportFailure,
+			Reason:   "malformed_result",
+			ExitCode: createResult.ExitCode,
+			Stdout:   createResult.Stdout,
+			Stderr:   createResult.Stderr,
+			Cause:    fmt.Errorf("kernel success omitted a canonical preset reference"),
+		})
+		return 1
+	}
+
+	agentDir := filepath.Join(lingtaiDir, agentName)
+	if err := os.MkdirAll(filepath.Join(lingtaiDir, ".library_shared"), 0o755); err != nil {
+		// The kernel owns the seed tree. Restore only the TUI-required shared
+		// library directory and never compensate by deleting kernel-created data.
+		writeCreatedProjectRecovery(stderr, opts.Dir, agentName, agentDir, "shared_library_setup", err)
+		return 1
+	}
+	if cleanupErr != nil {
+		// The kernel result is known, but do not proceed to registration or
+		// launch when TUI-owned sensitive input cleanup was not completed.
+		writeCreatedProjectRecovery(stderr, opts.Dir, agentName, agentDir, "temporary_covenant_cleanup", cleanupErr)
+		return 1
+	}
+	if err := preserveSpawnLanguage(agentDir, lang); err != nil {
+		// Kernel create has no language argument. Preserve the existing
+		// headless language behavior only after its complete success protocol,
+		// and never compensate by deleting the project on a later TUI failure.
+		writeCreatedProjectRecovery(stderr, opts.Dir, agentName, agentDir, "language_compatibility", err)
+		return 1
+	}
+
+	// Populate bundled library skills after kernel seeding succeeds.
 	preset.PopulateBundledLibrary(globalDir)
 
-	// Generate init.json with default opts
-	agentOpts := preset.DefaultAgentOpts()
-	agentOpts.Language = lang
-	if err := preset.GenerateInitJSONWithOpts(p, agentName, agentName, lingtaiDir, globalDir, agentOpts); err != nil {
-		WriteError(stderr, "init.json generation failed: "+err.Error(), "init_failed")
-		return 1
-	}
-
-	// Apply the plain recipe (no greet, no behavioral constraints)
+	// Apply the existing plain recipe (no greet, no behavioral constraints).
+	// This legacy bundle/apply work is deliberately best-effort: recipe state
+	// records the selected recipe, not proof that every optional recipe artifact
+	// was copied or applied.
 	recipeDir := preset.RecipeDir(globalDir, "plain")
 	if recipeDir != "" {
 		if err := preset.CopyBundle(recipeDir, opts.Dir); err != nil {
@@ -168,13 +251,31 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		preset.ApplyRecipe(opts.Dir, lang, subst)
 	}
 
-	// Save recipe state
-	preset.SaveRecipeState(lingtaiDir, preset.RecipeState{Recipe: "plain"})
+	// Persist the selected TUI-only plain recipe state before registration. Unlike
+	// the best-effort bundle/apply side effects above, this is required TUI
+	// metadata after trusted kernel creation.
+	if err := saveRecipeState(lingtaiDir, preset.RecipeState{Recipe: "plain"}); err != nil {
+		writeCreatedProjectRecovery(stderr, opts.Dir, agentName, agentDir, "recipe_state_persistence", err)
+		return 1
+	}
 
-	agentDir := filepath.Join(lingtaiDir, agentName)
+	// Register only after a fully trusted kernel create result and required
+	// TUI-side metadata writes. A registration failure is a known-created recovery
+	// state, not a successful spawn: the kernel has no rollback command.
+	if err := registerProject(globalDir, opts.Dir); err != nil {
+		writeCreatedProjectRecovery(stderr, opts.Dir, agentName, agentDir, "registration", err)
+		return 1
+	}
 
-	// Register project in global registry (non-fatal)
-	config.Register(globalDir, opts.Dir)
+	// A competing creator now sees a complete created/registered root at its
+	// guarded precheck, so do not hold it through launch or readiness waiting.
+	if err := releaseSpawnLock(); err != nil {
+		// Registration already succeeded, so the created_unregistered recovery
+		// protocol is not honest here. Retain the established init_failed shape
+		// without launching after an incomplete release boundary.
+		WriteError(stderr, "project was created and registered but serialization lock release did not complete cleanly; it was not launched: "+err.Error(), "init_failed")
+		return 1
+	}
 
 	// Launch the agent (async — start and return immediately)
 	pid := 0
@@ -236,6 +337,145 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		ReadyTimeoutSeconds:         readyTimeout.Seconds(),
 	})
 	return 0
+}
+
+// spawnSerializationLockPath returns the stable sibling lock path for root. A
+// resolved root makes an existing symlink alias share the same lock identity;
+// an unresolved root remains creatable through its cleaned absolute input.
+func spawnSerializationLockPath(root string) string {
+	identity := filepath.Clean(root)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		if absolute, err := filepath.Abs(filepath.Clean(resolved)); err == nil {
+			identity = absolute
+		}
+	}
+	return identity + ".lingtai-spawn.lock"
+}
+
+func selectedPresetFile(p preset.Preset) (string, error) {
+	ref := preset.RefFor(p)
+	if ref == "" {
+		return "", fmt.Errorf("loaded preset has no reference")
+	}
+	if strings.HasPrefix(ref, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		ref = filepath.Join(home, ref[2:])
+	}
+	return filepath.Abs(ref)
+}
+
+func materializeSpawnCovenant(globalDir, lang string) (string, error) {
+	data, err := os.ReadFile(preset.CovenantPath(globalDir, lang))
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("selected covenant is empty")
+	}
+	file, err := os.CreateTemp("", "lingtai-spawn-covenant-*")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	fail := func(cause error) (string, error) {
+		_ = file.Close()
+		_ = os.Remove(path) // only the file this function created
+		return "", cause
+	}
+	if _, err := file.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path) // only the file this function created
+		return "", err
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		_ = os.Remove(path) // only the file this function created
+		return "", err
+	}
+	return absolute, nil
+}
+
+// preserveSpawnLanguage is the narrow compatibility mapping for the existing
+// headless language option. The kernel project-create grammar intentionally has
+// no language flag, so this runs only after its trusted terminal success.
+func preserveSpawnLanguage(agentDir, lang string) error {
+	initPath := filepath.Join(agentDir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	var init map[string]interface{}
+	if err := decoder.Decode(&init); err != nil {
+		return err
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("init.json contains more than one JSON document")
+		}
+		return err
+	}
+	manifest, ok := init["manifest"].(map[string]interface{})
+	if !ok || manifest == nil {
+		return fmt.Errorf("init.json manifest is missing")
+	}
+	manifest["language"] = lang
+	updated, err := json.MarshalIndent(init, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(initPath, updated, 0o644)
+}
+
+// writeCreatedProjectRecovery reports a known kernel-created project that could
+// not complete a later TUI compatibility or registration step. It deliberately
+// leaves the seed in place for repair and prevents any later launch or retry.
+func writeCreatedProjectRecovery(stderr io.Writer, projectDir, agentName, agentDir, step string, cause error) {
+	WriteErrorDetail(stderr, fmt.Sprintf("project was created but %s failed; it was not registered or launched: %v", strings.ReplaceAll(step, "_", " "), cause), "init_failed", map[string]interface{}{
+		"recovery_state": "created_unregistered",
+		"recovery_step":  step,
+		"project_dir":    projectDir,
+		"agent_name":     agentName,
+		"agent_dir":      agentDir,
+		"cause":          cause.Error(),
+	})
+}
+
+func writeProjectCreateFailure(stderr io.Writer, err error) {
+	var failure *process.ProjectCreateError
+	if errors.As(err, &failure) && failure.Kind == process.ProjectCreateHandlerFailure {
+		details := map[string]interface{}{
+			"kernel_code": failure.Code,
+		}
+		if failure.Stderr != "" {
+			details["kernel_stderr"] = failure.Stderr
+		}
+		WriteErrorDetail(stderr, failure.Message, "init_failed", details)
+		return
+	}
+
+	details := map[string]interface{}{}
+	message := "project create outcome is unknown; it was not registered or launched"
+	if errors.As(err, &failure) {
+		details["reason"] = failure.Reason
+		details["exit_code"] = failure.ExitCode
+		if failure.Stdout != "" {
+			details["kernel_stdout"] = failure.Stdout
+		}
+		if failure.Stderr != "" {
+			details["kernel_stderr"] = failure.Stderr
+		}
+	} else {
+		details["cause"] = err.Error()
+	}
+	WriteErrorDetail(stderr, message, "init_failed", details)
 }
 
 type readinessResult struct {

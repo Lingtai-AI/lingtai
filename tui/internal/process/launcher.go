@@ -1,6 +1,8 @@
 package process
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,66 @@ import (
 // to the user rather than re-attempting the launch.
 var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in this workdir")
 
+// ProjectCreateRequest is the literal input to `lingtai-agent project create`.
+// Callers must keep CovenantFile available until CreateProject returns because
+// the kernel reads its contents while the child is running.
+type ProjectCreateRequest struct {
+	Dir          string
+	AgentName    string
+	Preset       string
+	CovenantFile string
+}
+
+// ProjectCreateResult is a complete, accepted kernel create response. Child
+// output remains captured here rather than leaking into a headless caller's
+// stdout protocol.
+type ProjectCreateResult struct {
+	Status    string
+	AgentName string
+	PresetRef string
+	Stdout    string
+	Stderr    string
+	ExitCode  int
+}
+
+// ProjectCreateFailureKind distinguishes a kernel-declared application error
+// from an execution outcome for which the TUI must not infer project state.
+type ProjectCreateFailureKind string
+
+const (
+	ProjectCreateHandlerFailure   ProjectCreateFailureKind = "handler"
+	ProjectCreateTransportFailure ProjectCreateFailureKind = "transport"
+)
+
+// ProjectCreateError retains the child outcome for diagnostic rendering. A
+// Handler failure is trusted only for the kernel's documented exit-1 JSON
+// stderr protocol; all other failures are transport/unknown outcomes.
+type ProjectCreateError struct {
+	Kind     ProjectCreateFailureKind
+	Reason   string
+	Code     string
+	Message  string
+	ExitCode int
+	Stdout   string
+	Stderr   string
+	Cause    error
+}
+
+func (e *ProjectCreateError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("project create %s: %v", e.Reason, e.Cause)
+	}
+	return fmt.Sprintf("project create %s", e.Reason)
+}
+
+func (e *ProjectCreateError) Unwrap() error { return e.Cause }
+
+// InitProject creates the legacy TUI-owned project skeleton. It remains for
+// its independent callers; headless spawn seeds fresh projects through
+// CreateProject instead.
 func InitProject(lingtaiDir string) error {
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		return fmt.Errorf("create .lingtai: %w", err)
@@ -85,6 +147,142 @@ func resolvePython(agentDir, fallbackCmd string) string {
 	return fallbackCmd
 }
 
+// kernelCLI resolves the managed kernel executable beside its interpreter.
+func kernelCLI(python string) string {
+	return kernelCLIForOS(python, runtime.GOOS)
+}
+
+// kernelCLIForOS keeps the platform suffix decision independently testable
+// without executing a platform-specific child process.
+func kernelCLIForOS(python, goos string) string {
+	name := "lingtai-agent"
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(filepath.Dir(python), name)
+}
+
+// CreateProject runs the kernel-owned fresh-project seed command with literal
+// argv. It captures all child output and accepts success only when exit 0 emits
+// exactly one expected JSON object. ctx cancellation or deadline expiry, signal
+// termination, parser failures, and unexpected exit statuses are deliberately
+// returned as transport outcomes rather than trusted create results.
+func CreateProject(ctx context.Context, lingtaiCmd string, request ProjectCreateRequest) (ProjectCreateResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmd := exec.CommandContext(ctx, kernelCLI(lingtaiCmd),
+		"project", "create",
+		"--dir", request.Dir,
+		"--name", request.AgentName,
+		"--preset", request.Preset,
+		"--covenant-file", request.CovenantFile,
+		"--json",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	stdoutText, stderrText := stdout.String(), stderr.String()
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		reason := "cancelled"
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			reason = "timeout"
+		}
+		return ProjectCreateResult{}, &ProjectCreateError{
+			Kind: ProjectCreateTransportFailure, Reason: reason, ExitCode: -1,
+			Stdout: stdoutText, Stderr: stderrText, Cause: ctxErr,
+		}
+	}
+	if runErr == nil {
+		return parseProjectCreateSuccess(request.AgentName, stdoutText, stderrText)
+	}
+
+	exitErr, ok := runErr.(*exec.ExitError)
+	if !ok {
+		return ProjectCreateResult{}, &ProjectCreateError{
+			Kind: ProjectCreateTransportFailure, Reason: "start_failed", ExitCode: -1,
+			Stdout: stdoutText, Stderr: stderrText, Cause: runErr,
+		}
+	}
+	exitCode := exitErr.ProcessState.ExitCode()
+	if exitCode < 0 {
+		return ProjectCreateResult{}, &ProjectCreateError{
+			Kind: ProjectCreateTransportFailure, Reason: "signal", ExitCode: exitCode,
+			Stdout: stdoutText, Stderr: stderrText, Cause: runErr,
+		}
+	}
+	if exitCode == 1 {
+		return parseProjectCreateHandlerError(exitCode, stdoutText, stderrText)
+	}
+	reason := "unexpected_exit"
+	if exitCode == 2 {
+		reason = "argument_error"
+	}
+	return ProjectCreateResult{}, &ProjectCreateError{
+		Kind: ProjectCreateTransportFailure, Reason: reason, ExitCode: exitCode,
+		Stdout: stdoutText, Stderr: stderrText, Cause: runErr,
+	}
+}
+
+func parseProjectCreateSuccess(expectedAgentName, stdout, stderr string) (ProjectCreateResult, error) {
+	var response struct {
+		Status    string `json:"status"`
+		AgentName string `json:"agent_name"`
+		PresetRef string `json:"preset_ref"`
+	}
+	if err := decodeProjectCreateJSONObject([]byte(stdout), &response); err != nil {
+		return ProjectCreateResult{}, malformedProjectCreateError(0, stdout, stderr, err)
+	}
+	if response.Status != "created" || response.AgentName != expectedAgentName || response.PresetRef == "" || !filepath.IsAbs(response.PresetRef) {
+		return ProjectCreateResult{}, malformedProjectCreateError(0, stdout, stderr,
+			fmt.Errorf("unexpected success status %q, agent name %q, or canonical preset reference %q", response.Status, response.AgentName, response.PresetRef))
+	}
+	return ProjectCreateResult{
+		Status: response.Status, AgentName: response.AgentName, PresetRef: response.PresetRef,
+		Stdout: stdout, Stderr: stderr, ExitCode: 0,
+	}, nil
+}
+
+func parseProjectCreateHandlerError(exitCode int, stdout, stderr string) (ProjectCreateResult, error) {
+	var response struct {
+		Status  string `json:"status"`
+		Code    string `json:"code"`
+		Message string `json:"error"`
+	}
+	if err := decodeProjectCreateJSONObject([]byte(stderr), &response); err != nil {
+		return ProjectCreateResult{}, malformedProjectCreateError(exitCode, stdout, stderr, err)
+	}
+	if response.Status != "error" || response.Code == "" || response.Message == "" {
+		return ProjectCreateResult{}, malformedProjectCreateError(exitCode, stdout, stderr,
+			fmt.Errorf("unexpected handler error response"))
+	}
+	return ProjectCreateResult{}, &ProjectCreateError{
+		Kind: ProjectCreateHandlerFailure, Reason: "handler_error", Code: response.Code,
+		Message: response.Message, ExitCode: exitCode, Stdout: stdout, Stderr: stderr,
+	}
+}
+
+func malformedProjectCreateError(exitCode int, stdout, stderr string, cause error) error {
+	return &ProjectCreateError{
+		Kind: ProjectCreateTransportFailure, Reason: "malformed_result", ExitCode: exitCode,
+		Stdout: stdout, Stderr: stderr, Cause: cause,
+	}
+}
+
+func decodeProjectCreateJSONObject(data []byte, target interface{}) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("expected one JSON object")
+	}
+	if err := json.Unmarshal(trimmed, target); err != nil {
+		return fmt.Errorf("parse JSON: %w", err)
+	}
+	return nil
+}
+
 // LaunchAgent starts an agent process. lingtaiCmd is the global fallback Python;
 // the agent's init.json venv_path is tried first.
 //
@@ -94,14 +292,6 @@ func resolvePython(agentDir, fallbackCmd string) string {
 // in that case. The kernel's flock guarantees correctness of on-disk state,
 // but a duplicate Python process still shows up in `ps`/`lingtai-tui list`
 // and can mislead users; this guard keeps the process accounting honest.
-func kernelCLI(python string) string {
-	name := "lingtai-agent"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(filepath.Dir(python), name)
-}
-
 func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	if IsAgentRunning(agentDir) {
 		return nil, ErrAgentAlreadyRunning

@@ -36,7 +36,7 @@ maintenance: |
 
 ## Connections
 
-- **Called by `tui/main.go`** (`tui/main.go:1001`, `tui/main.go:1457`) on the interactive startup and doctor paths, and by `tui/internal/headless/spawn.go:95` so a headless spawn advances machine state identically.
+- **Called by `tui/main.go`** (`tui/main.go:1001`, `tui/main.go:1457`) on the interactive startup and doctor paths, and by `tui/internal/headless/spawn.go:112` so a headless spawn advances machine state identically.
 - **Runs before `preset.Bootstrap`** in the startup order — which is exactly why a destructive step here can eat user data (see Notes).
 - **Reads/writes `~/.lingtai-tui/meta.json` only.** Directory resolution comes from `tui/internal/config/`.
 - **Independent of `tui/internal/migrate/`.** Same conventions and shape, disjoint version space and target directory. Do not renumber across the two.
