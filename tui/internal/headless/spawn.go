@@ -32,6 +32,11 @@ var (
 	readySleep              = time.Sleep
 	readyPollInterval       = 200 * time.Millisecond
 	processExitGrace        = 2 * time.Second
+	// Package-local defaults keep focused tests coordinated with the actual
+	// acquisition/release boundary without changing the headless public surface.
+	acquireSpawnSerializationLock       = fs.AcquireExclusiveFileLock
+	releaseSpawnSerializationLock       = func(lock *fs.ExclusiveFileLock) error { return lock.Release() }
+	beforeSpawnSerializationLockAcquire = func() {}
 )
 
 // SpawnOpts holds the parsed flags for the spawn subcommand.
@@ -88,6 +93,24 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		WriteError(stderr, fmt.Sprintf("invalid agent name %q: %s", agentName, err.Error()), "invalid_args")
 		return 1
 	}
+
+	// Serialize cooperating headless creators for this root before the .lingtai
+	// precheck. The persistent sibling sidecar keeps the kernel target empty.
+	beforeSpawnSerializationLockAcquire()
+	spawnLock, err := acquireSpawnSerializationLock(spawnSerializationLockPath(opts.Dir))
+	if err != nil {
+		WriteError(stderr, "cannot acquire project serialization lock: "+err.Error(), "init_failed")
+		return 1
+	}
+	releaseSpawnLock := func() error {
+		if spawnLock == nil {
+			return nil
+		}
+		lock := spawnLock
+		spawnLock = nil
+		return releaseSpawnSerializationLock(lock)
+	}
+	defer func() { _ = releaseSpawnLock() }()
 
 	// Validate: target must not already have .lingtai/
 	lingtaiDir := filepath.Join(opts.Dir, ".lingtai")
@@ -244,6 +267,16 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		return 1
 	}
 
+	// A competing creator now sees a complete created/registered root at its
+	// guarded precheck, so do not hold it through launch or readiness waiting.
+	if err := releaseSpawnLock(); err != nil {
+		// Registration already succeeded, so the created_unregistered recovery
+		// protocol is not honest here. Retain the established init_failed shape
+		// without launching after an incomplete release boundary.
+		WriteError(stderr, "project was created and registered but serialization lock release did not complete cleanly; it was not launched: "+err.Error(), "init_failed")
+		return 1
+	}
+
 	// Launch the agent (async — start and return immediately)
 	pid := 0
 	status := "created"
@@ -304,6 +337,19 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 		ReadyTimeoutSeconds:         readyTimeout.Seconds(),
 	})
 	return 0
+}
+
+// spawnSerializationLockPath returns the stable sibling lock path for root. A
+// resolved root makes an existing symlink alias share the same lock identity;
+// an unresolved root remains creatable through its cleaned absolute input.
+func spawnSerializationLockPath(root string) string {
+	identity := filepath.Clean(root)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		if absolute, err := filepath.Abs(filepath.Clean(resolved)); err == nil {
+			identity = absolute
+		}
+	}
+	return identity + ".lingtai-spawn.lock"
 }
 
 func selectedPresetFile(p preset.Preset) (string, error) {

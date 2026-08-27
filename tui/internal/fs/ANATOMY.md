@@ -21,6 +21,7 @@ related_files:
   - tui/internal/fs/heartbeat_test.go
   - tui/internal/fs/atomic_write.go
   - tui/internal/fs/atomic_write_permissions_unix_test.go
+  - tui/internal/fs/exclusive_lock.go
   - tui/internal/fs/file_ops_unix.go
   - tui/internal/fs/file_ops_windows.go
   - tui/internal/fs/mail.go
@@ -120,6 +121,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | **atomic_write.go / file_ops_*.go** | | |
 | `writeAtomicReplacement` / `createAtomicReplacementTemp` / `writeAtomicBytes` | `tui/internal/fs/atomic_write.go:15-106` | writes through a random exclusive same-directory temp, preserves an existing target's permission bits or applies the caller fallback through the process umask for a new target, flushes and closes before atomic replacement, cleans every unpublished temp, and best-effort flushes the parent directory |
 | `replaceFile` / `lockFileExclusive` / `unlockFile` | `tui/internal/fs/file_ops_unix.go:10-20`, `tui/internal/fs/file_ops_windows.go:11-31` | supplies platform replacement and advisory-lock operations: rename/flock on non-Windows and `MoveFileEx` with replacement/write-through plus `LockFileEx`/`UnlockFileEx` on Windows |
+| `AcquireExclusiveFileLock` / `ExclusiveFileLock.Release` | `tui/internal/fs/exclusive_lock.go` | reusable stable-file advisory-exclusive lock: canonical path mutex, ensured lock parent, blocking OS lock, then idempotent unlock/close/mutex release; the sidecar is never removed |
 | **mail.go** | | |
 | `newMailboxID()` | `tui/internal/fs/mail.go:33` | builds `YYYYMMDDTHHMMSS-xxxx` short id matching the kernel's `_new_mailbox_id` |
 | `prepareMailDirs` | `tui/internal/fs/mail.go:55` | allocates a short id and creates every mailbox leaf the send will write, retrying on collisions in any target folder |

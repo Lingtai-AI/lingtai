@@ -10,6 +10,7 @@ related_files:
   - tui/internal/headless/presets_test.go
   - tui/internal/headless/spawn.go
   - tui/internal/headless/spawn_test.go
+  - tui/internal/headless/spawn_serialization_test.go
   - tui/main.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
@@ -34,14 +35,14 @@ maintenance: |
 | `ExitError` | `tui/internal/headless/headless.go:37` | writes the error document to stderr and exits nonzero; used directly by `tui/main.go` argument parsing before a subcommand is entered |
 | `PresetEntry` / `PresetsOutput` | `tui/internal/headless/presets.go:10,19` | the `presets` output schema — name, source (template/saved), description, and the resolved ref an `init.json` can cite |
 | `RunPresets` | `tui/internal/headless/presets.go:25` | lists presets through `internal/preset`, honoring the mutually exclusive `--saved-only` / `--templates-only` filters |
-| `SpawnOpts` / `SpawnOutput` | `tui/internal/headless/spawn.go:37,47` | the existing `spawn` input options (target dir, preset, agent name, language) and output document (agent dir, name, preset, PID, readiness) |
-| `RunSpawn` | `tui/internal/headless/spawn.go:73` | the whole non-interactive create-and-launch path: global-dir resolution, `globalmigrate.Run`, a TUI-owned covenant temp input, complete trusted kernel create, shared-library/language compatibility writes, deliberately best-effort plain recipe bundle/apply work, required recipe-state persistence, registration, launch, then the existing bounded readiness wait (`defaultReadyTimeout`, `tui/internal/headless/spawn.go:21`) before emitting JSON |
+| `SpawnOpts` / `SpawnOutput` | `tui/internal/headless/spawn.go:42,53` | the existing `spawn` input options (target dir, preset, agent name, language) and output document (agent dir, name, preset, PID, readiness) |
+| `RunSpawn` | `tui/internal/headless/spawn.go:78` | the whole non-interactive create-and-launch path: after argument validation, a per-resolved-root stable sibling `<root>.lingtai-spawn.lock` blocks cooperating creators before the `.lingtai` precheck and remains held through global setup, trusted kernel create, required post-create policy, and registration; it releases before launch/readiness. The rest resolves global state, runs `globalmigrate.Run`, uses a TUI-owned covenant temp input, performs complete trusted kernel create, shared-library/language compatibility writes, deliberately best-effort plain recipe bundle/apply work, required recipe-state persistence, registration, launch, then the existing bounded readiness wait (`defaultReadyTimeout`, `tui/internal/headless/spawn.go:21`) before emitting JSON |
 
 ## Connections
 
 - **Called by `tui/main.go`** — `bootstrapMain`, `presetsMain`, and `spawnMain` are thin argv parsers over this package. The adjacent `doctorMain` and `selfUpdateMain` subcommands deliberately do NOT route through here: they repair the local install via `internal/config` rather than emitting headless JSON.
 - **Calls `tui/internal/preset/`** for preset enumeration, selected-preset resolution, the TUI-owned covenant input, bundled utilities, and the retained plain-recipe state.
-- **Calls `tui/internal/globalmigrate/`** (`tui/internal/headless/spawn.go:112`) so a headless spawn advances per-machine state exactly like an interactive start.
+- **Calls `tui/internal/globalmigrate/`** (`tui/internal/headless/spawn.go:136`) so a headless spawn advances per-machine state exactly like an interactive start.
 - **Calls `tui/internal/process/`** to seed through `CreateProject` and, only after its complete success protocol, to retain the existing guarded agent launch; it calls `tui/internal/fs/` to observe the new agent's manifest/heartbeat while waiting for readiness.
 
 ## Composition

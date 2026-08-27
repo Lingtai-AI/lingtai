@@ -49,12 +49,8 @@ func stubSuccessfulSpawnCreate(t *testing.T) {
 		}
 		lingtaiDir := filepath.Join(request.Dir, ".lingtai")
 		for _, dir := range []string{
-			filepath.Join(lingtaiDir, "human", "mailbox", "inbox"),
-			filepath.Join(lingtaiDir, "human", "mailbox", "outbox"),
-			filepath.Join(lingtaiDir, "human", "mailbox", "sent"),
-			filepath.Join(lingtaiDir, "human", "mailbox", "archive"),
-			filepath.Join(lingtaiDir, "human", "mailbox", "schedules"),
-			filepath.Join(lingtaiDir, request.AgentName, "mailbox", "inbox"),
+			filepath.Join(lingtaiDir, "human"),
+			filepath.Join(lingtaiDir, request.AgentName),
 		} {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return process.ProjectCreateResult{}, err
@@ -358,184 +354,181 @@ func TestRunSpawn_LanguageDefault(t *testing.T) {
 	}
 }
 
-func TestRunSpawn_LanguageFailureReportsCreatedRecoveryAndDoesNotLaunch(t *testing.T) {
-	withTempHome(t)
-	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
-	preset.RefreshTemplates()
-	if err := preset.Bootstrap(globalDir); err != nil {
-		t.Fatal(err)
+func TestRunSpawn_PostCreateFailureReportsCreatedRecoveryAndDoesNotLaunch(t *testing.T) {
+	cases := []struct {
+		name                string
+		recoveryStep        string
+		expectedCause       string
+		malformedInit       bool
+		failRecipeState     bool
+		failRegistration    bool
+		assertSharedLibrary bool
+	}{
+		{
+			name:                "language_compatibility",
+			recoveryStep:        "language_compatibility",
+			malformedInit:       true,
+			assertSharedLibrary: true,
+		},
+		{
+			name:                "recipe_state_persistence",
+			recoveryStep:        "recipe_state_persistence",
+			expectedCause:       "recipe state storage unavailable",
+			failRecipeState:     true,
+			assertSharedLibrary: true,
+		},
+		{
+			name:             "registration",
+			recoveryStep:     "registration",
+			expectedCause:    "registry unavailable",
+			failRegistration: true,
+		},
 	}
 
-	originalRuntimeReady := runtimeReady
-	runtimeReady = func(string) error { return nil }
-	t.Cleanup(func() { runtimeReady = originalRuntimeReady })
-	originalLaunch := launchAgent
-	launchAgent = func(string, string) (*exec.Cmd, error) {
-		t.Fatal("launchAgent was called after a language compatibility failure")
-		return nil, nil
-	}
-	t.Cleanup(func() { launchAgent = originalLaunch })
-	stubSpawnRegister(t, func(string, string) error {
-		t.Fatal("registerProject was called after a language compatibility failure")
-		return nil
-	})
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			withTempHome(t)
+			globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
+			preset.RefreshTemplates()
+			if err := preset.Bootstrap(globalDir); err != nil {
+				t.Fatal(err)
+			}
 
-	dir := filepath.Join(t.TempDir(), "project")
-	stubSpawnCreate(t, func(_ context.Context, _ string, request process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
-		agentDir := filepath.Join(request.Dir, ".lingtai", request.AgentName)
-		if err := os.MkdirAll(agentDir, 0o755); err != nil {
-			return process.ProjectCreateResult{}, err
-		}
-		if err := os.WriteFile(filepath.Join(agentDir, "init.json"), []byte("{"), 0o644); err != nil {
-			return process.ProjectCreateResult{}, err
-		}
-		return process.ProjectCreateResult{Status: "created", AgentName: request.AgentName, PresetRef: request.Preset, ExitCode: 0}, nil
-	})
+			originalRuntimeReady := runtimeReady
+			runtimeReady = func(string) error { return nil }
+			t.Cleanup(func() { runtimeReady = originalRuntimeReady })
+			originalLaunch := launchAgent
+			launchAgent = func(string, string) (*exec.Cmd, error) {
+				t.Fatal("launchAgent was called after a post-create failure")
+				return nil, nil
+			}
+			t.Cleanup(func() { launchAgent = originalLaunch })
 
-	var stdout, stderr bytes.Buffer
-	code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "minimax", AgentName: "alice", Language: "en"})
-	if code != 1 || stdout.Len() != 0 {
-		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
-	}
-	var response map[string]interface{}
-	if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
-		t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
-	}
-	agentDir := filepath.Join(dir, ".lingtai", "alice")
-	if response["code"] != "init_failed" || response["recovery_state"] != "created_unregistered" || response["recovery_step"] != "language_compatibility" || response["project_dir"] != dir || response["agent_name"] != "alice" || response["agent_dir"] != agentDir {
-		t.Fatalf("language recovery response = %#v", response)
-	}
-	if _, err := os.Stat(filepath.Join(agentDir, "init.json")); err != nil {
-		t.Fatalf("known-created seed was removed after language failure: %v", err)
-	}
-	if info, err := os.Stat(filepath.Join(dir, ".lingtai", ".library_shared")); err != nil || !info.IsDir() {
-		t.Fatalf("shared library was not preserved before language recovery: info=%v err=%v", info, err)
+			if test.malformedInit {
+				stubSpawnCreate(t, func(_ context.Context, _ string, request process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
+					agentDir := filepath.Join(request.Dir, ".lingtai", request.AgentName)
+					if err := os.MkdirAll(agentDir, 0o755); err != nil {
+						return process.ProjectCreateResult{}, err
+					}
+					if err := os.WriteFile(filepath.Join(agentDir, "init.json"), []byte("{"), 0o644); err != nil {
+						return process.ProjectCreateResult{}, err
+					}
+					return process.ProjectCreateResult{Status: "created", AgentName: request.AgentName, PresetRef: request.Preset, ExitCode: 0}, nil
+				})
+			} else {
+				stubSuccessfulSpawnCreate(t)
+			}
+			if test.failRecipeState {
+				stubSpawnSaveRecipeState(t, func(string, preset.RecipeState) error {
+					return errors.New(test.expectedCause)
+				})
+			}
+			if test.failRegistration {
+				stubSpawnRegister(t, func(string, string) error { return errors.New(test.expectedCause) })
+			} else {
+				stubSpawnRegister(t, func(string, string) error {
+					t.Fatal("registerProject was called after a pre-registration post-create failure")
+					return nil
+				})
+			}
+
+			dir := filepath.Join(t.TempDir(), "project")
+			var stdout, stderr bytes.Buffer
+			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "minimax", AgentName: "alice", Language: "en"})
+			if code != 1 || stdout.Len() != 0 {
+				t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
+			}
+			var response map[string]interface{}
+			if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
+				t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
+			}
+			agentDir := filepath.Join(dir, ".lingtai", "alice")
+			if response["code"] != "init_failed" || response["recovery_state"] != "created_unregistered" || response["recovery_step"] != test.recoveryStep || response["project_dir"] != dir || response["agent_name"] != "alice" || response["agent_dir"] != agentDir {
+				t.Fatalf("%s recovery response = %#v", test.name, response)
+			}
+			cause, ok := response["cause"].(string)
+			if !ok || cause == "" {
+				t.Fatalf("%s recovery response has no cause: %#v", test.name, response)
+			}
+			if test.expectedCause != "" && cause != test.expectedCause {
+				t.Fatalf("%s recovery cause = %q, want %q", test.name, cause, test.expectedCause)
+			}
+			if _, err := os.Stat(filepath.Join(agentDir, "init.json")); err != nil {
+				t.Fatalf("known-created seed was removed after %s failure: %v", test.name, err)
+			}
+			if test.assertSharedLibrary {
+				if info, err := os.Stat(filepath.Join(dir, ".lingtai", ".library_shared")); err != nil || !info.IsDir() {
+					t.Fatalf("shared library was not preserved before %s recovery: info=%v err=%v", test.name, info, err)
+				}
+			}
+		})
 	}
 }
 
-func TestRunSpawn_RecipeStateFailureReportsCreatedRecoveryAndDoesNotRegisterOrLaunch(t *testing.T) {
-	withTempHome(t)
-	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
-	preset.RefreshTemplates()
-	if err := preset.Bootstrap(globalDir); err != nil {
-		t.Fatal(err)
-	}
-	stubSuccessfulSpawnCreate(t)
-
-	originalRuntimeReady := runtimeReady
-	runtimeReady = func(string) error { return nil }
-	t.Cleanup(func() { runtimeReady = originalRuntimeReady })
-	originalLaunch := launchAgent
-	launchAgent = func(string, string) (*exec.Cmd, error) {
-		t.Fatal("launchAgent was called after recipe-state persistence failed")
-		return nil, nil
-	}
-	t.Cleanup(func() { launchAgent = originalLaunch })
-	stubSpawnRegister(t, func(string, string) error {
-		t.Fatal("registerProject was called after recipe-state persistence failed")
-		return nil
-	})
-	stubSpawnSaveRecipeState(t, func(string, preset.RecipeState) error {
-		return errors.New("recipe state storage unavailable")
-	})
-
-	dir := filepath.Join(t.TempDir(), "project")
-	var stdout, stderr bytes.Buffer
-	code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "minimax", AgentName: "alice", Language: "en"})
-	if code != 1 || stdout.Len() != 0 {
-		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
-	}
-	var response map[string]interface{}
-	if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
-		t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
-	}
-	agentDir := filepath.Join(dir, ".lingtai", "alice")
-	if response["code"] != "init_failed" || response["recovery_state"] != "created_unregistered" || response["recovery_step"] != "recipe_state_persistence" || response["project_dir"] != dir || response["agent_name"] != "alice" || response["agent_dir"] != agentDir || response["cause"] != "recipe state storage unavailable" {
-		t.Fatalf("recipe-state recovery response = %#v", response)
-	}
-	if _, err := os.Stat(filepath.Join(agentDir, "init.json")); err != nil {
-		t.Fatalf("known-created seed was removed after recipe-state failure: %v", err)
-	}
-	if info, err := os.Stat(filepath.Join(dir, ".lingtai", ".library_shared")); err != nil || !info.IsDir() {
-		t.Fatalf("shared library was not preserved before recipe-state recovery: info=%v err=%v", info, err)
-	}
-}
-
-func TestRunSpawn_RegistrationFailureReportsCreatedRecoveryAndDoesNotLaunch(t *testing.T) {
-	withTempHome(t)
-	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
-	preset.RefreshTemplates()
-	if err := preset.Bootstrap(globalDir); err != nil {
-		t.Fatal(err)
-	}
-	stubSuccessfulSpawnCreate(t)
-
-	originalRuntimeReady := runtimeReady
-	runtimeReady = func(string) error { return nil }
-	t.Cleanup(func() { runtimeReady = originalRuntimeReady })
-	originalLaunch := launchAgent
-	launchAgent = func(string, string) (*exec.Cmd, error) {
-		t.Fatal("launchAgent was called after registration failed")
-		return nil, nil
-	}
-	t.Cleanup(func() { launchAgent = originalLaunch })
-	stubSpawnRegister(t, func(string, string) error { return errors.New("registry unavailable") })
-
-	dir := filepath.Join(t.TempDir(), "project")
-	var stdout, stderr bytes.Buffer
-	code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "minimax", AgentName: "alice", Language: "en"})
-	if code != 1 || stdout.Len() != 0 {
-		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
-	}
-	var response map[string]interface{}
-	if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
-		t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
-	}
-	agentDir := filepath.Join(dir, ".lingtai", "alice")
-	if response["code"] != "init_failed" || response["recovery_state"] != "created_unregistered" || response["recovery_step"] != "registration" || response["project_dir"] != dir || response["agent_name"] != "alice" || response["agent_dir"] != agentDir || response["cause"] != "registry unavailable" {
-		t.Fatalf("registration recovery response = %#v", response)
-	}
-	if _, err := os.Stat(filepath.Join(agentDir, "init.json")); err != nil {
-		t.Fatalf("known-created seed was removed after registration failure: %v", err)
-	}
-}
-
-func TestRunSpawn_IncompleteCreateResultDoesNotRegisterOrLaunch(t *testing.T) {
-	withTempHome(t)
-	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
-	preset.RefreshTemplates()
-	if err := preset.Bootstrap(globalDir); err != nil {
-		t.Fatal(err)
+func TestRunSpawn_UntrustedCreateOutcomeWritesOneErrorAndDoesNotRegisterOrLaunch(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		create func(process.ProjectCreateRequest) (process.ProjectCreateResult, error)
+	}{
+		{
+			name:   "incomplete_exit_zero_result",
+			reason: "malformed_result",
+			create: func(request process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
+				return process.ProjectCreateResult{Status: "created", AgentName: request.AgentName, ExitCode: 0}, nil
+			},
+		},
+		{
+			name:   "argument_error_transport",
+			reason: "argument_error",
+			create: func(process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
+				return process.ProjectCreateResult{}, &process.ProjectCreateError{
+					Kind: process.ProjectCreateTransportFailure, Reason: "argument_error", ExitCode: 2,
+					Stderr: "usage: lingtai-agent project create",
+				}
+			},
+		},
 	}
 
-	originalRuntimeReady := runtimeReady
-	runtimeReady = func(string) error { return nil }
-	t.Cleanup(func() { runtimeReady = originalRuntimeReady })
-	originalLaunch := launchAgent
-	launchAgent = func(string, string) (*exec.Cmd, error) {
-		t.Fatal("launchAgent was called after an incomplete create result")
-		return nil, nil
-	}
-	t.Cleanup(func() { launchAgent = originalLaunch })
-	stubSpawnRegister(t, func(string, string) error {
-		t.Fatal("registerProject was called after an incomplete create result")
-		return nil
-	})
-	stubSpawnCreate(t, func(_ context.Context, _ string, request process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
-		return process.ProjectCreateResult{Status: "created", AgentName: request.AgentName, ExitCode: 0}, nil
-	})
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			withTempHome(t)
+			globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
+			preset.RefreshTemplates()
+			if err := preset.Bootstrap(globalDir); err != nil {
+				t.Fatal(err)
+			}
 
-	var stdout, stderr bytes.Buffer
-	code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: filepath.Join(t.TempDir(), "project"), Preset: "minimax", AgentName: "alice", Language: "en"})
-	if code != 1 || stdout.Len() != 0 {
-		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
-	}
-	var response map[string]interface{}
-	if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
-		t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
-	}
-	if response["code"] != "init_failed" || response["reason"] != "malformed_result" {
-		t.Fatalf("incomplete create response = %#v", response)
+			originalRuntimeReady := runtimeReady
+			runtimeReady = func(string) error { return nil }
+			t.Cleanup(func() { runtimeReady = originalRuntimeReady })
+			originalLaunch := launchAgent
+			launchAgent = func(string, string) (*exec.Cmd, error) {
+				t.Fatal("launchAgent was called after an untrusted create outcome")
+				return nil, nil
+			}
+			t.Cleanup(func() { launchAgent = originalLaunch })
+			stubSpawnRegister(t, func(string, string) error {
+				t.Fatal("registerProject was called after an untrusted create outcome")
+				return nil
+			})
+			stubSpawnCreate(t, func(_ context.Context, _ string, request process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
+				return test.create(request)
+			})
+
+			var stdout, stderr bytes.Buffer
+			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: filepath.Join(t.TempDir(), "project"), Preset: "minimax", AgentName: "alice", Language: "en"})
+			if code != 1 || stdout.Len() != 0 {
+				t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
+			}
+			var response map[string]interface{}
+			if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
+				t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
+			}
+			if response["code"] != "init_failed" || response["reason"] != test.reason {
+				t.Fatalf("%s response = %#v", test.name, response)
+			}
+		})
 	}
 }
 
@@ -671,45 +664,5 @@ func TestRunSpawn_HandlerCreateFailureWritesOneStructuredErrorAndDoesNotLaunch(t
 	}
 	if _, err := os.Stat(filepath.Join(globalDir, "registry.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("failed create was registered: %v", err)
-	}
-}
-
-func TestRunSpawn_UnknownCreateFailureDoesNotTrustOrLaunch(t *testing.T) {
-	withTempHome(t)
-	globalDir := filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
-	preset.RefreshTemplates()
-	if err := preset.Bootstrap(globalDir); err != nil {
-		t.Fatal(err)
-	}
-
-	originalRuntimeReady := runtimeReady
-	runtimeReady = func(string) error { return nil }
-	t.Cleanup(func() { runtimeReady = originalRuntimeReady })
-	originalLaunch := launchAgent
-	launchAgent = func(string, string) (*exec.Cmd, error) {
-		t.Fatal("launchAgent was called after an unknown project create outcome")
-		return nil, nil
-	}
-	t.Cleanup(func() { launchAgent = originalLaunch })
-	stubSpawnCreate(t, func(context.Context, string, process.ProjectCreateRequest) (process.ProjectCreateResult, error) {
-		return process.ProjectCreateResult{}, &process.ProjectCreateError{
-			Kind: process.ProjectCreateTransportFailure, Reason: "argument_error", ExitCode: 2,
-			Stderr: "usage: lingtai-agent project create",
-		}
-	})
-
-	var stdout, stderr bytes.Buffer
-	code := RunSpawn(&stdout, &stderr, SpawnOpts{
-		Dir: filepath.Join(t.TempDir(), "project"), Preset: "minimax", AgentName: "alice", Language: "en",
-	})
-	if code != 1 || stdout.Len() != 0 {
-		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
-	}
-	var response map[string]interface{}
-	if err := json.Unmarshal(stderr.Bytes(), &response); err != nil {
-		t.Fatalf("stderr is not one structured JSON error: %v\n%s", err, stderr.String())
-	}
-	if response["code"] != "init_failed" || response["reason"] != "argument_error" {
-		t.Fatalf("unknown failure mapping = %#v", response)
 	}
 }
