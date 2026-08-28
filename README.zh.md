@@ -92,9 +92,9 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。在普通的首次 macOS 稳定版安装中，它还会注册 `lingtai-desktop`，但此时不会下载或安装 Desktop App。首次执行 `lingtai-desktop` 时，它才会获取并校验官方 Desktop 安装支持与 App，然后继续执行你原本请求的命令；后续运行会复用已托管的安装。可用 `--skip-desktop` 不注册该命令。Desktop 目前仍在私有发布阶段：LingTai 主安装不受影响，但首次运行 Desktop 命令仍要等仓库标签与发布资产可匿名读取。准确的信任与归属边界见 [`RELEASING.md`](RELEASING.md) 和 [`CONTRACT.md`](CONTRACT.md)。
+安装脚本支持 macOS、Linux 和 WSL，会安装 `lingtai-tui` 和 `lingtai-portal`。在 macOS 上，它也会加入 `lingtai-desktop`；App 第一次打开时才下载，因此日常安装依然轻量，`--skip-desktop` 可跳过。Desktop 仍在私有发布阶段，普通用户首次启动还要等公开下载开放。
 
-Desktop 与 TUI 操作的是同一份 `.lingtai/` 项目状态：TUI 是终端里的设置与控制界面，Desktop 是原生 macOS 界面。安装器托管的 Python 运行时留在本机，每位常驻科学家则留在自己的项目里。更新 TUI 与内核时，重新运行 `install.sh`（或 `lingtai-tui self-update`），再重启 TUI。Desktop 在日常运行时会自行检查官方发布渠道；`lingtai-desktop update` 会强制发起一次新的检查，不弹确认提示。
+Desktop 和 TUI 使用同一个灵台项目、同一批科学家：你可以选原生 macOS App，也可以用终端。重新运行安装脚本（或 `lingtai-tui self-update`）可更新 TUI 与内核。Desktop 会自行检查更新，需要立即检查时运行 `lingtai-desktop update`。
 
 原生 Windows/PowerShell 现已支持：
 
@@ -127,9 +127,9 @@ irm https://lingtai.ai/install.ps1 | iex
 
 ## 与它协作的几种方式
 
-**Desktop——`lingtai-desktop`（macOS）** 是原生的项目与智能体界面：查看项目和智能体、直接对话与收发信件、设置与预设配置、生命周期控制，都作用于同一份持久项目状态。现有项目的这些能力由 Desktop 直接负责，没有安装 TUI 也能工作；只有新建项目目前仍调用 TUI 的无界面启动流程。
+**Desktop——`lingtai-desktop`（macOS）** 是灵台的原生 App：在一处查看项目和科学家、对话与收发信件、调整设置和预设，也能随时管理它们的工作。
 
-**TUI——`lingtai-tui`** 是终端界面：项目初始化、模型/预设配置、对话与信箱、助理状态（token + 上下文 + 心跳），以及通往持久状态的各个视图——`/knowledge` 看它的知识库，`/skills` 看它的技能目录，`/system` 看它的性格与契约，`/daemons` 看后台运行，`/goal` 设一个长线目标。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。
+**TUI——`lingtai-tui`** 把灵台带进终端：设置项目和模型、对话与读信、查看科学家状态；需要更深入时，可打开 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。
 
 **Portal——`lingtai-portal`** 是可视化服务器。它读取项目状态，呈现实时智能体网络、信件边、历史拓扑——当一个项目里不止一个智能体、或你想看清工作如何演变时，很有用。
 
@@ -153,13 +153,13 @@ irm https://lingtai.ai/install.ps1 | iex
 
 灵台由三个产品仓库组成：
 
-| 仓库 | 语言 | 负责 |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | Go + TypeScript | TUI、portal、安装流水线、自带工具技能。产出 `lingtai-tui` 与 `lingtai-portal`。 |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python（+ Rust sidecar） | 智能体运行时、LLM 回合循环、固有工具、会话/上下文/凝蜕管理、MCP 宿主。在 PyPI 上以 `lingtai` 发布。 |
-| `Lingtai-AI/lingtai-desktop`（私有发布阶段） | C++ + Qt | 原生 macOS 项目/智能体界面、对话、设置/预设与生命周期控制，共用 `.lingtai/` 状态。 |
+| 仓库 | 产品职责 |
+|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | 终端 App、可视化 portal 与安装脚本。 |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | 让科学家持续运行，处理工具、记忆与对话。 |
+| `Lingtai-AI/lingtai-desktop`（私有发布阶段） | 用来管理项目和科学家的原生 macOS App。 |
 
-终端与原生界面都**不**承担智能体心智。TUI 与 Desktop 都能启动 Python 内核智能体；Desktop 直接负责现有项目的设置与生命周期操作，只在新建项目时调用 TUI 的无界面命令。独立运行的 Python 内核才拥有智能体的心智与监听器。各个控制界面不导入这颗心智，而是通过持久的项目文件协作（`.lingtai/` 信箱、心跳、日志、提示文件、portal 记录）。这就是为什么状态如此易查、其他工具不靠任何 SDK 就能跟它协作。
+Desktop 和 TUI 是同一个灵台项目、同一批科学家的两种界面。即使你关掉界面，内核仍会让科学家继续运行、继续听候消息。项目留在本地，也始终可查，因此编辑器和其他工具一样能跟它协作。
 
 想看有源可查的仓库地图，从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。想知道每一层的接口与预期的 agent 行为承诺什么，读 [`CONTRACT.md`](CONTRACT.md)。想按知识图谱导航，见 [`docs/graphify.md`](docs/graphify.md)。
 

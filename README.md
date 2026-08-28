@@ -93,9 +93,9 @@ It prints and records the exact full commit SHA for each repository. This mode i
 
 </details>
 
-The installer covers macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`. On an ordinary first stable macOS install, it also registers `lingtai-desktop` without downloading or installing the Desktop App. The first `lingtai-desktop` invocation obtains and verifies the official Desktop support and App, then continues the command you requested; later runs reuse the managed installation. Pass `--skip-desktop` to omit the command. During the current private rollout, the main LingTai install still succeeds, but the first Desktop command requires the repository tag and release assets to become anonymously readable. The exact trust and ownership boundaries live in [`RELEASING.md`](RELEASING.md) and [`CONTRACT.md`](CONTRACT.md).
+The installer supports macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`. On macOS it also adds `lingtai-desktop`; the app downloads the first time you open it so the normal install stays light, and `--skip-desktop` opts out. Desktop is still in private rollout, so first launch for public users waits until its downloads are public.
 
-Desktop and the TUI operate on the same `.lingtai/` project state: the TUI is the terminal setup and control surface, while Desktop is the native macOS surface. The installer-managed Python runtime stays local, and each resident scientist stays with its project. To update the TUI and kernel, re-run `install.sh` (or `lingtai-tui self-update`) and restart the TUI. Desktop checks its own official release channel during ordinary runs; `lingtai-desktop update` forces a fresh check without prompting.
+Desktop and the TUI use the same LingTai project and scientists: choose the native macOS app or the terminal. Re-run the installer (or `lingtai-tui self-update`) to update the TUI and kernel. Desktop checks its own updates; use `lingtai-desktop update` to check immediately.
 
 Native Windows/PowerShell is also available:
 
@@ -128,9 +128,9 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 ## Ways to work with it
 
-**Desktop — `lingtai-desktop` (macOS)** is the native project and agent view: direct conversations and mail, setup and preset configuration, and lifecycle controls, all operating on the same durable project state. These existing-project paths are owned by Desktop and work without the TUI installed; creating a new project currently uses the TUI's headless bootstrap.
+**Desktop — `lingtai-desktop` (macOS)** is the native app for LingTai: see your projects and scientists, chat and exchange mail, adjust setup and presets, and manage their work in one place.
 
-**TUI — `lingtai-tui`** is the terminal interface: setup, model/preset configuration, chat and mail, scientist status (token/context + heartbeat), and views into the durable state — `/knowledge` for its library, `/skills` for its skill catalog, `/system` for its character and covenant, `/daemons` for background runs, `/goal` to set a long-running goal. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
+**TUI — `lingtai-tui`** brings LingTai to the terminal: set up projects and models, chat and read mail, check scientist status, and open `/knowledge`, `/skills`, `/system`, `/daemons`, or `/goal` when you need a deeper view. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
 
 **Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one agent or when you want to see how the work evolved.
 
@@ -154,13 +154,13 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 LingTai is split across three product repositories.
 
-| Repository | Language | Owns |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Go + TypeScript | TUI, portal, install pipeline, shipped utility skills. Ships `lingtai-tui` and `lingtai-portal`. |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python (+ Rust sidecar) | Agent runtime, LLM turn loop, intrinsic tools, session/context/molt management, MCP host. Published as the `lingtai` PyPI package. |
-| `Lingtai-AI/lingtai-desktop` (private during rollout) | C++ + Qt | Native macOS project/agent UI, conversations, setup/presets, and lifecycle controls over the shared `.lingtai/` state. |
+| Repository | Product role |
+|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Terminal app, visual portal, and installer. |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Keeps scientists running and handles their tools, memory, and conversations. |
+| `Lingtai-AI/lingtai-desktop` (private rollout) | Native macOS app for working with your projects and scientists. |
 
-The terminal and native frontends do not run the agent mind. The TUI and Desktop can both launch Python kernel agents; Desktop directly owns its existing-project setup and lifecycle operations, using the TUI's headless commands only to create a new project. The independently running Python kernel owns the mind and listeners. These control surfaces coordinate through durable project files (`.lingtai/` mailboxes, heartbeats, logs, prompt files, portal records) rather than importing the mind. That is why the state is so easy to inspect — and why other tools can cooperate with it without any SDK.
+Desktop and the TUI are two interfaces to the same LingTai project and the same scientists. The kernel keeps those scientists running and listening even when you close either interface. The project stays local and inspectable, so your editor and other tools can work with it too.
 
 For the source-grounded repo map, start at [`ANATOMY.md`](ANATOMY.md), then descend into [`tui/ANATOMY.md`](tui/ANATOMY.md) or [`portal/ANATOMY.md`](portal/ANATOMY.md). For what each layer's interfaces and expected agent behavior promise, read [`CONTRACT.md`](CONTRACT.md). To navigate by knowledge graph, see [`docs/graphify.md`](docs/graphify.md).
 
