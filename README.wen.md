@@ -97,9 +97,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本通 macOS、Linux 与 WSL，装 `lingtai-tui`、`lingtai-portal`。于 macOS 又置 `lingtai-desktop`；App 初启方取，故常装犹轻，欲略之则加 `--skip-desktop`。今 Desktop 尚私行，公开下载未备，众人初启尚须待之。
-
-Desktop 与 TUI 共用一项目、同一众灵：或取 macOS 原生 App，或用终端。重行安装脚本（或 `lingtai-tui self-update`）可更 TUI 与内核。Desktop 自察其更新，欲即察则行 `lingtai-desktop update`。
+安装脚本通 macOS、Linux 与 WSL，装 `lingtai-tui`、`lingtai-portal`；于 macOS 又备 `lingtai-desktop`。
 
 原生 Windows/PowerShell 今已可用：
 
@@ -162,7 +160,7 @@ irm https://lingtai.ai/install.ps1 | iex
 |---|---|
 | [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓） | 终端 App、可视 portal 与安装脚本。 |
 | [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | 令众灵常行，司诸器、记忆与对谈。 |
-| `Lingtai-AI/lingtai-desktop`（私行之期） | 理项目与众灵之 macOS 原生 App。 |
+| `Lingtai-AI/lingtai-desktop` | 理项目与众灵之 macOS 原生 App。 |
 
 Desktop 与 TUI，皆通同一灵台项目与同一众灵。二面虽闭，内核仍令众灵常行常听。项目之状在本地而可考，故编辑器与他器亦能与之协。
 

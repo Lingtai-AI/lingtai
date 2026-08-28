@@ -93,9 +93,7 @@ It prints and records the exact full commit SHA for each repository. This mode i
 
 </details>
 
-The installer supports macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`. On macOS it also adds `lingtai-desktop`; the app downloads the first time you open it so the normal install stays light, and `--skip-desktop` opts out. Desktop is still in private rollout, so first launch for public users waits until its downloads are public.
-
-Desktop and the TUI use the same LingTai project and scientists: choose the native macOS app or the terminal. Re-run the installer (or `lingtai-tui self-update`) to update the TUI and kernel. Desktop checks its own updates; use `lingtai-desktop update` to check immediately.
+The installer supports macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`; on macOS it also provides `lingtai-desktop`.
 
 Native Windows/PowerShell is also available:
 
@@ -158,7 +156,7 @@ LingTai is split across three product repositories.
 |---|---|
 | [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Terminal app, visual portal, and installer. |
 | [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Keeps scientists running and handles their tools, memory, and conversations. |
-| `Lingtai-AI/lingtai-desktop` (private rollout) | Native macOS app for working with your projects and scientists. |
+| `Lingtai-AI/lingtai-desktop` | Native macOS app for working with your projects and scientists. |
 
 Desktop and the TUI are two interfaces to the same LingTai project and the same scientists. The kernel keeps those scientists running and listening even when you close either interface. The project stays local and inspectable, so your editor and other tools can work with it too.
 

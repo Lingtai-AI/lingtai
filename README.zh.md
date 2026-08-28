@@ -92,9 +92,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本支持 macOS、Linux 和 WSL，会安装 `lingtai-tui` 和 `lingtai-portal`。在 macOS 上，它也会加入 `lingtai-desktop`；App 第一次打开时才下载，因此日常安装依然轻量，`--skip-desktop` 可跳过。Desktop 仍在私有发布阶段，普通用户首次启动还要等公开下载开放。
-
-Desktop 和 TUI 使用同一个灵台项目、同一批科学家：你可以选原生 macOS App，也可以用终端。重新运行安装脚本（或 `lingtai-tui self-update`）可更新 TUI 与内核。Desktop 会自行检查更新，需要立即检查时运行 `lingtai-desktop update`。
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`；macOS 还会提供 `lingtai-desktop`。
 
 原生 Windows/PowerShell 现已支持：
 
@@ -157,7 +155,7 @@ irm https://lingtai.ai/install.ps1 | iex
 |---|---|
 | [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | 终端 App、可视化 portal 与安装脚本。 |
 | [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | 让科学家持续运行，处理工具、记忆与对话。 |
-| `Lingtai-AI/lingtai-desktop`（私有发布阶段） | 用来管理项目和科学家的原生 macOS App。 |
+| `Lingtai-AI/lingtai-desktop` | 用来管理项目和科学家的原生 macOS App。 |
 
 Desktop 和 TUI 是同一个灵台项目、同一批科学家的两种界面。即使你关掉界面，内核仍会让科学家继续运行、继续听候消息。项目留在本地，也始终可查，因此编辑器和其他工具一样能跟它协作。
 
