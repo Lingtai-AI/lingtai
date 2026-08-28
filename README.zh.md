@@ -92,7 +92,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。在普通的首次 macOS 稳定版安装中，它还会注册一个面向 Desktop `0.1.6` 的惰性 `lingtai-desktop` 命令；注册过程不访问 Desktop 网络，也不创建 App、Desktop current 链接、收据、缓存或版本状态。首次执行该命令时，它才下载三个带准确 SHA-256 固定值的安装支持文件，把压缩包/清单校验与 App 原子安装交给 Desktop 项目自己的安装器和独立校验器，然后继续执行用户原本请求的命令；后续执行直接使用已安装的 current CLI，不会重复安装。可用 `--skip-desktop` 不注册该命令。Linux/WSL、已有安装的重跑以及 `--update`、`--latest`、`--ref` 流程不会注册它。Desktop v0.1.6 与经审计的安装支持校验值构成一个固定信任集合，不提供不安全的任意版本覆盖。当前私有的 Desktop 仓库标签及发布资产只需在首次执行 `lingtai-desktop` 时公开可读；它们暂不可用不会导致 LingTai 主安装失败。LingTai 的 `remove.sh` 会有意保留 Desktop App 和惰性命令状态；之后再次运行主安装器时，完整且可执行的官方 Desktop 启动器或由本安装器标记且可执行的惰性命令会原样保留，而不可执行文件、任意文件、符号链接或缺少可执行 App 的不完整官方启动器仍会报错且不会被覆盖。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`) 再重启 TUI 即可。
 
 原生 Windows/PowerShell 现已支持：
 

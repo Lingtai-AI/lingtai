@@ -764,6 +764,10 @@ assert_single_local_artifact_install() {
   BUNDLE_MANIFEST_JSON=""
   SKIP_VENV=0
   BUNDLE_PROVIDER="github"
+  # This case owns only the fail-loud gate. Keep the decoupled latest-kernel
+  # resolver offline and deterministically unavailable instead of consulting
+  # the real GitHub/Gitee routes from an installer test.
+  resolve_latest_kernel_release() { return 1; }
   if out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"; then
     rc=0
   else

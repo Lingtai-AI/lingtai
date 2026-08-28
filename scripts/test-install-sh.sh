@@ -407,13 +407,42 @@ BIN_DIR_OVERRIDE=""
 FROM_SOURCE=0
 SKIP_PORTAL=0
 SKIP_VENV=0
+SKIP_DESKTOP=0
 NON_INTERACTIVE=0
-parse_args --version v9.9.9 --bin-dir "$tmp/mybin" --from-source --skip-portal --skip-venv
+parse_args --version v9.9.9 --bin-dir "$tmp/mybin" --from-source --skip-portal --skip-venv --skip-desktop
 assert_eq "v9.9.9" "$VERSION" "version flag (install mode)"
 assert_eq "$tmp/mybin" "$BIN_DIR_OVERRIDE" "bin-dir flag"
 assert_eq "1" "$FROM_SOURCE" "from-source flag"
 assert_eq "1" "$SKIP_PORTAL" "skip-portal flag"
 assert_eq "1" "$SKIP_VENV" "skip-venv flag"
+assert_eq "1" "$SKIP_DESKTOP" "skip-desktop flag"
+
+SKIP_DESKTOP=0
+UPDATE_MODE=0
+LATEST_MAIN_MODE=0
+REINSTALL_OK=0
+REF=""
+original_detect_os="$(declare -f detect_os)"
+detect_os() { echo darwin; }
+should_install_desktop || fail "ordinary macOS install should register Desktop by default"
+SKIP_DESKTOP=1
+if should_install_desktop; then fail "--skip-desktop must opt out"; fi
+SKIP_DESKTOP=0
+UPDATE_MODE=1
+if should_install_desktop; then fail "--update must not register Desktop"; fi
+UPDATE_MODE=0
+LATEST_MAIN_MODE=1
+if should_install_desktop; then fail "--latest must not register Desktop"; fi
+LATEST_MAIN_MODE=0
+REINSTALL_OK=1
+if should_install_desktop; then fail "ordinary TUI reinstall must not register Desktop"; fi
+REINSTALL_OK=0
+REF="feature/x"
+if should_install_desktop; then fail "--ref must not register Desktop"; fi
+REF=""
+detect_os() { echo linux; }
+if should_install_desktop; then fail "non-macOS install must not register Desktop"; fi
+eval "$original_detect_os"
 
 # --ref selects a source build ref.
 REF=""
@@ -429,6 +458,7 @@ BIN_DIR_OVERRIDE=""
 FROM_SOURCE=0
 SKIP_PORTAL=0
 SKIP_VENV=0
+SKIP_DESKTOP=0
 NON_INTERACTIVE=0
 
 printf 'second\n' >> "$repo/file.txt"

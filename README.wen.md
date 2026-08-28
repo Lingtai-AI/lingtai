@@ -97,7 +97,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-一令安装之脚本，通 macOS、Linux 与 WSL，装 `lingtai-tui` 与 `lingtai-portal`。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
+一令安装之脚本，通 macOS、Linux 与 WSL，装 `lingtai-tui` 与 `lingtai-portal`。凡 macOS 常规稳定版之初装，仅置一惰性 `lingtai-desktop` 令以候 Desktop `0.1.6`；置令之时不访 Desktop 网络，亦不生 App、current 链、收据、缓存、版本诸状。初次行此令，方取三个以确切 SHA-256 钉定之安装支件，仍委 Desktop 本仓之安装器及独立包验器验档、原子安 App，继行原令；后行则径用已装 current CLI，不复安装。欲不置令则加 `--skip-desktop`。Linux/WSL、已有安装之重跑，及 `--update`、`--latest`、`--ref` 诸路皆不置之。Desktop v0.1.6 与所审支件校验值合为一固定信任集，不开任意换版之险门。今 Desktop 仓尚私，其标签与发布资产惟初行 `lingtai-desktop` 时须公开可读；未备此前提，亦不令 LingTai 主安装败。LingTai `remove.sh` 特留 Desktop App 与惰性令之状；其后复行主安装器，若目标为完备可行之官方 Desktop 启动令，或带本安装器标记且可行之惰性令，则字节与权限悉仍其旧；若不可执行、为他物、符号链接，或官方标记虽在而可执行 App 不全，仍明拒而不覆。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
 
 原生 Windows/PowerShell 今已可用：
 

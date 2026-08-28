@@ -153,6 +153,37 @@ curl -fsSL https://lingtai.ai/install.sh | bash
 curl -fsSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
 ```
 
+On the ordinary stable macOS path, `install.sh` registers a self-contained lazy
+`lingtai-desktop` command and stops: it does not contact Desktop, invoke its
+installer, or create any Desktop App/current/receipt/cache/version state. The
+command embeds Desktop `0.1.6` plus SHA-256 pins audited from its commit
+`7c8483dba5c4e22544f962b3ba37590602dc73e4`. On its first execution only, it
+downloads the matching `install-macos-app.py`, `desktop_user_cli.py`, and
+independent `verify-app-archive.py`, rejects any byte mismatch, invokes the
+Desktop installer, and then continues the user's requested command. Archive,
+manifest, smoke, atomic-publication, and later-update policy stay entirely in
+the Desktop code. Later command executions delegate to the installed current
+CLI without reinstalling. `--skip-desktop` opts out of registration.
+
+LingTai's `scripts/remove.sh` deliberately does not delete Desktop's App or
+command state because neither is owned by the TUI receipt. A later main install
+therefore treats a regular, executable, non-symlink command target as already satisfied only
+when it is this installer's marked lazy bootstrap, or when it carries Desktop's
+official launcher marker and the managed current App executable is complete.
+The command's bytes and mode are preserved in either case. A symlink, arbitrary
+file, or official-marker launcher without its regular executable App remains a
+loud no-overwrite failure.
+
+Linux/WSL, an existing-install re-run, `--update` (including Homebrew
+migration/self-update), `--latest`, or arbitrary `--ref` installs do not
+register the command; Windows is platform-N/A because LingTai Desktop itself is
+macOS-only. The `Lingtai-AI/lingtai-desktop` tag and release assets need
+anonymous readability only at the first `lingtai-desktop` execution. While the
+repository remains private, the main LingTai install still succeeds; the first
+Desktop command fails clearly, remains retryable, and publishes no partial
+Desktop state. Version and support-file hashes are one fixed trust set; there is
+no free-form Desktop version override.
+
 Manual source build (if you prefer to build the binaries yourself):
 
 ```bash
