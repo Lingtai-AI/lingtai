@@ -156,8 +156,8 @@ curl -fsSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh 
 On the ordinary stable macOS path, `install.sh` registers a self-contained lazy
 `lingtai-desktop` command and stops: it does not contact Desktop, invoke its
 installer, or create any Desktop App/current/receipt/cache/version state. The
-command embeds Desktop `0.1.6` plus SHA-256 pins audited from its commit
-`7c8483dba5c4e22544f962b3ba37590602dc73e4`. On its first execution only, it
+command embeds Desktop `0.1.7` plus SHA-256 pins audited from its commit
+`8c87bf6003e09499ee5cbd7b16d68f0cbf1a79c6`. On its first execution only, it
 downloads the matching `install-macos-app.py`, `desktop_user_cli.py`, and
 independent `verify-app-archive.py`, rejects any byte mismatch, invokes the
 Desktop installer, and then continues the user's requested command. Archive,

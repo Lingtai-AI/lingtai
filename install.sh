@@ -71,10 +71,10 @@ GO_DL_BASE="${LINGTAI_GO_DL_BASE:-https://go.dev/dl}"  # official Go toolchain d
 NODE_DL_BASE="${LINGTAI_NODE_DL_BASE:-https://nodejs.org/dist}"
 UV_INSTALLER_URL="${LINGTAI_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"  # official uv bootstrap installer
 NODE_TOOLCHAIN_VERSION="${LINGTAI_NODE_VERSION:-22.12.0}"
-DESKTOP_VERSION="0.1.6"
+DESKTOP_VERSION="0.1.7"
 DESKTOP_RAW_BASE="https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop"
-# Audited from lingtai-desktop v0.1.6 commit
-# 7c8483dba5c4e22544f962b3ba37590602dc73e4. These are deliberately not
+# Audited from lingtai-desktop v0.1.7 commit
+# 8c87bf6003e09499ee5cbd7b16d68f0cbf1a79c6. These are deliberately not
 # environment-overridable: the registered lazy bootstrap accepts only these
 # exact installer-support bytes before running them.
 DESKTOP_INSTALLER_SHA256="d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9"
@@ -207,7 +207,7 @@ Options:
                          ordinary stable install; it downloads no Desktop App
                          data. The command's first execution installs Desktop.
                          Linux, WSL, Windows, --update, --latest, and --ref are
-                         unaffected. This installer pins Desktop v0.1.6 and its
+                         unaffected. This installer pins Desktop v0.1.7 and its
                          audited installer-support checksums as one trust set.
   --source <mode>       auto|github|gitee (default: auto, or $LINGTAI_SOURCE).
                          auto prefers Gitee for mainland-China public IPs via
