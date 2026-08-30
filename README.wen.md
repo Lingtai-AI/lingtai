@@ -46,7 +46,7 @@
   → 录其所得于久藏之知识库
   → 化一专家分身，专攻某一仪器之定标
   → 累旬之间，磨出自有之行事之风与可复用之技能
-  → 仍由 Telegram / TUI / 邮件，携其成果奉君一简报
+  → 仍由 Desktop / TUI / Telegram / 邮件，携其成果奉君一简报
 ```
 
 上者无一为一次而止。文献之记、既核之得、彼定标之专家、其所沉之行事之风——皆久存者也。君下旬复来，此格物者自此所积之状而续，非从零而起。同一之环，于工程亦然：持一码库，以证据复现一 bug，施补丁，而记其所以然。
@@ -71,7 +71,7 @@
 - **如格物者而行事**——证据为先之用器、实验、既核之得，及君可复盘之久存之记。
 - **自长其器箧**——将所学蒸为可复用之技能与私之知识库。
 - **越一心之量**——为深究之子题化久存之专家**分身**，为一时之并行派轻捷之**神识**。
-- **就君所在而达君**——君以 TUI 及 Telegram、飞书、微信、WhatsApp、邮件诸外接之渠，与同一格物者对；而 portal 显其网络与往史。
+- **就君所在而达君**——君以 Desktop、TUI 及 Telegram、飞书、微信、WhatsApp、邮件诸外接之渠，与同一格物者对；而 portal 显其网络与往史。
 - **恒可查、可复**——久存之项目状态，以可考之文件存于本地 `.lingtai/` 之下，非困于某托管之聊天之录也。
 
 ## 三令而启
@@ -97,7 +97,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-一令安装之脚本，通 macOS、Linux 与 WSL，装 `lingtai-tui` 与 `lingtai-portal`。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
+安装脚本通 macOS、Linux 与 WSL，装 `lingtai-tui`、`lingtai-portal`；于 macOS 又备 `lingtai-desktop`。
 
 原生 Windows/PowerShell 今已可用：
 
@@ -130,7 +130,9 @@ irm https://lingtai.ai/install.ps1 | iex
 
 ## 与之协作之数途
 
-**TUI——`lingtai-tui`** 者，人所主用之面也：项目初始、模型/配方之设、对话与信匣、器灵之状（token + 上下文 + 心跳），及通往久存之状之诸视——`/knowledge` 观其知识库，`/skills` 观其技能之录，`/system` 观其性格与契约，`/daemons` 观后台之运，`/goal` 立一长线之志。入 `/help` 可观斜杠命令之全录（其权威之目，乃内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.wen.md)，此 README 不复述之）。升级之后若有不谐，行 `lingtai-tui doctor`。
+**Desktop——`lingtai-desktop`（macOS）** 者，灵台之原生 App 也：一处观项目与众灵、对谈通书、调设置与配方，亦可随时理其所作。
+
+**TUI——`lingtai-tui`** 者，灵台之终端面也：设项目与模型、对谈读信、察器灵之状；欲深观，则入 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。入 `/help` 可观斜杠命令之全录（其权威之目，乃内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.wen.md)，此 README 不复述之）。升级之后若有不谐，行 `lingtai-tui doctor`。
 
 **Portal——`lingtai-portal`** 者，可视之服也。读项目之状，显器灵之网、书信之边、历史之拓扑——一项目中器灵非一，或欲观其事之所以演，则用之。
 
@@ -152,14 +154,15 @@ irm https://lingtai.ai/install.ps1 | iex
 
 ## 可考之制式
 
-灵台由二仓而成：
+灵台由三产品之仓而成：
 
-| 仓 | 语 | 所司 |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓） | Go + TypeScript | TUI、portal、安装流水、自带工具技能。出 `lingtai-tui` 与 `lingtai-portal`。 |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python（+ Rust sidecar） | 器灵运行时、LLM 回合之环、固有诸器、会话/上下文/凝蜕之治、MCP 之宿。于 PyPI 以 `lingtai` 发。 |
+| 仓 | 所司 |
+|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓） | 终端 App、可视 portal 与安装脚本。 |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | 令众灵常行，司诸器、记忆与对谈。 |
+| `Lingtai-AI/lingtai-desktop` | 理项目与众灵之 macOS 原生 App。 |
 
-Go 之 TUI **不**承器灵之心，但启并监 Python 内核器灵为子进程；面与器灵之间，凡交皆经项目文件系统（`.lingtai/` 信匣、心跳、日志、提示之文、portal 之记）。此所以其状易考、他器不假 SDK 而能与之协也。
+Desktop 与 TUI，皆通同一灵台项目与同一众灵。二面虽闭，内核仍令众灵常行常听。项目之状在本地而可考，故编辑器与他器亦能与之协。
 
 欲观有源可考之仓图，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。欲知每层之接口与所期 agent 行为何所许，读 [`CONTRACT.md`](CONTRACT.md)。欲循知识图谱而行，见 [`docs/graphify.md`](docs/graphify.md)。
 

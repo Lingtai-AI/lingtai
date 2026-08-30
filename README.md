@@ -42,7 +42,7 @@ LingTai
   → records findings in its durable knowledge library
   → spawns a specialist avatar to go deep on one instrument's calibration
   → over weeks, refines its own operating style and reusable skills
-  → sends you a brief on Telegram / TUI / email with the artifacts
+  → sends you a brief through Desktop / TUI / Telegram / email with the artifacts
 ```
 
 Nothing above is a one-off. The literature notes, the verified findings, the calibration specialist, the working style it settled on — all of it is durable. When you come back next week, the scientist resumes from that accumulated state instead of starting cold. The same loop serves engineering just as well: hold a codebase, reproduce a bug with evidence, patch it, and remember why.
@@ -67,7 +67,7 @@ This is growth you can read and audit, not a black box. The loop is explicit, in
 - **Works like a scientist** — evidence-first tool use, experiments, verified findings, and durable records you can review.
 - **Grows its own toolkit** — distills what it learns into reusable skills and a private knowledge library.
 - **Scales beyond one mind** — spawns persistent specialist *avatars* for deep sub-problems and lightweight *daemons* for temporary parallel work.
-- **Reaches you where you are** — you talk to the same scientist through the TUI and external channels like Telegram, Feishu, WeChat, WhatsApp, and email, while the portal shows the network and history.
+- **Reaches you where you are** — you talk to the same scientist through Desktop, the TUI, and external channels like Telegram, Feishu, WeChat, WhatsApp, and email, while the portal shows the network and history.
 - **Stays inspectable and recoverable** — durable project state lives locally under `.lingtai/` as inspectable files, rather than trapped in a hosted chat transcript.
 
 ## Quick start
@@ -93,7 +93,7 @@ It prints and records the exact full commit SHA for each repository. This mode i
 
 </details>
 
-The installer covers macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+The installer supports macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`; on macOS it also provides `lingtai-desktop`.
 
 Native Windows/PowerShell is also available:
 
@@ -126,7 +126,9 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 ## Ways to work with it
 
-**TUI — `lingtai-tui`** is the main human surface: setup, model/preset configuration, chat and mail, scientist status (token/context + heartbeat), and views into the durable state — `/knowledge` for its library, `/skills` for its skill catalog, `/system` for its character and covenant, `/daemons` for background runs, `/goal` to set a long-running goal. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
+**Desktop — `lingtai-desktop` (macOS)** is the native app for LingTai: see your projects and scientists, chat and exchange mail, adjust setup and presets, and manage their work in one place.
+
+**TUI — `lingtai-tui`** brings LingTai to the terminal: set up projects and models, chat and read mail, check scientist status, and open `/knowledge`, `/skills`, `/system`, `/daemons`, or `/goal` when you need a deeper view. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
 
 **Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one agent or when you want to see how the work evolved.
 
@@ -148,14 +150,15 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 ## Inspectable architecture
 
-LingTai is split across two repositories.
+LingTai is split across three product repositories.
 
-| Repository | Language | Owns |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Go + TypeScript | TUI, portal, install pipeline, shipped utility skills. Ships `lingtai-tui` and `lingtai-portal`. |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python (+ Rust sidecar) | Agent runtime, LLM turn loop, intrinsic tools, session/context/molt management, MCP host. Published as the `lingtai` PyPI package. |
+| Repository | Product role |
+|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Terminal app, visual portal, and installer. |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Keeps scientists running and handles their tools, memory, and conversations. |
+| `Lingtai-AI/lingtai-desktop` | Native macOS app for working with your projects and scientists. |
 
-The Go TUI does not run the agent mind. It launches and supervises Python kernel agents as subprocesses; everything between UI and agents flows through the project filesystem (`.lingtai/` mailboxes, heartbeats, logs, prompt files, portal records). That is why the state is so easy to inspect — and why other tools can cooperate with it without any SDK.
+Desktop and the TUI are two interfaces to the same LingTai project and the same scientists. The kernel keeps those scientists running and listening even when you close either interface. The project stays local and inspectable, so your editor and other tools can work with it too.
 
 For the source-grounded repo map, start at [`ANATOMY.md`](ANATOMY.md), then descend into [`tui/ANATOMY.md`](tui/ANATOMY.md) or [`portal/ANATOMY.md`](portal/ANATOMY.md). For what each layer's interfaces and expected agent behavior promise, read [`CONTRACT.md`](CONTRACT.md). To navigate by knowledge graph, see [`docs/graphify.md`](docs/graphify.md).
 

@@ -41,7 +41,7 @@
   → 把发现记进它持久的知识库
   → 化出一个专家分身，专攻某一台仪器的定标
   → 数周之间，打磨出自己的做事风格与可复用技能
-  → 在 Telegram / TUI / 邮件里，带着产物给你一份简报
+  → 通过 Desktop / TUI / Telegram / 邮件，带着产物给你一份简报
 ```
 
 上面没有一样是一次性的。文献笔记、核验过的发现、那个定标专家、它沉淀下来的做事风格——全都是持久的。等你下周回来，这位科学家从这些积累的状态继续，而不是从零开始。同一套循环也一样服务工程：握住一个代码库，用证据复现一个 bug，打上补丁，并记住为什么这么改。
@@ -66,7 +66,7 @@
 - **像科学家一样做事**——证据优先的工具使用、实验、核验过的发现，以及你可复盘的持久记录。
 - **长出自己的工具箱**——把学到的东西蒸馏为可复用技能与私有知识库。
 - **超越一个脑袋的规模**——为深入的子问题化出持久的专家**分身**，为临时的并行活儿派出轻量的**神识**。
-- **在你已有的地方触达你**——你通过 TUI 和 Telegram、飞书、微信、WhatsApp、邮件等外接渠道跟同一位科学家对话，而 portal 则呈现网络与历史。
+- **在你已有的地方触达你**——你通过 Desktop、TUI 和 Telegram、飞书、微信、WhatsApp、邮件等外接渠道跟同一位科学家对话，而 portal 则呈现网络与历史。
 - **始终可查、可恢复**——持久的项目状态以可查的文件形式存在本地 `.lingtai/` 下，而不是困在某个托管的聊天记录里。
 
 ## 快速开始
@@ -92,7 +92,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`；macOS 还会提供 `lingtai-desktop`。
 
 原生 Windows/PowerShell 现已支持：
 
@@ -125,7 +125,9 @@ irm https://lingtai.ai/install.ps1 | iex
 
 ## 与它协作的几种方式
 
-**TUI——`lingtai-tui`** 是主交互界面：项目初始化、模型/预设配置、对话与信箱、助理状态（token + 上下文 + 心跳），以及通往持久状态的各个视图——`/knowledge` 看它的知识库，`/skills` 看它的技能目录，`/system` 看它的性格与契约，`/daemons` 看后台运行，`/goal` 设一个长线目标。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。
+**Desktop——`lingtai-desktop`（macOS）** 是灵台的原生 App：在一处查看项目和科学家、对话与收发信件、调整设置和预设，也能随时管理它们的工作。
+
+**TUI——`lingtai-tui`** 把灵台带进终端：设置项目和模型、对话与读信、查看科学家状态；需要更深入时，可打开 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。
 
 **Portal——`lingtai-portal`** 是可视化服务器。它读取项目状态，呈现实时智能体网络、信件边、历史拓扑——当一个项目里不止一个智能体、或你想看清工作如何演变时，很有用。
 
@@ -147,14 +149,15 @@ irm https://lingtai.ai/install.ps1 | iex
 
 ## 可查的架构
 
-灵台由两个仓库组成：
+灵台由三个产品仓库组成：
 
-| 仓库 | 语言 | 负责 |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | Go + TypeScript | TUI、portal、安装流水线、自带工具技能。产出 `lingtai-tui` 与 `lingtai-portal`。 |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python（+ Rust sidecar） | 智能体运行时、LLM 回合循环、固有工具、会话/上下文/凝蜕管理、MCP 宿主。在 PyPI 上以 `lingtai` 发布。 |
+| 仓库 | 产品职责 |
+|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | 终端 App、可视化 portal 与安装脚本。 |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | 让科学家持续运行，处理工具、记忆与对话。 |
+| `Lingtai-AI/lingtai-desktop` | 用来管理项目和科学家的原生 macOS App。 |
 
-Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智能体作为子进程；UI 与智能体之间所有交互都走项目文件系统（`.lingtai/` 信箱、心跳、日志、提示文件、portal 记录）。这就是为什么状态如此易查、其他工具不靠任何 SDK 就能跟它协作。
+Desktop 和 TUI 是同一个灵台项目、同一批科学家的两种界面。即使你关掉界面，内核仍会让科学家继续运行、继续听候消息。项目留在本地，也始终可查，因此编辑器和其他工具一样能跟它协作。
 
 想看有源可查的仓库地图，从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。想知道每一层的接口与预期的 agent 行为承诺什么，读 [`CONTRACT.md`](CONTRACT.md)。想按知识图谱导航，见 [`docs/graphify.md`](docs/graphify.md)。
 

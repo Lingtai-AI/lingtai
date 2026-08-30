@@ -71,6 +71,15 @@ GO_DL_BASE="${LINGTAI_GO_DL_BASE:-https://go.dev/dl}"  # official Go toolchain d
 NODE_DL_BASE="${LINGTAI_NODE_DL_BASE:-https://nodejs.org/dist}"
 UV_INSTALLER_URL="${LINGTAI_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"  # official uv bootstrap installer
 NODE_TOOLCHAIN_VERSION="${LINGTAI_NODE_VERSION:-22.12.0}"
+DESKTOP_VERSION="0.1.6"
+DESKTOP_RAW_BASE="https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop"
+# Audited from lingtai-desktop v0.1.6 commit
+# 7c8483dba5c4e22544f962b3ba37590602dc73e4. These are deliberately not
+# environment-overridable: the registered lazy bootstrap accepts only these
+# exact installer-support bytes before running them.
+DESKTOP_INSTALLER_SHA256="d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9"
+DESKTOP_CLI_SHA256="9943ebc83fb0127aabcd142abf16860756239ba8dd7fbe3ca1584a65d85619d8"
+DESKTOP_VERIFIER_SHA256="5496bbfaa6c5cb4b7744b6e65d799c43acb4942129a6be8e8509a7a36eb9b900"
 
 # The single package index used ONLY for third-party dependencies of the
 # verified local LingTai artifact — see python_dependency_index_url. Tsinghua
@@ -127,6 +136,7 @@ NON_INTERACTIVE=0    # --non-interactive: never prompt / never sudo-install pack
 FROM_SOURCE=0        # --from-source: skip release-asset download, always build
 SKIP_PORTAL=0        # --skip-portal: TUI only
 SKIP_VENV=0          # --skip-python (alias: --skip-venv): don't touch the Python runtime venv
+SKIP_DESKTOP=0       # --skip-desktop: don't register the macOS-only lazy Desktop command
 INSTALL_KIND=""      # "release-asset" | "source-build" (recorded in metadata)
 SOURCE_ARG="${LINGTAI_SOURCE:-auto}"  # --source auto|github|gitee (env LINGTAI_SOURCE)
 BUNDLE_PROVIDER=""    # resolved by resolve_source_provider(): "github" | "gitee"
@@ -164,7 +174,8 @@ RUNTIME_VENV_DIR=""   # set by ensure_runtime_venv() on success; read by write_i
 
 usage() {
   cat <<'EOF'
-One-shot installer for lingtai-tui, lingtai-portal, and the Python runtime.
+One-shot installer for lingtai-tui, lingtai-portal, the Python runtime, and
+LingTai Desktop on macOS.
 
 Homebrew is not required. By default the latest release bundle is installed from the selected source:
 a prebuilt per-platform tarball when available, otherwise a source build.
@@ -191,6 +202,13 @@ Options:
                          exists without a native install receipt, it is
                          preserved unchanged so TUI/portal binaries can be
                          installed beside it. --skip-venv is a back-compat alias.
+  --skip-desktop        On macOS, do not register the lazy lingtai-desktop
+                         command. Registration is the default only for the
+                         ordinary stable install; it downloads no Desktop App
+                         data. The command's first execution installs Desktop.
+                         Linux, WSL, Windows, --update, --latest, and --ref are
+                         unaffected. This installer pins Desktop v0.1.6 and its
+                         audited installer-support checksums as one trust set.
   --source <mode>       auto|github|gitee (default: auto, or $LINGTAI_SOURCE).
                          auto prefers Gitee for mainland-China public IPs via
                          a bounded, fail-open country lookup; an explicit
@@ -301,6 +319,188 @@ detect_os() {
     Linux)  echo "linux" ;;
     *)      echo "unsupported" ;;
   esac
+}
+
+# Desktop has its own release train and verified installer. The public LingTai
+# installer only registers its lazy command on an ordinary stable macOS install;
+# update/current-main/arbitrary-ref workflows keep their existing ownership.
+should_install_desktop() {
+  [[ "$SKIP_DESKTOP" != "1" ]] || return 1
+  [[ "$(detect_os)" == "darwin" ]] || return 1
+  [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" && -z "$REF" ]]
+}
+
+# Register only a self-contained lazy command. It performs no Desktop network
+# access and creates no Desktop managed state. On its first execution the
+# command downloads the three exact, SHA-pinned installer-support files audited
+# above; that existing Desktop code retains exclusive ownership of release API,
+# archive/manifest verification, atomic App publication, and command semantics.
+register_desktop_bootstrap() {
+  local target="$BIN_DIR/lingtai-desktop"
+  local app_executable="$HOME/.local/share/lingtai-desktop/current/LingTai.app/Contents/MacOS/LingTai"
+  local template="$BUILD_DIR/lingtai-desktop-bootstrap.py.in"
+  local staged="$BUILD_DIR/lingtai-desktop-bootstrap.py"
+
+  if [[ -f "$target" && -x "$target" && ! -L "$target" ]]; then
+    if grep -Fq '# lingtai-desktop-owned-v1' "$target"; then
+      if [[ -f "$app_executable" && -x "$app_executable" && ! -L "$app_executable" ]]; then
+        note "Existing complete LingTai Desktop command is already installed; keeping it unchanged: $target"
+        return 0
+      fi
+      echo "error: existing Desktop command target was found; refusing to overwrite it: $target" >&2
+      return 1
+    fi
+    if grep -Fq 'lingtai-desktop-lazy-bootstrap-v1' "$target"; then
+      note "Existing LingTai Desktop lazy command is already registered; keeping it unchanged: $target"
+      return 0
+    fi
+  fi
+  if [[ -e "$target" || -L "$target" ]]; then
+    echo "error: existing Desktop command target was found; refusing to overwrite it: $target" >&2
+    return 1
+  fi
+  mkdir -p "$BUILD_DIR"
+  cat > "$template" <<'PY'
+#!/usr/bin/env python3
+"""LingTai Desktop lazy bootstrap, registered by the public LingTai installer."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+DESKTOP_VERSION = "@DESKTOP_VERSION@"
+RAW_BASE = "@DESKTOP_RAW_BASE@"
+SUPPORT = {
+    "install-macos-app.py": "@DESKTOP_INSTALLER_SHA256@",
+    "desktop_user_cli.py": "@DESKTOP_CLI_SHA256@",
+    "verify-app-archive.py": "@DESKTOP_VERIFIER_SHA256@",
+}
+BOOTSTRAP_MARKER = "lingtai-desktop-lazy-bootstrap-v1"
+
+
+def fail(message: str) -> int:
+    print(f"lingtai-desktop: {message}", file=sys.stderr)
+    return 1
+
+
+def invoked_path() -> Path:
+    candidate = sys.argv[0]
+    if os.sep not in candidate:
+        candidate = shutil.which(candidate) or candidate
+    return Path(candidate).resolve(strict=True)
+
+
+def installed_paths() -> tuple[Path, Path]:
+    home = Path.home()
+    launcher = home / ".local/bin/lingtai-desktop"
+    executable = (
+        home / ".local/share/lingtai-desktop/current/"
+        "LingTai.app/Contents/MacOS/LingTai"
+    )
+    return launcher, executable
+
+
+def is_same_file(left: Path, right: Path) -> bool:
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def exec_installed(launcher: Path, arguments: list[str]) -> None:
+    os.execv(os.fspath(launcher), [os.fspath(launcher), *arguments])
+
+
+def main() -> int:
+    arguments = sys.argv[1:]
+    bootstrap = invoked_path()
+    launcher, app_executable = installed_paths()
+    if launcher.is_file() and app_executable.is_file() and not is_same_file(bootstrap, launcher):
+        exec_installed(launcher, arguments)
+
+    curl = shutil.which("curl")
+    if curl is None:
+        return fail("curl is required for the first Desktop command execution")
+
+    with tempfile.TemporaryDirectory(prefix="lingtai-desktop-bootstrap-") as temporary:
+        support_root = Path(temporary)
+        scripts_root = support_root / "scripts"
+        scripts_root.mkdir(mode=0o700)
+        for name, expected_sha in SUPPORT.items():
+            destination = scripts_root / name
+            url = f"{RAW_BASE}/v{DESKTOP_VERSION}/scripts/{name}"
+            result = subprocess.run(
+                [curl, "-fsSL", "--max-time", "30", "-o", os.fspath(destination), url],
+                check=False,
+            )
+            if result.returncode != 0:
+                return fail(
+                    f"Desktop installer support is unavailable for v{DESKTOP_VERSION}; "
+                    "the public repository/tag prerequisite is not yet satisfied"
+                )
+            actual_sha = hashlib.sha256(destination.read_bytes()).hexdigest()
+            if actual_sha != expected_sha:
+                return fail(f"Desktop installer support checksum mismatch: {name}")
+            destination.chmod(0o600)
+
+        backup: Path | None = None
+        if launcher.exists() and is_same_file(bootstrap, launcher):
+            backup = launcher.with_name(f".lingtai-desktop.bootstrap.{os.getpid()}")
+            if backup.exists() or backup.is_symlink():
+                return fail("Desktop bootstrap backup path is unexpectedly occupied")
+            os.replace(launcher, backup)
+
+        result = subprocess.run(
+            [sys.executable, os.fspath(scripts_root / "install-macos-app.py"),
+             "--version", DESKTOP_VERSION],
+            check=False,
+        )
+        if result.returncode != 0:
+            retryable = backup is None
+            if backup is not None and not launcher.exists() and not launcher.is_symlink():
+                os.replace(backup, launcher)
+                retryable = True
+            suffix = (
+                "the lazy command remains retryable"
+                if retryable else "inspect the Desktop installer error above"
+            )
+            return fail(f"verified Desktop installation failed; {suffix}")
+        if not launcher.is_file() or not app_executable.is_file():
+            retryable = backup is None
+            if backup is not None and not launcher.exists() and not launcher.is_symlink():
+                os.replace(backup, launcher)
+                retryable = True
+            suffix = (
+                "the lazy command remains retryable"
+                if retryable else "incomplete Desktop state requires inspection"
+            )
+            return fail(f"Desktop installer returned success without a complete managed installation; {suffix}")
+        if backup is not None:
+            backup.unlink()
+    exec_installed(launcher, arguments)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PY
+  sed \
+    -e "s|@DESKTOP_VERSION@|$DESKTOP_VERSION|g" \
+    -e "s|@DESKTOP_RAW_BASE@|$DESKTOP_RAW_BASE|g" \
+    -e "s|@DESKTOP_INSTALLER_SHA256@|$DESKTOP_INSTALLER_SHA256|g" \
+    -e "s|@DESKTOP_CLI_SHA256@|$DESKTOP_CLI_SHA256|g" \
+    -e "s|@DESKTOP_VERIFIER_SHA256@|$DESKTOP_VERIFIER_SHA256|g" \
+    "$template" > "$staged"
+  chmod 755 "$staged"
+  install_binary_atomically "$staged" "$target"
+  say "Registered lazy LingTai Desktop command at $target"
+  note "The Desktop App will be downloaded and independently verified only when lingtai-desktop is first run."
 }
 
 # detect_arch prints amd64|arm64, or "unsupported".
@@ -904,6 +1104,7 @@ parse_args() {
       --from-source) FROM_SOURCE=1; saw_from_source=1; shift ;;
       --skip-portal) SKIP_PORTAL=1; shift ;;
       --skip-python|--skip-venv) SKIP_VENV=1; saw_skip_python=1; shift ;;
+      --skip-desktop) SKIP_DESKTOP=1; shift ;;
       --source) SOURCE_ARG="${2:?error: --source requires a value}"; saw_source=1; shift 2 ;;
       --update) UPDATE_MODE=1; saw_update=1; shift ;;
       --non-interactive) NON_INTERACTIVE=1; shift ;;
@@ -2891,6 +3092,16 @@ write_install_metadata \
   "$BIN_DIR/lingtai-tui" \
   "$PORTAL_PATH"
 say "Wrote install metadata to $GLOBAL_DIR/install.json"
+
+if should_install_desktop; then
+  if ! register_desktop_bootstrap; then
+    echo "error: LingTai TUI/runtime installation succeeded and its receipt is valid," >&2
+    echo "       but the lazy macOS Desktop command could not be registered." >&2
+    echo "       No Desktop App state or Desktop network access occurred; use --skip-desktop" >&2
+    echo "       to keep the completed TUI/Portal installation without that command." >&2
+    exit 1
+  fi
+fi
 
 say "Done. $("$BIN_DIR/lingtai-tui" version 2>&1 || echo "$VERSION")"
 
