@@ -54,8 +54,7 @@ cat > "$ORCH_DIR/init.json" << INITEOF
     },
     "context_limit": null,
     "max_turns": 500,
-    "admin": {"karma": true},
-    "streaming": true
+    "admin": {"karma": true}
   },
   "covenant": "You are the orchestrator agent. You manage tasks, delegate to avatars when appropriate, and communicate with the human operator via email. Respond to messages from the human via email. You can use file operations, web search, bash commands, vision, speech, music, and more. Be concise and helpful."
 }

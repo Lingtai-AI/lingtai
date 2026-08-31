@@ -14,6 +14,8 @@ related_files:
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/SKILL.md
   - tui/internal/preset/preset.go
+  - tui/internal/tui/stream_progress.go
+  - tui/internal/streamprogress/client.go
   - tui/main.go
   - tui/internal/config/global_test.go
   - docs/tui-agent-alignment.md
@@ -112,6 +114,47 @@ appears as the degraded state below.
    (fable F8, D1-D5 below): check agents present (R1), `config.json`
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
    (R1), runtime/version (R1).
+
+## Live stream-progress badge (additive, loopback-only)
+
+While the visible recipient is `ACTIVE`, Mail's `Email To:` indicator may
+append ` · C chars · delay D.Ds` beside `Active N s`. The value comes from the
+kernel's consumer-neutral, read-only `lingtai.stream-progress/v1` snapshot
+(`GET /v1/stream-progress` on `127.0.0.1`, discovered deterministically from the
+agent's stable `agent_id`; client in
+`tui/internal/streamprogress/ANATOMY.md`, display adapter in
+`tui/internal/tui/stream_progress.go`). `C` is the factual `streamed_chars`
+value: exact below 1000 and one-decimal `k` at or above 1000. `delay` is snapshot
+freshness, `max(now - updated_unix_ms, 0)`, shown to one decimal second; it is
+not provider-response duration and performs no token conversion. Whether an
+agent streams at all is kernel-owned runtime
+configuration with exactly one owner path — the kernel's System settings
+resolver: a valid `LINGTAI_STREAMING_ENABLED` environment value, otherwise a
+valid boolean `streaming` in the agent's `settings/system.json`, otherwise on.
+`init.json` carries no `streaming` field: `GenerateInitJSON`
+(`tui/internal/preset/preset.go`), `templates/init.jsonc`, and
+`examples/init.jsonc` emit none, `/kanban` shows no such row, and the TUI
+offers no editor or writer for the System setting.
+
+1. **Purely additive, fail-open, strict.** A missing, refused, redirecting,
+   foreign, or malformed endpoint is never a launch gate, banner, or doctor
+   check — the suffix is simply absent and the next poll tries again. The
+   client never follows an HTTP redirect (so nothing can send it off
+   loopback) and accepts only an exact seven-field v1 body: any extra field
+   (a `text` field above all), duplicate key, or trailing data is rejected.
+2. **RAM only.** No snapshot, port, or progress state is written under
+   `.lingtai/` or `~/.lingtai-tui/`; the shared on-disk schema read by both
+   binaries is unchanged.
+3. **Never on the render path.** `View()` reads one cached reading; all
+   loopback I/O runs in a poll-tick `tea.Cmd` and its result is accepted only
+   when the Mail generation and the visible recipient's stable identity (Main
+   orchestrator, or the validated direct target) still match.
+4. **Active-only, immediate clear.** The suffix shows only while the recipient
+   lifecycle is `ACTIVE` and the snapshot is active; it clears at once when
+   either stops holding or the visible recipient changes. Narrow terminals omit
+   it rather than wrap the interaction line.
+5. **No text.** The kernel publishes character counts only; the TUI reads and
+   shows no output preview.
 
 ## Model list curation
 

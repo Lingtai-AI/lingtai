@@ -650,10 +650,16 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 		if !ok {
 			t.Fatal("manifest not a map")
 		}
-		for _, key := range []string{"agent_name", "language", "llm", "capabilities", "admin", "streaming", "max_turns"} {
+		for _, key := range []string{"agent_name", "language", "llm", "capabilities", "admin", "max_turns"} {
 			if _, exists := manifest[key]; !exists {
 				t.Errorf("manifest missing key %q", key)
 			}
+		}
+		// Streaming is kernel/System-owned runtime configuration
+		// (LINGTAI_STREAMING_ENABLED > settings/system.json > on); the TUI
+		// must not generate an init.json field the kernel no longer owns.
+		if _, exists := manifest["streaming"]; exists {
+			t.Errorf("manifest must not carry a streaming key, got %v", manifest["streaming"])
 		}
 		if manifest["agent_name"] != "test-agent" {
 			t.Errorf("agent_name = %v, want %q", manifest["agent_name"], "test-agent")

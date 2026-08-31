@@ -173,10 +173,7 @@
     // karma: allows lull (sleep other), interrupt, suspend actions.
     // nirvana: allows permanent destruction of other agents.
     // Avatars always get {} (no privileges) regardless of parent.
-    "admin": { "karma": true, "nirvana": false },
-
-    // Whether to use streaming for LLM responses.
-    "streaming": false
+    "admin": { "karma": true, "nirvana": false }
   },
 
   // =============================================================

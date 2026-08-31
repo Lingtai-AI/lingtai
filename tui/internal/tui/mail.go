@@ -18,6 +18,7 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/streamprogress"
 )
 
 const (
@@ -89,6 +90,7 @@ type mailRefreshMsg struct {
 	activity             fs.NetworkActivity
 	orchName             string // agent name from .agent.json (may change at runtime)
 	orchNickname         string // nickname from .agent.json
+	orchAgentID          string // stable agent_id from .agent.json (stream-progress identity)
 	initial              bool   // true only for the deferred initial rebuild (clears the loading banner)
 }
 
@@ -184,6 +186,7 @@ type MailModel struct {
 	orchAddr          string // 本我 address (from .agent.json)
 	orchName          string // 本我 agent name (true name)
 	orchNickname      string // 本我 nickname (display name override)
+	orchAgentID       string // 本我 stable manifest agent_id (stream-progress identity)
 	baseDir           string // .lingtai/ directory
 	visitExitHint     bool   // append subtle Esc-Esc return hint to the title row
 	verbose           verboseLevel
@@ -277,6 +280,18 @@ type MailModel struct {
 	// through NewMailModel — the render path only ever walks a legal order.
 	homeTelemetryDisplay []homeTelemetrySegment
 
+	// Stream-progress badge (stream_progress.go): the loopback fetcher, the one
+	// cached reading View() consumes, and the in-flight gate keyed by
+	// activation generation + recipient + a monotonic per-request serial.
+	// All I/O runs in fetchStreamProgressCmd off the render/input path.
+	streamProgressFetcher     streamProgressFetcher
+	streamProgress            streamProgressState
+	streamProgressSerial      uint64 // newest scheduled request; 0 = none yet
+	streamProgressInFlight    bool
+	streamProgressInFlightGen uint64
+	streamProgressInFlightFor streamRecipient
+	streamProgressInFlightAt  time.Time
+
 	// Home async-work stats resolve exactly like home telemetry: a background
 	// fs.CountDaemons() read, cached snapshot, in-flight debounce, TTL floor.
 	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders an all-zero row once loaded
@@ -289,11 +304,15 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	input := NewInputModel(humanDir)
 	input.textarea.Focus()
 	palette := NewPaletteModel()
-	// Resolve orchestrator address from .agent.json
+	// Resolve orchestrator address and stable agent_id from .agent.json
 	orchAddr := orchDir
+	orchAgentID := ""
 	if orchDir != "" {
-		if node, err := fs.ReadAgent(orchDir); err == nil && node.Address != "" {
-			orchAddr = node.Address
+		if node, err := fs.ReadAgent(orchDir); err == nil {
+			if node.Address != "" {
+				orchAddr = node.Address
+			}
+			orchAgentID = node.AgentID
 		}
 	}
 	pageSize = config.NormalizeMailPageSize(pageSize)
@@ -304,6 +323,7 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		orchestrator:      orchDir,
 		orchAddr:          orchAddr,
 		orchName:          orchName,
+		orchAgentID:       orchAgentID,
 		input:             input,
 		palette:           palette,
 		pollRate:          1 * time.Second,
@@ -314,7 +334,10 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		insightsEnabled:   insights,
 		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
-		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir), fs.MainAggregateWriter),
+		// Read-only loopback client for the kernel's stream-progress API; only
+		// ever invoked from a poll-tick command (see stream_progress.go).
+		streamProgressFetcher: streamprogress.NewClient(streamprogress.DefaultTimeout),
+		sessionCache:          fs.NewSessionCache(humanDir, filepath.Dir(baseDir), fs.MainAggregateWriter),
 		// Serial 1 is reserved for the one-shot deferred initial rebuild issued
 		// by Init; every later request is issued on the Update loop.
 		refreshRequestSerial: 1,
@@ -713,6 +736,7 @@ func (m MailModel) refreshMail() tea.Msg {
 		activity:             activity,
 		orchName:             orchName,
 		orchNickname:         orchNickname,
+		orchAgentID:          orchestrator.AgentID,
 	}
 }
 
@@ -1146,6 +1170,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.orchName = msg.orchName
 			}
 			m.orchNickname = msg.orchNickname
+			if msg.orchAgentID != "" {
+				m.orchAgentID = msg.orchAgentID
+			}
 			isActive := strings.EqualFold(m.orchState, "ACTIVE")
 			isIdle := strings.EqualFold(m.orchState, "IDLE")
 			if isActive && !m.wasActive {
@@ -1266,7 +1293,18 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if cmd := m.maybeScheduleHomeAsyncStats(time.Now()); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Stream-progress badge: one loopback read per tick for the visible
+		// ACTIVE recipient, off the render path (stream_progress.go).
+		if cmd := m.maybeScheduleStreamProgress(time.Now()); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		return m, tea.Batch(cmds...)
+
+	case streamProgressMsg:
+		// Async loopback read landed: accept only for the current generation
+		// and the currently visible recipient identity; otherwise clear/drop.
+		m.applyStreamProgress(msg)
+		return m, nil
 
 	case homeTelemetryMsg:
 		if msg.generation != m.generation {
@@ -2368,7 +2406,17 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 	// where their attention already is. Reuses the header's stateStyle/stateLabel
 	// and is independent of the verbose level.
 	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel())
-	indicator := stateStyle.Render(m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince) + staleElapsedFor(recipientLifecycle.state, recipientLifecycle.staleSeconds))
+	indicatorText := m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince) + staleElapsedFor(recipientLifecycle.state, recipientLifecycle.staleSeconds)
+	indicator := stateStyle.Render(indicatorText)
+	// Stream-progress suffix (" · N chars · delay 0.1s") beside "active Ns" — read
+	// from the cached loopback snapshot only (no I/O here), rendered only while
+	// the visible recipient is ACTIVE, and omitted rather than wrapped when the
+	// terminal is too narrow for the whole interaction line.
+	if suffix := m.streamProgressSuffix(recipientLifecycle.state); suffix != "" {
+		if lipgloss.Width(toLabel)+2+lipgloss.Width(indicatorText)+lipgloss.Width(suffix)+1 <= m.width {
+			indicator += StyleFaint.Render(suffix)
+		}
+	}
 	toLabel += "  " + indicator + " "
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
