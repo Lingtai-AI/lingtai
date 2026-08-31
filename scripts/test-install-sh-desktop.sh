@@ -179,13 +179,17 @@ file="${url##*/}"
 case "$url" in
   "https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v${EXPECTED_DESKTOP_VERSION}/scripts/"*)
     case "$file" in
-      install-macos-app.py|desktop_user_cli.py|verify-app-archive.py|support_bootstrap.py) ;;
-      *) echo "unexpected Desktop support file: $file" >&2; exit 66 ;;
+      install-macos-app.py|support_bootstrap.py) ;;
+      *) echo "unexpected raw-tag Desktop support file: $file" >&2; exit 66 ;;
     esac
     cp "$FIXTURE_DIR/$file" "$destination"
     if [[ "$CURL_FAIL" == "bootstrap-checksum" && "$file" == "support_bootstrap.py" ]]; then
       printf 'tampered\n' >> "$destination"
     fi
+    ;;
+  "https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v${EXPECTED_DESKTOP_VERSION}/desktop_user_cli.py"|\
+  "https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v${EXPECTED_DESKTOP_VERSION}/verify-app-archive.py")
+    cp "$FIXTURE_DIR/$file" "$destination"
     ;;
   "https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v${EXPECTED_DESKTOP_VERSION}")
     [[ "${CURL_FAIL:-0}" != "release" ]] || exit 22
@@ -471,8 +475,8 @@ assert_file "$success/home/.local/share/lingtai-desktop/receipts/0.1.9.json" "De
 [[ "$(wc -l < "$success/curl.log" | tr -d ' ')" == "7" ]] \
   || fail "first invocation did not make exactly four support and three release fixture reads"
 grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/install-macos-app.py' "$success/curl.log"
-grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/desktop_user_cli.py' "$success/curl.log"
-grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/verify-app-archive.py' "$success/curl.log"
+grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/desktop_user_cli.py' "$success/curl.log"
+grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/verify-app-archive.py' "$success/curl.log"
 grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/support_bootstrap.py' "$success/curl.log"
 grep -qx 'https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v0.1.9' "$success/curl.log"
 grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/LingTai-0.1.9-macOS-universal.app.tar.gz' "$success/curl.log"

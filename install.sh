@@ -73,6 +73,7 @@ UV_INSTALLER_URL="${LINGTAI_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}" 
 NODE_TOOLCHAIN_VERSION="${LINGTAI_NODE_VERSION:-22.12.0}"
 DESKTOP_VERSION="0.1.9"
 DESKTOP_RAW_BASE="https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop"
+DESKTOP_RELEASE_BASE="https://github.com/Lingtai-AI/lingtai-desktop/releases/download"
 # Audited from lingtai-desktop v0.1.9 commit
 # 33fc807b84cd7f2ec2482b629c7cfc2099aa6ad3. These are deliberately not
 # environment-overridable: the registered lazy bootstrap accepts only these
@@ -378,6 +379,8 @@ from pathlib import Path
 
 DESKTOP_VERSION = "@DESKTOP_VERSION@"
 RAW_BASE = "@DESKTOP_RAW_BASE@"
+RELEASE_BASE = "@DESKTOP_RELEASE_BASE@"
+RELEASE_ASSETS = {"desktop_user_cli.py", "verify-app-archive.py"}
 SUPPORT = {
     "install-macos-app.py": "@DESKTOP_INSTALLER_SHA256@",
     "desktop_user_cli.py": "@DESKTOP_CLI_SHA256@",
@@ -437,7 +440,10 @@ def main() -> int:
         scripts_root.mkdir(mode=0o700)
         for name, expected_sha in SUPPORT.items():
             destination = scripts_root / name
-            url = f"{RAW_BASE}/v{DESKTOP_VERSION}/scripts/{name}"
+            if name in RELEASE_ASSETS:
+                url = f"{RELEASE_BASE}/v{DESKTOP_VERSION}/{name}"
+            else:
+                url = f"{RAW_BASE}/v{DESKTOP_VERSION}/scripts/{name}"
             result = subprocess.run(
                 [curl, "-fsSL", "--max-time", "30", "-o", os.fspath(destination), url],
                 check=False,
@@ -496,6 +502,7 @@ PY
   sed \
     -e "s|@DESKTOP_VERSION@|$DESKTOP_VERSION|g" \
     -e "s|@DESKTOP_RAW_BASE@|$DESKTOP_RAW_BASE|g" \
+    -e "s|@DESKTOP_RELEASE_BASE@|$DESKTOP_RELEASE_BASE|g" \
     -e "s|@DESKTOP_INSTALLER_SHA256@|$DESKTOP_INSTALLER_SHA256|g" \
     -e "s|@DESKTOP_CLI_SHA256@|$DESKTOP_CLI_SHA256|g" \
     -e "s|@DESKTOP_VERIFIER_SHA256@|$DESKTOP_VERIFIER_SHA256|g" \
