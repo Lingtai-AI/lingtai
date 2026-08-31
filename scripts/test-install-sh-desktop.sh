@@ -52,9 +52,13 @@ mkdir -p "$FIXTURES"
 
 cat > "$FIXTURES/install-macos-app.py" <<'PY'
 #!/usr/bin/env python3
+import os
+from pathlib import Path
+
 from desktop_user_cli import bootstrap_main
 
 if __name__ == "__main__":
+    Path(os.environ["DESKTOP_INSTALLER_LOG"]).write_text("invoked\n", encoding="utf-8")
     raise SystemExit(bootstrap_main())
 PY
 
@@ -64,11 +68,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _launcher_bytes():
+    source = Path(__file__).parent / "support_bootstrap.py"
+    if not source.is_file():
+        raise SystemExit("stable support bootstrap source is missing")
+    payload = source.read_bytes()
+    if b"# lingtai-desktop-support-bootstrap-v1" not in payload[:512]:
+        raise SystemExit("stable support bootstrap source identity is invalid")
+    return payload
+
+
 def bootstrap_main(argv=None):
     expected = os.environ["EXPECTED_DESKTOP_VERSION"]
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments != ["--version", expected]:
         raise SystemExit("unexpected Desktop bootstrap argv")
+    _launcher_bytes()
     support = Path(__file__).parent
     verifier = support / "verify-app-archive.py"
     if not verifier.is_file():
@@ -130,9 +146,16 @@ if manifest.read_bytes() != b"fixture Desktop manifest\n":
     raise SystemExit("manifest fixture mismatch")
 PY
 
+cat > "$FIXTURES/support_bootstrap.py" <<'PY'
+#!/usr/bin/env python3
+# lingtai-desktop-support-bootstrap-v1
+"""Fixture for the stable managed-support bootstrap source."""
+PY
+
 FIXTURE_INSTALLER_SHA256="$(shasum -a 256 "$FIXTURES/install-macos-app.py" | awk '{print $1}')"
 FIXTURE_CLI_SHA256="$(shasum -a 256 "$FIXTURES/desktop_user_cli.py" | awk '{print $1}')"
 FIXTURE_VERIFIER_SHA256="$(shasum -a 256 "$FIXTURES/verify-app-archive.py" | awk '{print $1}')"
+FIXTURE_BOOTSTRAP_SHA256="$(shasum -a 256 "$FIXTURES/support_bootstrap.py" | awk '{print $1}')"
 
 cat > "$TEST_ROOT/fake-curl" <<'SH'
 #!/usr/bin/env bash
@@ -156,10 +179,13 @@ file="${url##*/}"
 case "$url" in
   "https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v${EXPECTED_DESKTOP_VERSION}/scripts/"*)
     case "$file" in
-      install-macos-app.py|desktop_user_cli.py|verify-app-archive.py) ;;
+      install-macos-app.py|desktop_user_cli.py|verify-app-archive.py|support_bootstrap.py) ;;
       *) echo "unexpected Desktop support file: $file" >&2; exit 66 ;;
     esac
     cp "$FIXTURE_DIR/$file" "$destination"
+    if [[ "$CURL_FAIL" == "bootstrap-checksum" && "$file" == "support_bootstrap.py" ]]; then
+      printf 'tampered\n' >> "$destination"
+    fi
     ;;
   "https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v${EXPECTED_DESKTOP_VERSION}")
     [[ "${CURL_FAIL:-0}" != "release" ]] || exit 22
@@ -205,9 +231,12 @@ invoke_case() (
     || fail "production Desktop CLI pin drifted"
   [[ "$DESKTOP_VERIFIER_SHA256" == "5496bbfaa6c5cb4b7744b6e65d799c43acb4942129a6be8e8509a7a36eb9b900" ]] \
     || fail "production Desktop verifier pin drifted"
+  [[ "$DESKTOP_BOOTSTRAP_SHA256" == "6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c41846ac02e6" ]] \
+    || fail "production Desktop stable-bootstrap pin drifted"
   DESKTOP_INSTALLER_SHA256="$FIXTURE_INSTALLER_SHA256"
   DESKTOP_CLI_SHA256="$FIXTURE_CLI_SHA256"
   DESKTOP_VERIFIER_SHA256="$FIXTURE_VERIFIER_SHA256"
+  DESKTOP_BOOTSTRAP_SHA256="$FIXTURE_BOOTSTRAP_SHA256"
 
   detect_os() { printf '%s\n' "$platform"; }
   resolve_source_provider() { BUNDLE_PROVIDER="github"; }
@@ -260,6 +289,7 @@ run_desktop_command() (
   export CURL_FAIL="$curl_mode"
   export EXPECTED_DESKTOP_VERSION="0.1.9"
   export DESKTOP_COMMAND_LOG="$case_root/command.log"
+  export DESKTOP_INSTALLER_LOG="$case_root/installer.log"
   "$case_root/home/.local/bin/lingtai-desktop" "$@"
 )
 
@@ -419,10 +449,12 @@ check_tui_portal_receipt "$success"
 assert_file "$success/home/.local/bin/lingtai-desktop" "Desktop launcher"
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$success/home/.local/bin/lingtai-desktop" \
   || fail "main install did not register the lazy command"
+grep -Fq "\"support_bootstrap.py\": \"$FIXTURE_BOOTSTRAP_SHA256\"" "$success/home/.local/bin/lingtai-desktop" \
+  || fail "generated lazy command did not bind the stable-bootstrap fixture digest"
 assert_absent "$success/curl.log" "main-install Desktop transport"
 assert_absent "$success/home/.local/share/lingtai-desktop" "main-install Desktop managed state"
 
-# First command execution obtains the three pinned support files, then the
+# First command execution obtains the four pinned support files, then the
 # fixture installer performs release API/archive/manifest reads, invokes its
 # independent verifier, atomically publishes managed state, and continues the
 # requested doctor command. The bootstrap occupies Desktop's future launcher
@@ -434,11 +466,14 @@ assert_file "$success/home/.local/share/lingtai-desktop/receipts/0.1.9.json" "De
   || fail "Desktop current link was not published"
 [[ "$(cat "$success/command.log")" == "doctor" ]] \
   || fail "first invocation did not continue the requested command"
-[[ "$(wc -l < "$success/curl.log" | tr -d ' ')" == "6" ]] \
-  || fail "first invocation did not make exactly three support and three release fixture reads"
+[[ "$(cat "$success/installer.log")" == "invoked" ]] \
+  || fail "first invocation did not invoke the verified Desktop installer"
+[[ "$(wc -l < "$success/curl.log" | tr -d ' ')" == "7" ]] \
+  || fail "first invocation did not make exactly four support and three release fixture reads"
 grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/install-macos-app.py' "$success/curl.log"
 grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/desktop_user_cli.py' "$success/curl.log"
 grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/verify-app-archive.py' "$success/curl.log"
+grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/support_bootstrap.py' "$success/curl.log"
 grep -qx 'https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v0.1.9' "$success/curl.log"
 grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/LingTai-0.1.9-macOS-universal.app.tar.gz' "$success/curl.log"
 grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/LingTai-0.1.9-macOS-universal.app.manifest.json' "$success/curl.log"
@@ -481,6 +516,34 @@ grep -q 'retry after confirming access to the public release' "$failure.first.ou
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$failure/home/.local/bin/lingtai-desktop" \
   || fail "failed first invocation did not preserve the retryable command"
 
+# A tampered stable bootstrap is rejected after the complete four-file support
+# read but before the verified installer runs. The managed-state boundary stays
+# empty and the original lazy command remains byte-for-byte retryable.
+checksum_failure="$TEST_ROOT/bootstrap-checksum-failure"
+invoke_case "$checksum_failure" darwin bootstrap-checksum > "$checksum_failure.out" 2>&1
+check_tui_portal_receipt "$checksum_failure"
+assert_absent "$checksum_failure/curl.log" "main-install checksum-failure transport"
+checksum_bootstrap="$checksum_failure/home/.local/bin/lingtai-desktop"
+checksum_bootstrap_sha="$(file_sha256 "$checksum_bootstrap")"
+checksum_bootstrap_mode="$(file_mode "$checksum_bootstrap")"
+set +e
+run_desktop_command "$checksum_failure" bootstrap-checksum doctor > "$checksum_failure.first.out" 2>&1
+checksum_failure_rc=$?
+set -e
+[[ "$checksum_failure_rc" != "0" ]] || fail "tampered stable bootstrap must fail clearly"
+[[ "$(wc -l < "$checksum_failure/curl.log" | tr -d ' ')" == "4" ]] \
+  || fail "stable-bootstrap checksum failure did not stop after four support reads"
+grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/support_bootstrap.py' "$checksum_failure/curl.log" \
+  || fail "stable-bootstrap checksum journey did not read the pinned support URL"
+grep -q 'Desktop installer support checksum mismatch: support_bootstrap.py' "$checksum_failure.first.out" \
+  || fail "stable-bootstrap checksum failure did not identify the tampered support file"
+assert_absent "$checksum_failure/installer.log" "checksum-failure installer invocation"
+assert_absent "$checksum_failure/home/.local/share/lingtai-desktop" "checksum-failure Desktop managed state"
+assert_file_unchanged "$checksum_bootstrap" "$checksum_bootstrap_sha" "$checksum_bootstrap_mode" \
+  "checksum-failure retryable Desktop bootstrap"
+grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$checksum_bootstrap" \
+  || fail "stable-bootstrap checksum failure did not preserve the retryable lazy command"
+
 # A failure after installer support is verified but before archive publication
 # also restores the bootstrap when it shared Desktop's future launcher path.
 release_failure="$TEST_ROOT/release-failure"
@@ -495,8 +558,8 @@ set -e
 assert_absent "$release_failure/home/.local/share/lingtai-desktop" "failed release Desktop state"
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$release_failure/home/.local/bin/lingtai-desktop" \
   || fail "release failure did not restore the retryable command"
-[[ "$(wc -l < "$release_failure/curl.log" | tr -d ' ')" == "4" ]] \
-  || fail "release failure did not stop after support plus release API fixtures"
+[[ "$(wc -l < "$release_failure/curl.log" | tr -d ' ')" == "5" ]] \
+  || fail "release failure did not stop after four support plus one release API fixture read"
 
 # Linux: byte-for-byte control flow beyond our fixture overrides stays on the
 # pre-existing TUI/Portal/runtime path and never consults Desktop transport.
