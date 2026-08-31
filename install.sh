@@ -79,7 +79,7 @@ DESKTOP_RAW_BASE="https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop"
 # exact installer-support bytes before running them.
 DESKTOP_INSTALLER_SHA256="d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9"
 DESKTOP_CLI_SHA256="0a681eacdf71daea137089e68204b780f6e065184689d9b56208a67c24facc95"
-DESKTOP_VERIFIER_SHA256="5496bbfaa6c5cb4b7744b6e65d799c43acb4942129a6be8e8509a7a36eb9b900"
+DESKTOP_VERIFIER_SHA256="745374c0634709fa235cd7b63af6cd78b79f99ef5d290157d6e7bd281b3e8fc2"
 DESKTOP_BOOTSTRAP_SHA256="6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c41846ac02e6"
 
 # The single package index used ONLY for third-party dependencies of the
