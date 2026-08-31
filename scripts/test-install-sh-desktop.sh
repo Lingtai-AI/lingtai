@@ -191,12 +191,20 @@ invoke_case() (
   export FIXTURE_DIR="$FIXTURES"
   export CURL_LOG="$case_root/curl.log"
   export CURL_FAIL="$curl_mode"
-  export EXPECTED_DESKTOP_VERSION="0.1.8"
+  export EXPECTED_DESKTOP_VERSION="0.1.9"
   export LINGTAI_INSTALL_SH_SOURCE_ONLY=1
   # shellcheck source=../install.sh
   source "$INSTALL_SH"
-  # Production pins are immutable. Source-only tests replace the internal
-  # constants with hashes for these local installer-support fixtures.
+  # Lock the production trust set before source-only tests replace its hashes
+  # with the local installer-support fixture hashes.
+  [[ "$DESKTOP_VERSION" == "0.1.9" ]] \
+    || fail "production Desktop version pin drifted"
+  [[ "$DESKTOP_INSTALLER_SHA256" == "d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9" ]] \
+    || fail "production Desktop installer pin drifted"
+  [[ "$DESKTOP_CLI_SHA256" == "0a681eacdf71daea137089e68204b780f6e065184689d9b56208a67c24facc95" ]] \
+    || fail "production Desktop CLI pin drifted"
+  [[ "$DESKTOP_VERIFIER_SHA256" == "5496bbfaa6c5cb4b7744b6e65d799c43acb4942129a6be8e8509a7a36eb9b900" ]] \
+    || fail "production Desktop verifier pin drifted"
   DESKTOP_INSTALLER_SHA256="$FIXTURE_INSTALLER_SHA256"
   DESKTOP_CLI_SHA256="$FIXTURE_CLI_SHA256"
   DESKTOP_VERIFIER_SHA256="$FIXTURE_VERIFIER_SHA256"
@@ -250,7 +258,7 @@ run_desktop_command() (
   export FIXTURE_DIR="$FIXTURES"
   export CURL_LOG="$case_root/curl.log"
   export CURL_FAIL="$curl_mode"
-  export EXPECTED_DESKTOP_VERSION="0.1.8"
+  export EXPECTED_DESKTOP_VERSION="0.1.9"
   export DESKTOP_COMMAND_LOG="$case_root/command.log"
   "$case_root/home/.local/bin/lingtai-desktop" "$@"
 )
@@ -420,20 +428,20 @@ assert_absent "$success/home/.local/share/lingtai-desktop" "main-install Desktop
 # requested doctor command. The bootstrap occupies Desktop's future launcher
 # path here, so this also proves the ownership hand-off/replacement path.
 run_desktop_command "$success" 0 doctor > "$success.first.out" 2>&1
-assert_file "$success/home/.local/share/lingtai-desktop/versions/0.1.8/LingTai.app/Contents/MacOS/LingTai" "Desktop App"
-assert_file "$success/home/.local/share/lingtai-desktop/receipts/0.1.8.json" "Desktop receipt"
+assert_file "$success/home/.local/share/lingtai-desktop/versions/0.1.9/LingTai.app/Contents/MacOS/LingTai" "Desktop App"
+assert_file "$success/home/.local/share/lingtai-desktop/receipts/0.1.9.json" "Desktop receipt"
 [[ -L "$success/home/.local/share/lingtai-desktop/current" ]] \
   || fail "Desktop current link was not published"
 [[ "$(cat "$success/command.log")" == "doctor" ]] \
   || fail "first invocation did not continue the requested command"
 [[ "$(wc -l < "$success/curl.log" | tr -d ' ')" == "6" ]] \
   || fail "first invocation did not make exactly three support and three release fixture reads"
-grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.8/scripts/install-macos-app.py' "$success/curl.log"
-grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.8/scripts/desktop_user_cli.py' "$success/curl.log"
-grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.8/scripts/verify-app-archive.py' "$success/curl.log"
-grep -qx 'https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v0.1.8' "$success/curl.log"
-grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.8/LingTai-0.1.8-macOS-universal.app.tar.gz' "$success/curl.log"
-grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.8/LingTai-0.1.8-macOS-universal.app.manifest.json' "$success/curl.log"
+grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/install-macos-app.py' "$success/curl.log"
+grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/desktop_user_cli.py' "$success/curl.log"
+grep -qx 'https://raw.githubusercontent.com/Lingtai-AI/lingtai-desktop/v0.1.9/scripts/verify-app-archive.py' "$success/curl.log"
+grep -qx 'https://api.github.com/repos/Lingtai-AI/lingtai-desktop/releases/tags/v0.1.9' "$success/curl.log"
+grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/LingTai-0.1.9-macOS-universal.app.tar.gz' "$success/curl.log"
+grep -qx 'https://github.com/Lingtai-AI/lingtai-desktop/releases/download/v0.1.9/LingTai-0.1.9-macOS-universal.app.manifest.json' "$success/curl.log"
 [[ -z "$(find "$success/tmp" -maxdepth 1 -name 'lingtai-desktop-bootstrap-*' -print -quit)" ]] \
   || fail "successful first invocation leaked its installer-support temporary directory"
 
@@ -468,8 +476,8 @@ failure_rc=$?
 set -e
 [[ "$failure_rc" != "0" ]] || fail "unavailable first-execution support must fail clearly"
 assert_absent "$failure/home/.local/share/lingtai-desktop" "failed Desktop bootstrap"
-grep -q 'public repository/tag prerequisite is not yet satisfied' "$failure.first.out" \
-  || fail "failure output did not state the public availability prerequisite"
+grep -q 'retry after confirming access to the public release' "$failure.first.out" \
+  || fail "failure output did not state the retryable public-release access requirement"
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$failure/home/.local/bin/lingtai-desktop" \
   || fail "failed first invocation did not preserve the retryable command"
 
