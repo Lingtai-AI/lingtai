@@ -132,6 +132,13 @@ func (a *App) installMailModel(m MailModel) {
 	a.mailGeneration++
 	m.generation = a.mailGeneration
 	m.advancePollEpoch()
+	// Detached activity work is activation-local. A first deferred rebuild may
+	// briefly coexist with the first periodic refresh, but the periodic lane
+	// itself remains single-flight thereafter.
+	m.mailRefreshInFlight = false
+	m.mailRefreshInFlightSerial = 0
+	m.mailRefreshPending = false
+	m.networkActivityInFlight = false
 	// Durable direct-unread operation results are activation-local. A preserved
 	// Mail model can return after prior lane results were routed through a
 	// visited context, so a new activation must not retain unfinishable
@@ -406,7 +413,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case mailRefreshMsg, mailPersistMsg, homeTelemetryMsg, homeAsyncStatsMsg:
+	case mailRefreshMsg, mailPersistMsg, networkActivityMsg, homeTelemetryMsg, homeAsyncStatsMsg:
 		// Mail content/count rebuilds, older pages, post-frame persistence, and
 		// telemetry can outlive the view that launched them. Route all at the root so Projects/Help
 		// cannot drop Mail's state machine; MailModel owns generation acceptance.

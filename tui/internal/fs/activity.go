@@ -42,7 +42,8 @@ type DaemonCounts struct {
 }
 
 // ComputeNetworkActivity returns a lightweight activity summary without reading
-// mailboxes, ledgers, contacts, or token logs.
+// mailboxes, contacts, or token logs. Daemon counts may tail each live agent's
+// bounded dispatch ledger, but never enumerate its lifetime daemon directory.
 func ComputeNetworkActivity(baseDir string) (NetworkActivity, error) {
 	nodes, err := DiscoverAgents(baseDir)
 	if err != nil {
@@ -360,69 +361,65 @@ type daemonStateFile struct {
 	FinishedAt json.RawMessage `json:"finished_at"`
 }
 
-// daemonListWindow bounds the daemon runs shown by the live kanban summary and
-// the mail async-work row to runs whose run directory was modified within the
-// last 10 minutes. Done/active/failed states are all included while recent.
-// Older historical runs remain browsable through the /daemons view; the
-// per-second dashboard never opens their state files, so a quiet week of
-// history costs no IO on the 1s tick.
+// daemonListWindow bounds the daemon runs shown by the live network and Mail
+// summaries to runs whose exact dispatch-ledger-selected directory was modified
+// within the last 10 minutes. Done/active/failed states are all included while
+// recent. Historical runs remain available to explicit diagnostics; recurring
+// UI paths never enumerate the lifetime daemons/ directory.
 const daemonListWindow = 10 * time.Minute
 
 // withinDaemonListWindow reports whether a run's directory mtime is fresh
-// enough for the live daemon summary to scan it. The boundary is inclusive: a
-// run exactly daemonListWindow old is still shown. Future mtimes (clock skew)
+// enough for the live daemon summary to inspect it. The boundary is inclusive:
+// a run exactly daemonListWindow old is still shown. Future mtimes (clock skew)
 // yield a negative age and are treated as fresh.
 func withinDaemonListWindow(runModTime, now time.Time) bool {
 	return now.Sub(runModTime) <= daemonListWindow
 }
 
-// CountDaemons counts parseable daemon.json files under agentDir/daemons whose
-// run directory was modified within the last daemonListWindow. The recency gate
-// runs on directory metadata already returned by ReadDir, so stale historical
-// runs are skipped before any daemon.json read: the per-second kanban/mail
-// summary only ever opens state files for recently-active runs.
-func CountDaemons(agentDir string) DaemonCounts {
-	daemonDir := filepath.Join(agentDir, "daemons")
-	entries, err := os.ReadDir(daemonDir)
-	if err != nil {
-		return DaemonCounts{}
+type recentDaemonRun struct {
+	directory string
+	card      daemonCard
+}
+
+// readRecentDaemonRuns selects at most the bounded dispatch-ledger tail, then
+// checks only those exact run directories. It deliberately has no ReadDir
+// fallback: an unavailable/malformed ledger yields an empty recent snapshot
+// rather than turning a one-second UI path into an O(lifetime history) scan.
+func readRecentDaemonRuns(agentDir string) []recentDaemonRun {
+	records, _, _ := readKanbanDispatches(agentDir, KanbanReadLimit, KanbanJSONLByteLimit, nil)
+	if len(records) == 0 {
+		return nil
 	}
 
+	daemonDir := filepath.Join(agentDir, "daemons")
 	now := time.Now()
-	var counts DaemonCounts
-	for _, entry := range entries {
-		var path string
-		if entry.IsDir() {
-			path = filepath.Join(daemonDir, entry.Name(), "daemon.json")
-		} else if entry.Name() == "daemon.json" {
-			path = filepath.Join(daemonDir, entry.Name())
-		} else {
+	runs := make([]recentDaemonRun, 0, len(records))
+	for _, record := range records {
+		runDir := filepath.Join(daemonDir, record.RunID)
+		info, err := os.Lstat(runDir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !withinDaemonListWindow(info.ModTime(), now) {
 			continue
 		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if !withinDaemonListWindow(info.ModTime(), now) {
-			continue
-		}
-		state, ok := readDaemonStateFile(path)
+		card, ok := readKanbanDaemonCard(filepath.Join(runDir, "daemon.json"), nil)
 		if !ok {
 			continue
 		}
-		counts.Total++
-		switch stateBucket(state.State) {
-		case "running":
-			if isRunningDaemonState(state) {
-				counts.Running++
-			}
-		case "queued":
-			counts.Queued++
-		case "done":
-			counts.Done++
-		case "failed":
-			counts.Failed++
+		if card.RunID == "" {
+			card.RunID = record.RunID
 		}
+		runs = append(runs, recentDaemonRun{directory: runDir, card: card})
+	}
+	return runs
+}
+
+// CountDaemons classifies only recent runs selected by the bounded append-only
+// dispatch ledger. It never lists daemons/, so its cost is independent of the
+// agent's lifetime run-directory count.
+func CountDaemons(agentDir string) DaemonCounts {
+	runs := readRecentDaemonRuns(agentDir)
+	counts := DaemonCounts{Total: len(runs)}
+	for _, run := range runs {
+		addDaemonDetailState(&counts, run.card)
 	}
 	return counts
 }

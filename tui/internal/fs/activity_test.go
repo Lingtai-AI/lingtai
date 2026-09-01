@@ -143,6 +143,19 @@ func TestCountDaemons(t *testing.T) {
 	}
 }
 
+func TestCountDaemonsUsesDispatchLedgerOnly(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "listed", map[string]interface{}{"state": "running"})
+	// A fresh valid historical directory that was never accepted into the
+	// dispatch ledger must not be discovered by a recurring UI read.
+	writeJSON(t, filepath.Join(agentDir, "daemons", "unlisted", "daemon.json"), map[string]interface{}{"state": "running"})
+
+	counts := CountDaemons(agentDir)
+	if counts.Total != 1 || counts.Running != 1 {
+		t.Fatalf("dispatch-only counts = %+v, want exactly the listed running daemon", counts)
+	}
+}
+
 func TestRecentLingtaiDaemonModelsUsesHomeWindowAndExactBackend(t *testing.T) {
 	agentDir := t.TempDir()
 	writeDaemonState(t, agentDir, "fresh-running", map[string]interface{}{
@@ -387,9 +400,26 @@ func writeStaleHeartbeat(t *testing.T, dir string) {
 	}
 }
 
+func appendDaemonDispatch(t *testing.T, agentDir, runID string) {
+	t.Helper()
+	path := filepath.Join(agentDir, "daemons", ".dispatch-ledger.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir dispatch ledger: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open dispatch ledger: %v", err)
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, `{"schema":"lingtai.daemon_dispatch/v1","sequence":%d,"run_id":%q,"created_at":%q}`+"\n", time.Now().UnixNano(), runID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("append dispatch ledger: %v", err)
+	}
+}
+
 func writeDaemonState(t *testing.T, agentDir, runID string, state map[string]interface{}) {
 	t.Helper()
 	writeJSON(t, filepath.Join(agentDir, "daemons", runID, "daemon.json"), state)
+	appendDaemonDispatch(t, agentDir, runID)
 }
 
 func writeMalformedDaemonState(t *testing.T, agentDir, runID string) {
@@ -401,6 +431,7 @@ func writeMalformedDaemonState(t *testing.T, agentDir, runID string) {
 	if err := os.WriteFile(path, []byte("{bad json"), 0o644); err != nil {
 		t.Fatalf("write malformed daemon: %v", err)
 	}
+	appendDaemonDispatch(t, agentDir, runID)
 }
 
 func TestComputeNetworkActivity_StatusActiveTurnEvidence(t *testing.T) {

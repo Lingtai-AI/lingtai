@@ -642,6 +642,8 @@ func TestDaemonRecentLedgerSummaryReadsOnlyWindow(t *testing.T) {
 	writeDaemonLedger(t, agentDir, "fresh-b", []string{
 		`{"input":300,"output":60,"thinking":15,"cached":120}`,
 	})
+	writeDaemonState(t, agentDir, "fresh-a", map[string]interface{}{"state": "done"})
+	writeDaemonState(t, agentDir, "fresh-b", map[string]interface{}{"state": "done"})
 	// In-window CLI-backend run with no per-call ledger: falls back to cli_tokens.
 	writeDaemonState(t, agentDir, "fresh-cli", map[string]interface{}{
 		"cli_tokens": map[string]interface{}{"input": 500, "output": 100, "thinking": 20, "cached": 50, "calls": 3},
@@ -650,6 +652,7 @@ func TestDaemonRecentLedgerSummaryReadsOnlyWindow(t *testing.T) {
 	writeDaemonLedger(t, agentDir, "stale", []string{
 		`{"input":99999,"output":99999,"thinking":99999,"cached":99999}`,
 	})
+	writeDaemonState(t, agentDir, "stale", map[string]interface{}{"state": "done"})
 	inside := time.Now().Add(-(daemonListWindow - time.Second))
 	for _, runID := range []string{"fresh-a", "fresh-b", "fresh-cli"} {
 		setRunDirMtime(t, agentDir, runID, inside)

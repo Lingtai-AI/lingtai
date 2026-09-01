@@ -95,10 +95,22 @@ func directOrderingIssueRefresh(t *testing.T, mail MailModel) (MailModel, tea.Cm
 func directOrderingRunRefresh(t *testing.T, cmd tea.Cmd, context string) tea.Msg {
 	t.Helper()
 	msg := cmd()
-	if _, ok := msg.(mailRefreshMsg); !ok {
-		t.Fatalf("%s: refresh command produced %T, want mailRefreshMsg", context, msg)
+	if _, ok := msg.(mailRefreshMsg); ok {
+		return msg
 	}
-	return msg
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, nested := range batch {
+			if nested == nil {
+				continue
+			}
+			nestedMsg := nested()
+			if _, ok := nestedMsg.(mailRefreshMsg); ok {
+				return nestedMsg
+			}
+		}
+	}
+	t.Fatalf("%s: refresh command produced %T without mailRefreshMsg", context, msg)
+	return nil
 }
 
 func directOrderingMailHas(messages []fs.MailMessage, marker string) bool {
@@ -150,17 +162,29 @@ func TestDirectRefreshNewestAcceptedWinsOverLateOlderCompletion(t *testing.T) {
 	mail, cmdA = directOrderingIssueRefresh(t, mail)
 	msgA := directOrderingRunRefresh(t, cmdA, "older request A")
 
-	// The world then genuinely advances: a new safe agent-b manifest appears and
-	// a newer strict direct message for agent-a arrives. Request B is issued
-	// after A and observes that newer state.
+	// The world then genuinely advances while A is still preparing. A second
+	// request is coalesced rather than launching overlapping filesystem work.
 	directPerformanceWriteManifest(t, fixture.targetB.Directory, fixture.targetB.AgentID, "Bravo", fixture.targetB.Address, false)
 	mail.cache.Messages = append(append([]fs.MailMessage(nil), mail.cache.Messages...),
 		directPerformanceIncoming(fixture.targetA, 2, markerNew))
-	mail, cmdB = directOrderingIssueRefresh(t, mail)
-	msgB := directOrderingRunRefresh(t, cmdB, "newer request B")
+	serialA := mail.refreshRequestSerial
+	var coalesced tea.Cmd
+	mail, coalesced = mail.issueRefreshRequest()
+	if coalesced != nil || mail.refreshRequestSerial != serialA {
+		t.Fatalf("overlapping request was not coalesced: cmd=%v serial=%d want=%d", coalesced != nil, mail.refreshRequestSerial, serialA)
+	}
 
-	// B completes first and is accepted: every component of its payload
-	// installs together.
+	// A lands and the matching owner immediately launches the one coalesced B
+	// command. Write the genuinely newer message before executing that command;
+	// its real RefreshRecent path must observe the mailbox update without a timer.
+	mail, cmdB = mail.Update(msgA)
+	if cmdB == nil || !mail.mailRefreshInFlight || mail.mailRefreshInFlightSerial != serialA+1 {
+		t.Fatalf("accepted A did not launch coalesced B: cmd=%v inFlight=%v owner=%d", cmdB != nil, mail.mailRefreshInFlight, mail.mailRefreshInFlightSerial)
+	}
+	if err := fs.WriteMail(fixture.humanDir, fixture.targetA.Directory, fixture.targetA.Address, directPerformanceHuman, "new direct message", markerNew); err != nil {
+		t.Fatalf("write newer incoming mail: %v", err)
+	}
+	msgB := directOrderingRunRefresh(t, cmdB, "coalesced newer request B")
 	mail, _ = mail.Update(msgB)
 	if !directOrderingMailHas(mail.cache.Messages, markerNew) {
 		t.Fatalf("accepted B did not install its mailbox cache: marker %q missing", markerNew)

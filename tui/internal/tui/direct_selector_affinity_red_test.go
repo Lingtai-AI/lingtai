@@ -554,6 +554,12 @@ func TestDirectV1AcceptedRefreshReconcilesCurrentTarget(t *testing.T) {
 	reboundOutbox := directAffinityOutbox(t, fixture.humanDir)
 	if reboundSendCmd == nil {
 		t.Error("send through accepted rebound route returned no refresh command")
+	} else {
+		var follow tea.Cmd
+		app, follow = directAffinityApply(app, reboundSendCmd())
+		if follow != nil {
+			app = directAffinityApplyPreparedResult(t, app, follow, "rebound send direct unread")
+		}
 	}
 	if len(reboundOutbox) != 1 {
 		t.Fatalf("rebound send wrote %d outbox messages, want 1", len(reboundOutbox))
@@ -825,10 +831,14 @@ func TestDirectV1RecipientChromeUsesSelectedAgentLifecycle(t *testing.T) {
 		generation: app.mail.generation,
 		state:      "active",
 		alive:      true,
+	})
+	app, _ = directAffinityApply(app, networkActivityMsg{
+		generation: app.mail.generation,
 		activity: fs.NetworkActivity{
 			Status:       fs.NetworkStatusActive,
 			ActiveAgents: 3,
 		},
+		ok: true,
 	})
 	app.mail.activeSince = time.Now().Add(-12 * time.Second)
 
