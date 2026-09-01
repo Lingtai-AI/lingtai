@@ -1,6 +1,34 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func mailPollRefreshFromCmd(t *testing.T, cmd tea.Cmd) mailRefreshMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("refresh command is nil")
+	}
+	msg := cmd()
+	if refresh, ok := msg.(mailRefreshMsg); ok {
+		return refresh
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, nested := range batch {
+			if nested == nil {
+				continue
+			}
+			if refresh, ok := nested().(mailRefreshMsg); ok {
+				return refresh
+			}
+		}
+	}
+	t.Fatalf("refresh command produced %T without mailRefreshMsg", msg)
+	return mailRefreshMsg{}
+}
 
 func newPollEpochTestApp(t *testing.T) App {
 	t.Helper()
@@ -54,6 +82,9 @@ func TestMailPollLoopEpochRejectsOldTickAfterSameGenerationReturn(t *testing.T) 
 		t.Fatal("old tick returned a refresh/rearm command after same-generation return")
 	}
 
+	// The return command has not been executed in this white-box test. Model its
+	// prepared completion before checking the next live tick's epoch behavior.
+	returned.mail.mailRefreshInFlight = false
 	liveEpoch := returned.mail.pollEpoch
 	updatedModel, cmd = returned.Update(tickMsg{
 		generation: returned.mail.generation,
@@ -71,6 +102,85 @@ func TestMailPollLoopEpochRejectsOldTickAfterSameGenerationReturn(t *testing.T) 
 	}
 	if updated.mail.pollEpoch != liveEpoch {
 		t.Fatalf("live tick changed poll epoch from %d to %d", liveEpoch, updated.mail.pollEpoch)
+	}
+}
+
+func TestMailRefreshSingleFlightCoalescesOverlappingRequests(t *testing.T) {
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m.generation = 7
+
+	m, first := m.issueRefreshRequest()
+	if first == nil || !m.mailRefreshInFlight {
+		t.Fatal("first refresh request did not start the single-flight lane")
+	}
+	serial := m.refreshRequestSerial
+	m, overlapping := m.issueRefreshRequest()
+	if overlapping != nil {
+		t.Fatal("overlapping refresh request launched a second filesystem command")
+	}
+	if m.refreshRequestSerial != serial {
+		t.Fatalf("coalesced request advanced serial from %d to %d", serial, m.refreshRequestSerial)
+	}
+	if !m.mailRefreshPending {
+		t.Fatal("coalesced request was not retained as one pending demand")
+	}
+
+	completed := first()
+	var next tea.Cmd
+	m, next = m.Update(completed)
+	if next == nil || !m.mailRefreshInFlight || m.mailRefreshInFlightSerial != serial+1 || m.mailRefreshPending {
+		t.Fatalf("owner completion did not launch exactly one follow-up: cmd:%v inFlight:%v owner:%d pending:%v", next != nil, m.mailRefreshInFlight, m.mailRefreshInFlightSerial, m.mailRefreshPending)
+	}
+	m, _ = m.Update(mailPollRefreshFromCmd(t, next))
+	if m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 0 {
+		t.Fatalf("follow-up completion did not release lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+	}
+}
+
+func TestMailInitialCompletionCannotReleaseNewerPeriodicLane(t *testing.T) {
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m.generation = 8
+
+	// Capture the one-shot initial command at serial 1, then let the first tick
+	// launch periodic serial 2 while that startup work is still running.
+	initial := m.initialRebuild
+	m, periodic := m.issueRefreshRequest()
+	if periodic == nil || m.mailRefreshInFlightSerial != 2 {
+		t.Fatalf("periodic lane = cmd:%v owner:%d, want command owned by serial 2", periodic != nil, m.mailRefreshInFlightSerial)
+	}
+
+	m, _ = m.Update(initial())
+	if !m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 2 {
+		t.Fatalf("older initial completion released newer lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+	}
+
+	m, _ = m.Update(periodic())
+	if m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 0 {
+		t.Fatalf("owning periodic completion did not release lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+	}
+}
+
+func TestNetworkActivityLaneUsesInFlightGateAndTTL(t *testing.T) {
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m.generation = 9
+	now := time.Now()
+	first := m.maybeScheduleNetworkActivity(now)
+	if first == nil || !m.networkActivityInFlight {
+		t.Fatal("first network-activity request did not start")
+	}
+	if overlapping := m.maybeScheduleNetworkActivity(now); overlapping != nil {
+		t.Fatal("network-activity lane launched overlapping filesystem work")
+	}
+
+	m, _ = m.Update(first())
+	if m.networkActivityInFlight || m.networkActivityLastFetch.IsZero() {
+		t.Fatalf("completion state = inFlight:%v lastFetch:%v", m.networkActivityInFlight, m.networkActivityLastFetch)
+	}
+	if withinTTL := m.maybeScheduleNetworkActivity(m.networkActivityLastFetch.Add(networkActivityTTL - time.Nanosecond)); withinTTL != nil {
+		t.Fatal("network-activity lane ignored its TTL floor")
+	}
+	if afterTTL := m.maybeScheduleNetworkActivity(m.networkActivityLastFetch.Add(networkActivityTTL)); afterTTL == nil {
+		t.Fatal("network-activity lane did not refresh at the TTL boundary")
 	}
 }
 

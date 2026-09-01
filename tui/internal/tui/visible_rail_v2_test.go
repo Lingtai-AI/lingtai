@@ -1293,6 +1293,9 @@ func TestVisibleRailV2ReorderResizeAndScroll(t *testing.T) {
 	// A removed row cannot be resurrected by presentation badge state.
 	model, _ = app.Update(MarkdownViewerCloseMsg{})
 	app = model.(App)
+	// This white-box test does not execute the batched return refresh; model its
+	// completion before issuing the explicit prepared removal snapshot below.
+	app.mail.mailRefreshInFlight = false
 	if err := os.RemoveAll(fixture.targets[3].Directory); err != nil {
 		t.Fatalf("remove Delta route: %v", err)
 	}

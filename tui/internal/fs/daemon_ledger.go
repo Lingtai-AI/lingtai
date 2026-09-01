@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 )
 
 // DaemonLedgerEntry is a single per-call token_ledger.jsonl line from a
@@ -77,6 +76,54 @@ type DaemonDetailSnapshot struct {
 	TokenReads   []BoundedReadStats
 	RunIDs       []string
 	WindowState  string // available, empty, recent, partial, malformed, or unavailable
+}
+
+// RecentDaemonActivity is the one bounded snapshot consumed by Mail's async
+// footer: state buckets, recent token totals, and exact LingTai model names all
+// come from the same dispatch-ledger-selected run cards. This avoids three
+// independent bounded traversals and every lifetime-directory scan on refresh.
+type RecentDaemonActivity struct {
+	Counts DaemonCounts
+	Tokens TokenTotals
+	Models []string
+}
+
+// ReadRecentDaemonActivity reads at most the bounded dispatch tail and only the
+// exact run directories still inside daemonListWindow. Per-run token ledgers are
+// tailed through the same bounded reader used by Kanban; missing ledgers fall
+// back to the aggregate token snapshot in daemon.json.
+func ReadRecentDaemonActivity(agentDir string) RecentDaemonActivity {
+	runs := readRecentDaemonRuns(agentDir)
+	result := RecentDaemonActivity{Counts: DaemonCounts{Total: len(runs)}}
+	for _, run := range runs {
+		card := run.card
+		addDaemonDetailState(&result.Counts, card)
+		if card.Backend == "lingtai" && card.Model != "" {
+			result.Models = append(result.Models, card.Model)
+		}
+
+		window := readKanbanDaemonTokenWindow(run.directory, nil)
+		if len(window.Entries) > 0 {
+			for _, entry := range window.Entries {
+				result.Tokens.Input += entry.Input
+				result.Tokens.Output += entry.Output
+				result.Tokens.Thinking += entry.Thinking
+				result.Tokens.Cached += entry.Cached
+				result.Tokens.APICalls++
+			}
+			continue
+		}
+		fallback := map[string]TokenTotals{}
+		addDaemonFallbackTotals(fallback, card)
+		for _, totals := range fallback {
+			result.Tokens.Input += totals.Input
+			result.Tokens.Output += totals.Output
+			result.Tokens.Thinking += totals.Thinking
+			result.Tokens.Cached += totals.Cached
+			result.Tokens.APICalls += totals.APICalls
+		}
+	}
+	return result
 }
 
 // ReadDaemonDetailSnapshot reads only the newest recentRunN run directories
@@ -193,89 +240,21 @@ func DaemonRecentLedger(agentDir string, recentN int) []DaemonLedgerEntry {
 	return recent
 }
 
-// DaemonRecentLedgerSummary aggregates token usage and API-call counts across
-// only the daemon runs whose run directory was modified within daemonListWindow
-// (10 minutes), mirroring CountDaemons' recency gate. The mail async-work row
-// and any other per-second consumer call this so token ledgers are never opened
-// for stale historical runs: one ReadDir yields the directory metadata, and only
-// in-window runs get their daemon.json / token_ledger.jsonl read. Per-run totals
-// follow ReadDaemonDetailSnapshot: the per-call ledger when present, else the
-// daemon.json cli_tokens/legacy snapshot (CLI backends write no ledger).
+// DaemonRecentLedgerSummary preserves the public recent-summary helper while
+// routing it through the shared bounded dispatch-ledger snapshot.
 func DaemonRecentLedgerSummary(agentDir string) TokenTotals {
-	daemonDir := filepath.Join(agentDir, "daemons")
-	entries, err := os.ReadDir(daemonDir)
-	if err != nil {
-		return TokenTotals{}
-	}
-
-	now := time.Now()
-	var totals TokenTotals
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if !withinDaemonListWindow(info.ModTime(), now) {
-			continue
-		}
-		runDir := filepath.Join(daemonDir, entry.Name())
-		card := readDaemonCard(filepath.Join(runDir, "daemon.json"))
-		if ledger := readLedgerEntries(filepath.Join(runDir, "logs", "token_ledger.jsonl")); len(ledger) > 0 {
-			for _, e := range ledger {
-				totals.Input += e.Input
-				totals.Output += e.Output
-				totals.Thinking += e.Thinking
-				totals.Cached += e.Cached
-				totals.APICalls++
-			}
-			continue
-		}
-		byProvider := map[string]TokenTotals{}
-		addDaemonFallbackTotals(byProvider, card)
-		for _, t := range byProvider {
-			totals.Input += t.Input
-			totals.Output += t.Output
-			totals.Thinking += t.Thinking
-			totals.Cached += t.Cached
-			totals.APICalls += t.APICalls
-		}
-	}
-	return totals
+	return ReadRecentDaemonActivity(agentDir).Tokens
 }
 
-// RecentLingtaiDaemonModels returns the raw daemon.json model strings for
-// backend="lingtai" runs in the same fresh daemonListWindow as CountDaemons and
-// the Telegram-aligned home async row. It deliberately reads only daemon cards:
-// historical run directories are skipped before opening their files, non-lingtai
-// backends are excluded, and no model is derived from presets or token ledgers.
+// RecentLingtaiDaemonModels preserves the public model-only helper without
+// paying for token tails the caller cannot use. The run-card selection is still
+// dispatch-ledger bounded and has no lifetime-directory fallback.
 func RecentLingtaiDaemonModels(agentDir string) []string {
-	daemonDir := filepath.Join(agentDir, "daemons")
-	entries, err := os.ReadDir(daemonDir)
-	if err != nil {
-		return nil
-	}
-
-	now := time.Now()
-	var models []string
-	for _, entry := range entries {
-		var cardPath string
-		if entry.IsDir() {
-			cardPath = filepath.Join(daemonDir, entry.Name(), "daemon.json")
-		} else if entry.Name() == "daemon.json" {
-			cardPath = filepath.Join(daemonDir, entry.Name())
-		} else {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil || !withinDaemonListWindow(info.ModTime(), now) {
-			continue
-		}
-		card := readDaemonCard(cardPath)
-		if card.Backend == "lingtai" && card.Model != "" {
-			models = append(models, card.Model)
+	runs := readRecentDaemonRuns(agentDir)
+	models := make([]string, 0, len(runs))
+	for _, run := range runs {
+		if run.card.Backend == "lingtai" && run.card.Model != "" {
+			models = append(models, run.card.Model)
 		}
 	}
 	return models

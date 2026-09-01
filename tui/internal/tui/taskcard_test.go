@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,18 @@ func writeTaskCardDaemon(t *testing.T, agentDir, runID, raw string) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := filepath.Join(agentDir, "daemons", ".dispatch-ledger.jsonl")
+	f, err := os.OpenFile(ledger, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(f, `{"schema":"lingtai.daemon_dispatch/v1","sequence":%d,"run_id":%q,"created_at":%q}`+"\n", time.Now().UnixNano(), runID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return dir

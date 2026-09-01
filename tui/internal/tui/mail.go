@@ -86,10 +86,15 @@ type mailRefreshMsg struct {
 	alive                bool
 	state                string // active, idle, stuck, asleep, stale, suspended, or ""
 	staleSeconds         int    // ordinary stale heartbeat age; zero outside the stale presentation
-	activity             fs.NetworkActivity
 	orchName             string // agent name from .agent.json (may change at runtime)
 	orchNickname         string // nickname from .agent.json
 	initial              bool   // true only for the deferred initial rebuild (clears the loading banner)
+}
+
+type networkActivityMsg struct {
+	generation uint64
+	activity   fs.NetworkActivity
+	ok         bool
 }
 
 // mailPersistMsg is the second, post-frame phase of an accepted authoritative
@@ -178,58 +183,60 @@ type directAgentLifecycle struct {
 }
 
 type MailModel struct {
-	humanDir          string
-	humanAddr         string
-	orchestrator      string // 本我 directory path (full path under .lingtai/)
-	orchAddr          string // 本我 address (from .agent.json)
-	orchName          string // 本我 agent name (true name)
-	orchNickname      string // 本我 nickname (display name override)
-	baseDir           string // .lingtai/ directory
-	visitExitHint     bool   // append subtle Esc-Esc return hint to the title row
-	verbose           verboseLevel
-	messages          []ChatMessage        // derived from the accepted mailbox snapshot
-	cache             fs.MailCache         // sole incremental mail producer
-	acceptedSnapshot  acceptedMailSnapshot // private consumer view installed after generation acceptance
-	pageSize          int                  // max messages shown (from settings)
-	loadedExtra       int                  // additional older messages loaded via ctrl+u
-	viewport          viewport.Model
-	input             InputModel
-	palette           PaletteModel
-	width             int
-	height            int
-	ready             bool
-	pollRate          time.Duration // refresh interval
-	orchAlive         bool
-	orchState         string // manifest lifecycle or heartbeat presentation state
-	orchStaleSeconds  int    // ordinary stale heartbeat age; zero outside the stale presentation
-	networkActivity   fs.NetworkActivity
-	statusFlash       string    // transient status message shown in status bar
-	statusExpiry      time.Time // when to clear the flash
-	lastInputLines    int
-	lastPaletteLines  int
-	lastBannerLines   int
-	lastTelemetryRows int              // how many additive home rows were reserved last sync
-	pendingMessage    string           // full text from editor, sent on Enter
-	globalDir         string           // ~/.lingtai-tui/
-	wasActive         bool             // true if previous refresh was ACTIVE
-	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
-	pulseTick         int              // pulse animation counter while ACTIVE
-	activeSince       time.Time        // when the agent last entered ACTIVE (zero when not active)
-	inquiryState      string           // "", "sent", "taken" — tracks /btw lifecycle
-	insightPending    bool             // true when waiting for 5s insight delay
-	insightAt         time.Time        // when to fire the auto-insight
-	dismissedInsights map[string]bool  // dismissed insight timestamps
-	showEditorWarn    bool             // one-time vim warning overlay
-	editorWarnText    string           // text to pass to editor after warning
-	insightsEnabled   bool             // from settings — show insight events
-	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
-	sessionCache      *fs.SessionCache // append-only session log
-	initialLoading    bool             // true until the bounded initial content rebuild has been applied
-	auxiliaryMessages int              // all renderable mail/inquiry entries, including older ones withheld across a partial event gap
-	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
-	generation        uint64           // activation token; stale async messages are ignored without rescheduling
-	pollEpoch         uint64           // timer-chain token; one tick/pulse loop is current inside an activation
-	beforeRebuild     func()           // optional deterministic test hook before deferred rebuild I/O
+	humanDir                 string
+	humanAddr                string
+	orchestrator             string // 本我 directory path (full path under .lingtai/)
+	orchAddr                 string // 本我 address (from .agent.json)
+	orchName                 string // 本我 agent name (true name)
+	orchNickname             string // 本我 nickname (display name override)
+	baseDir                  string // .lingtai/ directory
+	visitExitHint            bool   // append subtle Esc-Esc return hint to the title row
+	verbose                  verboseLevel
+	messages                 []ChatMessage        // derived from the accepted mailbox snapshot
+	cache                    fs.MailCache         // sole incremental mail producer
+	acceptedSnapshot         acceptedMailSnapshot // private consumer view installed after generation acceptance
+	pageSize                 int                  // max messages shown (from settings)
+	loadedExtra              int                  // additional older messages loaded via ctrl+u
+	viewport                 viewport.Model
+	input                    InputModel
+	palette                  PaletteModel
+	width                    int
+	height                   int
+	ready                    bool
+	pollRate                 time.Duration // refresh interval
+	orchAlive                bool
+	orchState                string             // manifest lifecycle or heartbeat presentation state
+	orchStaleSeconds         int                // ordinary stale heartbeat age; zero outside the stale presentation
+	networkActivity          fs.NetworkActivity // last accepted cached project activity snapshot
+	networkActivityInFlight  bool               // true while the detached filesystem observation is running
+	networkActivityLastFetch time.Time          // completion time of the last observation, for the TTL floor
+	statusFlash              string             // transient status message shown in status bar
+	statusExpiry             time.Time          // when to clear the flash
+	lastInputLines           int
+	lastPaletteLines         int
+	lastBannerLines          int
+	lastTelemetryRows        int              // how many additive home rows were reserved last sync
+	pendingMessage           string           // full text from editor, sent on Enter
+	globalDir                string           // ~/.lingtai-tui/
+	wasActive                bool             // true if previous refresh was ACTIVE
+	quoteIdx                 int              // which quote to show (advances on each ACTIVE transition)
+	pulseTick                int              // pulse animation counter while ACTIVE
+	activeSince              time.Time        // when the agent last entered ACTIVE (zero when not active)
+	inquiryState             string           // "", "sent", "taken" — tracks /btw lifecycle
+	insightPending           bool             // true when waiting for 5s insight delay
+	insightAt                time.Time        // when to fire the auto-insight
+	dismissedInsights        map[string]bool  // dismissed insight timestamps
+	showEditorWarn           bool             // one-time vim warning overlay
+	editorWarnText           string           // text to pass to editor after warning
+	insightsEnabled          bool             // from settings — show insight events
+	toolCallTruncate         int              // from settings — max chars per tool line (0 = no truncation)
+	sessionCache             *fs.SessionCache // append-only session log
+	initialLoading           bool             // true until the bounded initial content rebuild has been applied
+	auxiliaryMessages        int              // all renderable mail/inquiry entries, including older ones withheld across a partial event gap
+	copyMode                 bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
+	generation               uint64           // activation token; stale async messages are ignored without rescheduling
+	pollEpoch                uint64           // timer-chain token; one tick/pulse loop is current inside an activation
+	beforeRebuild            func()           // optional deterministic test hook before deferred rebuild I/O
 
 	// The one monotonic refresh request serial with its newest-accepted
 	// completion watermark. Requests are issued only on the serialized Update
@@ -238,6 +245,9 @@ type MailModel struct {
 	// coordinate and no Main-session ordinal.
 	refreshRequestSerial         uint64 // newest request issued; 1 is reserved for the one-shot initial rebuild
 	acceptedRefreshRequestSerial uint64 // newest prepared completion accepted for this activation
+	mailRefreshInFlight          bool   // at most one periodic prepared Mail refresh command may run per activation
+	mailRefreshInFlightSerial    uint64 // request serial that owns the lane; older initial work cannot release it
+	mailRefreshPending           bool   // one coalesced demand to launch immediately after the owning completion
 
 	// The /agents direct-conversation core: one accepted publication serial,
 	// the Mail-owned canonical conversation catalog/selection, the one
@@ -277,8 +287,8 @@ type MailModel struct {
 	// through NewMailModel — the render path only ever walks a legal order.
 	homeTelemetryDisplay []homeTelemetrySegment
 
-	// Home async-work stats resolve exactly like home telemetry: a background
-	// fs.CountDaemons() read, cached snapshot, in-flight debounce, TTL floor.
+	// Home async-work stats resolve exactly like home telemetry: one bounded
+	// dispatch-ledger snapshot, cached result, in-flight debounce, and TTL floor.
 	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders an all-zero row once loaded
 	homeAsyncStatsLoaded    bool           // true once a background fetch has completed at least once
 	homeAsyncStatsInFlight  bool           // true while a fetchHomeAsyncStats command is running (debounce)
@@ -588,11 +598,51 @@ func (m MailModel) showChatTailHint() bool {
 
 // issueRefreshRequest assigns the one monotonic refresh request serial on the
 // serialized Update loop, then returns the detached prepared-refresh command
-// bound to the issuing model state. A completion older than the newest
-// accepted request can never install any payload component.
+// bound to the issuing model state. At most one periodic command may be in
+// flight: a timer or explicit refresh that arrives while the current snapshot is
+// still preparing becomes one pending demand. The matching owner completion
+// launches that one follow-up immediately instead of dropping it or overlapping
+// filesystem work.
 func (m MailModel) issueRefreshRequest() (MailModel, tea.Cmd) {
+	if m.mailRefreshInFlight {
+		m.mailRefreshPending = true
+		return m, nil
+	}
 	m.refreshRequestSerial = nextAcceptedSnapshotSerial(m.refreshRequestSerial)
+	m.mailRefreshInFlight = true
+	m.mailRefreshInFlightSerial = m.refreshRequestSerial
 	return m, m.refreshMail
+}
+
+const networkActivityTTL = time.Second
+
+func (m MailModel) fetchNetworkActivity() tea.Cmd {
+	return func() tea.Msg {
+		activity, err := fs.ComputeNetworkActivity(m.baseDir)
+		return networkActivityMsg{generation: m.generation, activity: activity, ok: err == nil}
+	}
+}
+
+// maybeScheduleNetworkActivity owns the only recurring project-activity read.
+// Its cached snapshot, in-flight gate, and TTL keep Mail's one-second poll from
+// re-entering a slow filesystem observation.
+func (m *MailModel) maybeScheduleNetworkActivity(now time.Time) tea.Cmd {
+	if m.baseDir == "" || m.networkActivityInFlight {
+		return nil
+	}
+	if !m.networkActivityLastFetch.IsZero() && now.Sub(m.networkActivityLastFetch) < networkActivityTTL {
+		return nil
+	}
+	m.networkActivityInFlight = true
+	return m.fetchNetworkActivity()
+}
+
+func (m *MailModel) applyNetworkActivity(msg networkActivityMsg, now time.Time) {
+	m.networkActivityInFlight = false
+	m.networkActivityLastFetch = now
+	if msg.ok {
+		m.networkActivity = msg.activity
+	}
 }
 
 func resolveAgentLifecycle(directory string) (bool, agentLifecycleState, fs.AgentNode) {
@@ -684,12 +734,6 @@ func (m MailModel) refreshMail() tea.Msg {
 			directLastApiCall[key] = lp
 		}
 	}
-	var activity fs.NetworkActivity
-	if m.baseDir != "" {
-		if a, err := fs.ComputeNetworkActivity(m.baseDir); err == nil {
-			activity = a
-		}
-	}
 	orchName := m.orchName
 	orchNickname := ""
 	if orchestrator.AgentName != "" {
@@ -710,7 +754,6 @@ func (m MailModel) refreshMail() tea.Msg {
 		alive:                alive,
 		state:                lifecycle.state,
 		staleSeconds:         lifecycle.staleSeconds,
-		activity:             activity,
 		orchName:             orchName,
 		orchNickname:         orchNickname,
 	}
@@ -1074,6 +1117,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if msg.generation != m.generation {
 			return m, nil
 		}
+		var refreshFollowupCmd tea.Cmd
+		if msg.prepared && msg.refreshRequestSerial != 0 && msg.refreshRequestSerial == m.mailRefreshInFlightSerial {
+			m.mailRefreshInFlight = false
+			m.mailRefreshInFlightSerial = 0
+			if m.mailRefreshPending {
+				m.mailRefreshPending = false
+				m, refreshFollowupCmd = m.issueRefreshRequest()
+			}
+		}
 		// One monotonic request serial, newest-accepted-completion gate: a
 		// completion older than the newest accepted request installs no mailbox
 		// cache, accepted snapshot, selector rows, publication, or unread work,
@@ -1085,7 +1137,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		staleRequest := msg.refreshRequestSerial != 0 &&
 			msg.refreshRequestSerial <= m.acceptedRefreshRequestSerial
 		if staleRequest && !msg.initial {
-			return m, nil
+			return m, refreshFollowupCmd
 		}
 		if !staleRequest && msg.refreshRequestSerial != 0 {
 			m.acceptedRefreshRequestSerial = msg.refreshRequestSerial
@@ -1141,7 +1193,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.orchAlive = msg.alive
 			m.orchState = msg.state
 			m.orchStaleSeconds = msg.staleSeconds
-			m.networkActivity = msg.activity
 			if msg.orchName != "" {
 				m.orchName = msg.orchName
 			}
@@ -1215,18 +1266,18 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// The command itself performs no I/O; mailPersistMsg re-enters Update for a
 		// second generation/cache-identity gate and serialized persistence.
 		if persistCmd != nil {
-			return m, tea.Batch(persistCmd, directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, persistCmd, directVisibilityCmd, directUnreadCmd)
 		}
 		// Kick off the first background telemetry fetch as soon as a refresh has
 		// landed (including ordinary refreshes), so the row can appear without
 		// waiting a full poll tick. Initial rebuilds schedule it after persistence.
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
-			return m, tea.Batch(cmd, directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, cmd, directVisibilityCmd, directUnreadCmd)
 		}
 		if directUnreadCmd != nil {
-			return m, tea.Batch(directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd, directUnreadCmd)
 		}
-		return m, directVisibilityCmd
+		return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd)
 
 	case mailPersistMsg:
 		// Persist only the cache still installed for this activation. This runs on
@@ -1260,6 +1311,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		var refreshCmd tea.Cmd
 		m, refreshCmd = m.issueRefreshRequest()
 		cmds = append(cmds, refreshCmd, tickEvery(m.pollRate, m.generation, msg.pollEpoch))
+		if cmd := m.maybeScheduleNetworkActivity(time.Now()); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1267,6 +1321,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
+
+	case networkActivityMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		m.applyNetworkActivity(msg, time.Now())
+		return m, nil
 
 	case homeTelemetryMsg:
 		if msg.generation != m.generation {

@@ -11,10 +11,10 @@ package tui
 // through the same mailFooterHeight budget so the status bar can never be
 // clipped by the additive line.
 //
-// Data source: <agentDir>/daemons/<run-id>/daemon.json state files — the async
-// job ledger. fs.CountDaemons() reads those state files cheaply (one JSON per
-// run directory, no ledger/event/chat/result I/O), which is the same source the
-// /daemons view and props.go detail counts use.
+// Data source: the bounded tail of <agentDir>/daemons/.dispatch-ledger.jsonl
+// selects exact recent run directories; one shared snapshot reads only those
+// bounded cards/token tails for counts, tokens, and model names. There is no
+// lifetime daemons/ directory enumeration in this recurring footer path.
 
 import (
 	"fmt"
@@ -68,30 +68,25 @@ func (m MailModel) hasHomeAsyncStats() bool {
 	return m.homeAsyncStatsLoaded
 }
 
-// fetchHomeAsyncStats returns the background command that reads the async job
-// ledger snapshot. It runs off the render/input path: os.ReadDir over the
-// daemons directory can stall on a slow volume, so like fetchHomeTelemetry it is
-// never invoked synchronously from View()/Update(). Both reads are bounded to
-// the 10-minute daemon window (fs.CountDaemons + fs.DaemonRecentLedgerSummary),
-// so stale historical runs never get their state or token ledger opened on the
-// per-second tick.
+// fetchHomeAsyncStats returns the background command that reads one bounded
+// dispatch-ledger snapshot. Counts, token totals, and model names are derived in
+// the same traversal, so the one-second footer never performs three independent
+// daemons/ directory scans (or any lifetime-directory listing at all).
 func (m MailModel) fetchHomeAsyncStats() tea.Cmd {
 	return func() tea.Msg {
-		counts := fs.CountDaemons(m.orchestrator)
-		tokens := fs.DaemonRecentLedgerSummary(m.orchestrator)
-		models := fs.RecentLingtaiDaemonModels(m.orchestrator)
+		snapshot := fs.ReadRecentDaemonActivity(m.orchestrator)
 		return homeAsyncStatsMsg{
 			generation: m.generation,
 			t: homeAsyncStats{
-				running: counts.Running,
-				queued:  counts.Queued,
-				done:    counts.Done,
-				failed:  counts.Failed,
-				input:   tokens.Input,
-				output:  tokens.Output,
-				cached:  tokens.Cached,
-				calls:   tokens.APICalls,
-				models:  models,
+				running: snapshot.Counts.Running,
+				queued:  snapshot.Counts.Queued,
+				done:    snapshot.Counts.Done,
+				failed:  snapshot.Counts.Failed,
+				input:   snapshot.Tokens.Input,
+				output:  snapshot.Tokens.Output,
+				cached:  snapshot.Tokens.Cached,
+				calls:   snapshot.Tokens.APICalls,
+				models:  snapshot.Models,
 			},
 		}
 	}
