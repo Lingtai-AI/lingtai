@@ -237,10 +237,14 @@ invoke_case() (
     || fail "production Desktop verifier pin drifted"
   [[ "$DESKTOP_BOOTSTRAP_SHA256" == "6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c41846ac02e6" ]] \
     || fail "production Desktop stable-bootstrap pin drifted"
-  DESKTOP_INSTALLER_SHA256="$FIXTURE_INSTALLER_SHA256"
-  DESKTOP_CLI_SHA256="$FIXTURE_CLI_SHA256"
-  DESKTOP_VERIFIER_SHA256="$FIXTURE_VERIFIER_SHA256"
-  DESKTOP_BOOTSTRAP_SHA256="$FIXTURE_BOOTSTRAP_SHA256"
+  if [[ "${INSTALL_TEST_DESKTOP_PINS:-fixture}" == "fixture" ]]; then
+    DESKTOP_INSTALLER_SHA256="$FIXTURE_INSTALLER_SHA256"
+    DESKTOP_CLI_SHA256="$FIXTURE_CLI_SHA256"
+    DESKTOP_VERIFIER_SHA256="$FIXTURE_VERIFIER_SHA256"
+    DESKTOP_BOOTSTRAP_SHA256="$FIXTURE_BOOTSTRAP_SHA256"
+  elif [[ "$INSTALL_TEST_DESKTOP_PINS" != "production" ]]; then
+    fail "unknown Desktop pin fixture mode: $INSTALL_TEST_DESKTOP_PINS"
+  fi
 
   detect_os() { printf '%s\n' "$platform"; }
   resolve_source_provider() { BUNDLE_PROVIDER="github"; }
@@ -262,7 +266,7 @@ BIN
 echo "lingtai-portal v9.9.9"
 BIN
     chmod 755 "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai-portal"
-    ln -s "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai"
+    ln -sfn "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai"
     VERSION="$tag"
     RESOLVED_REF="$tag"
     RESOLVED_COMMIT=""
@@ -278,8 +282,20 @@ BIN
     KERNEL_PROVIDER="github"
   }
 
-  main --version v9.9.9 --bin-dir "$HOME/.local/bin" --non-interactive "$@"
+  if [[ "${INSTALL_TEST_UPDATE:-0}" == "1" ]]; then
+    main --update --prefix "$HOME/.local" --version v9.9.9 --non-interactive "$@"
+  else
+    main --version v9.9.9 --bin-dir "$HOME/.local/bin" --non-interactive "$@"
+  fi
 )
+
+invoke_update_case() {
+  INSTALL_TEST_UPDATE=1 invoke_case "$@"
+}
+
+invoke_update_case_with_production_desktop_pins() {
+  INSTALL_TEST_DESKTOP_PINS=production INSTALL_TEST_UPDATE=1 invoke_case "$@"
+}
 
 run_desktop_command() (
   case_root="$1"
@@ -319,11 +335,143 @@ assert receipt["kernel_source"] == "bundle"
 PY
 }
 
+prepare_v106_install() {
+  local case_root="$1"
+  local home="$case_root/home"
+  local bin_dir="$home/.local/bin"
+  local runtime="$home/.lingtai-tui/runtime/venv"
+  mkdir -p "$bin_dir" "$runtime"
+  cat > "$bin_dir/lingtai-tui" <<'BIN'
+#!/usr/bin/env bash
+echo "lingtai-tui v1.0.6"
+BIN
+  cat > "$bin_dir/lingtai-portal" <<'BIN'
+#!/usr/bin/env bash
+echo "lingtai-portal v1.0.6"
+BIN
+  chmod 755 "$bin_dir/lingtai-tui" "$bin_dir/lingtai-portal"
+  ln -s "$bin_dir/lingtai-tui" "$bin_dir/lingtai"
+  printf 'v1.0.6 runtime sentinel\n' > "$runtime/old-runtime"
+  python3 - "$home/.lingtai-tui/install.json" "$home/.local" "$bin_dir" "$runtime" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+receipt_path, prefix, bin_dir, runtime = sys.argv[1:]
+receipt = {
+    "schema": "lingtai.tui.install/v1",
+    "schema_version": 1,
+    "install_method": "source",
+    "install_kind": "release-asset",
+    "prefix": prefix,
+    "bin_dir": bin_dir,
+    "repo_url": "https://github.com/Lingtai-AI/lingtai.git",
+    "requested_ref": "v1.0.6",
+    "resolved_ref": "v1.0.6",
+    "resolved_commit": "",
+    "stamped_version": "v1.0.6",
+    "installed_at": "2026-08-31T00:00:00Z",
+    "managed_binaries": [
+        str(Path(bin_dir) / "lingtai-tui"),
+        str(Path(bin_dir) / "lingtai-portal"),
+    ],
+    "kernel_source": "bundle",
+    "kernel_bundle_id": "v1.0.6-fixture",
+    "kernel_version": "1.0.6",
+    "kernel_provider": "github",
+    "bundle_provider": "github",
+    "runtime_venv": runtime,
+}
+Path(receipt_path).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+prepare_v019_lazy_command() (
+  local case_root="$1"
+  export HOME="$case_root/home"
+  export TMPDIR="$case_root/tmp"
+  export LINGTAI_INSTALL_SH_SOURCE_ONLY=1
+  # shellcheck source=../install.sh
+  source "$INSTALL_SH"
+  BIN_DIR="$HOME/.local/bin"
+  DESKTOP_VERSION="0.1.9"
+  register_desktop_bootstrap > "$case_root/v019-registration.out" 2>&1
+)
+
+# Stable macOS self-update repairs the v1.0.6-era gap through the real main
+# journey: after updating binaries/runtime/receipt, it registers only the
+# current lazy command and performs no Desktop transport or managed-state work.
+update_missing="$TEST_ROOT/update-v106-missing-desktop"
+prepare_v106_install "$update_missing"
+invoke_update_case "$update_missing" darwin 0 > "$update_missing.out" 2>&1
+check_tui_portal_receipt "$update_missing"
+assert_file "$update_missing/home/.local/bin/lingtai-desktop" "stable update Desktop launcher"
+grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$update_missing/home/.local/bin/lingtai-desktop" \
+  || fail "stable update did not register the installer-owned lazy command"
+grep -Fq 'DESKTOP_VERSION = "0.1.10"' "$update_missing/home/.local/bin/lingtai-desktop" \
+  || fail "stable update did not register the current Desktop version"
+grep -Fq "\"support_bootstrap.py\": \"$FIXTURE_BOOTSTRAP_SHA256\"" "$update_missing/home/.local/bin/lingtai-desktop" \
+  || fail "stable update did not bind the current Desktop trust set"
+assert_absent "$update_missing/curl.log" "stable-update Desktop transport"
+assert_absent "$update_missing/home/.local/share/lingtai-desktop" "stable-update Desktop managed state"
+run_desktop_command "$update_missing" 0 doctor > "$update_missing.first.out" 2>&1
+assert_file "$update_missing/home/.local/share/lingtai-desktop/versions/0.1.10/LingTai.app/Contents/MacOS/LingTai" \
+  "stable-update first-command Desktop App"
+[[ "$(cat "$update_missing/command.log")" == "doctor" ]] \
+  || fail "stable-update first command did not continue the requested command"
+[[ "$(wc -l < "$update_missing/curl.log" | tr -d ' ')" == "7" ]] \
+  || fail "stable-update first command did not make the expected verified fixture reads"
+
+# An unrun v0.1.9 lazy command has installer-owned regular executable bytes,
+# but its embedded release identity is old. Stable update must replace it with
+# the current generator output without performing Desktop reads or App writes.
+update_old_lazy="$TEST_ROOT/update-v106-v019-lazy"
+prepare_v106_install "$update_old_lazy"
+prepare_v019_lazy_command "$update_old_lazy"
+update_old_target="$update_old_lazy/home/.local/bin/lingtai-desktop"
+[[ -f "$update_old_target" && -x "$update_old_target" && ! -L "$update_old_target" ]] \
+  || fail "v0.1.9 setup did not create an executable regular installer-owned command"
+grep -Fq 'lingtai-desktop-lazy-bootstrap-v1' "$update_old_target" \
+  || fail "v0.1.9 setup omitted the installer ownership marker"
+grep -Fq 'DESKTOP_VERSION = "0.1.9"' "$update_old_target" \
+  || fail "v0.1.9 setup omitted its historical release identity"
+grep -Fq '"install-macos-app.py": "d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9"' "$update_old_target" \
+  || fail "v0.1.9 setup omitted the exact installer trust pin"
+grep -Fq '"desktop_user_cli.py": "0a681eacdf71daea137089e68204b780f6e065184689d9b56208a67c24facc95"' "$update_old_target" \
+  || fail "v0.1.9 setup omitted the exact CLI trust pin"
+grep -Fq '"verify-app-archive.py": "745374c0634709fa235cd7b63af6cd78b79f99ef5d290157d6e7bd281b3e8fc2"' "$update_old_target" \
+  || fail "v0.1.9 setup omitted the exact verifier trust pin"
+grep -Fq '"support_bootstrap.py": "6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c41846ac02e6"' "$update_old_target" \
+  || fail "v0.1.9 setup omitted the exact support-bootstrap trust pin"
+update_old_sha="$(file_sha256 "$update_old_target")"
+assert_absent "$update_old_lazy/home/.local/share/lingtai-desktop" "unrun v0.1.9 Desktop managed state"
+invoke_update_case_with_production_desktop_pins "$update_old_lazy" darwin 0 > "$update_old_lazy.out" 2>&1
+check_tui_portal_receipt "$update_old_lazy"
+[[ "$(file_sha256 "$update_old_target")" != "$update_old_sha" ]] \
+  || fail "stable update preserved the obsolete v0.1.9 lazy command"
+[[ -f "$update_old_target" && -x "$update_old_target" && ! -L "$update_old_target" ]] \
+  || fail "refreshed Desktop command is not an executable regular file"
+grep -Fq 'lingtai-desktop-lazy-bootstrap-v1' "$update_old_target" \
+  || fail "refreshed Desktop command lost the installer ownership marker"
+grep -Fq 'DESKTOP_VERSION = "0.1.10"' "$update_old_target" \
+  || fail "stable update did not refresh the lazy command to v0.1.10"
+grep -Fq '"support_bootstrap.py": "6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c41846ac02e6"' "$update_old_target" \
+  || fail "refreshed Desktop command does not contain the current production trust pin"
+grep -Fq '"install-macos-app.py": "d915162c41b144fad19cd47405c36ceb5f408ca15fabd342d3b3615c53f654c9"' "$update_old_target" \
+  || fail "refreshed Desktop command does not contain the current installer trust pin"
+grep -Fq '"desktop_user_cli.py": "0a681eacdf71daea137089e68204b780f6e065184689d9b56208a67c24facc95"' "$update_old_target" \
+  || fail "refreshed Desktop command does not contain the current CLI trust pin"
+grep -Fq '"verify-app-archive.py": "745374c0634709fa235cd7b63af6cd78b79f99ef5d290157d6e7bd281b3e8fc2"' "$update_old_target" \
+  || fail "refreshed Desktop command does not contain the current verifier trust pin"
+assert_absent "$update_old_lazy/curl.log" "v0.1.9-refresh Desktop transport"
+assert_absent "$update_old_lazy/home/.local/share/lingtai-desktop" "v0.1.9-refresh Desktop managed state"
+
 # Registration accepts an already-complete official Desktop launcher without
 # touching it or consulting Desktop transport. This is the Desktop-first path.
 official="$TEST_ROOT/existing-official"
 official_target="$official/home/.local/bin/lingtai-desktop"
 official_app="$official/home/.local/share/lingtai-desktop/current/LingTai.app/Contents/MacOS/LingTai"
+prepare_v106_install "$official"
 mkdir -p "$(dirname "$official_target")" "$(dirname "$official_app")"
 printf '#!/usr/bin/env bash\n# lingtai-desktop-owned-v1\necho official\n' > "$official_target"
 printf '#!/usr/bin/env bash\necho app\n' > "$official_app"
@@ -331,12 +479,25 @@ chmod 751 "$official_target"
 chmod 755 "$official_app"
 official_sha="$(file_sha256 "$official_target")"
 official_mode="$(file_mode "$official_target")"
-invoke_case "$official" darwin 1 > "$official.out" 2>&1
+official_app_sha="$(file_sha256 "$official_app")"
+official_app_mode="$(file_mode "$official_app")"
+invoke_update_case "$official" darwin 1 > "$official.out" 2>&1
 check_tui_portal_receipt "$official"
 assert_file_unchanged "$official_target" "$official_sha" "$official_mode" "official Desktop launcher"
+assert_file_unchanged "$official_app" "$official_app_sha" "$official_app_mode" "managed current Desktop App executable"
 assert_absent "$official/curl.log" "existing official Desktop transport"
 grep -q 'Existing complete LingTai Desktop command is already installed' "$official.out" \
   || fail "existing official Desktop launcher did not produce the truthful keep note"
+
+# Ordinary existing-receipt reinstall keeps its prior ownership boundary: it
+# updates TUI/runtime/receipt but does not add the Desktop command.
+reinstall_missing="$TEST_ROOT/reinstall-v106-missing-desktop"
+prepare_v106_install "$reinstall_missing"
+invoke_case "$reinstall_missing" darwin 0 > "$reinstall_missing.out" 2>&1
+check_tui_portal_receipt "$reinstall_missing"
+assert_absent "$reinstall_missing/home/.local/bin/lingtai-desktop" "ordinary reinstall Desktop command"
+assert_absent "$reinstall_missing/curl.log" "ordinary reinstall Desktop transport"
+assert_absent "$reinstall_missing/home/.local/share/lingtai-desktop" "ordinary reinstall Desktop managed state"
 
 # A lazy command deliberately left behind by remove.sh is likewise recognized
 # by this installer's marker and preserved byte-for-byte.
@@ -496,7 +657,8 @@ run_desktop_command "$success" 0 version > "$success.second.out" 2>&1
 # Explicit opt-out: the existing TUI/Portal journey remains successful and the
 # Desktop transport is never consulted.
 opt_out="$TEST_ROOT/opt-out"
-invoke_case "$opt_out" darwin 1 --skip-desktop > "$opt_out.out" 2>&1
+prepare_v106_install "$opt_out"
+invoke_update_case "$opt_out" darwin 1 --skip-desktop > "$opt_out.out" 2>&1
 check_tui_portal_receipt "$opt_out"
 assert_absent "$opt_out/home/.local/share/lingtai-desktop" "Desktop opt-out"
 assert_absent "$opt_out/home/.local/bin/lingtai-desktop" "Desktop opt-out command"
@@ -568,7 +730,8 @@ grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$release_failure/home/.local/bin/li
 # Linux: byte-for-byte control flow beyond our fixture overrides stays on the
 # pre-existing TUI/Portal/runtime path and never consults Desktop transport.
 linux="$TEST_ROOT/linux-unchanged"
-invoke_case "$linux" linux 1 > "$linux.out" 2>&1
+prepare_v106_install "$linux"
+invoke_update_case "$linux" linux 1 > "$linux.out" 2>&1
 check_tui_portal_receipt "$linux"
 assert_absent "$linux/home/.local/share/lingtai-desktop" "Linux Desktop state"
 assert_absent "$linux/home/.local/bin/lingtai-desktop" "Linux Desktop command"

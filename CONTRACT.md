@@ -13,6 +13,7 @@ related_files:
   - scripts/dev.sh
   - scripts/remove.sh
   - scripts/remove.ps1
+  - scripts/test-install-sh.sh
   - scripts/test-install-sh-desktop.sh
   - tui/architecture_documents_test.go
   - tui/CONTRACT.md
@@ -398,24 +399,30 @@ The Desktop row is an authorized platform exception, not missing parity:
 LingTai Desktop's own public contract, bundle, verifier, and managed layout are
 macOS-only. `install.ps1` therefore remains unchanged instead of exposing a
 switch for a product it cannot install. The macOS default is lazy: the main
-installer may register the command bytes but must perform zero Desktop network
+installer may register the command bytes on an ordinary stable install or its
+version-pinned internal stable update, but must perform zero Desktop network
 reads and create zero Desktop App/current/receipt/cache/version state. Only the
 first execution of that command may obtain the SHA-pinned Desktop installer
 support, delegate archive/manifest verification and atomic publication, and
 continue the requested command; later executions use the installed current CLI
-without reinstalling. `scripts/test-install-sh-desktop.sh` proves this boundary,
-the explicit opt-out, retryable fail-clear behavior, and the non-macOS no-op
-with fake homes and a no-live-network transport.
+without reinstalling. `--skip-desktop` remains authoritative in either mode;
+Linux/WSL, `--latest`, arbitrary `--ref`, and ordinary existing-receipt
+reinstall remain outside this boundary. `scripts/test-install-sh-desktop.sh`
+proves these rules, retryable fail-clear behavior, and the non-macOS no-op with
+fake homes and a no-live-network transport.
 
 `scripts/remove.sh` deliberately leaves Desktop App and lazy-command state
 intact because the TUI receipt does not own them. On a later main install,
-Desktop registration MUST preserve a regular, executable, non-symlink selected target
-unchanged and return success only if it contains this installer's
-`lingtai-desktop-lazy-bootstrap-v1` marker, or if it contains Desktop's official
-`# lingtai-desktop-owned-v1` launcher marker and the managed current App
-executable is a regular executable. It MUST NOT accept either marker through a
-symlink. A foreign file, any symlink, or an incomplete official launcher MUST
-remain unchanged and fail loud after the valid TUI receipt is written.
+Desktop registration MUST preserve a complete official launcher unchanged only
+if it contains Desktop's `# lingtai-desktop-owned-v1` marker and the managed
+current App executable is a regular executable. An ordinary stable install MUST
+also preserve a regular, executable, non-symlink target containing this
+installer's `lingtai-desktop-lazy-bootstrap-v1` marker. A version-pinned stable
+update MUST atomically replace that marked lazy target with the current generated
+command and trust pins. Registration MUST NOT accept either marker through a
+symlink. A foreign file, any symlink, a non-executable target, or an incomplete
+official launcher MUST remain unchanged and fail loud after the valid TUI
+receipt is written.
 
 ## Validation
 

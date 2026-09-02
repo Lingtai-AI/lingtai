@@ -23,6 +23,12 @@ assert_eq() {
 command -v git >/dev/null || fail "git is required"
 command -v python3 >/dev/null || fail "python3 is required"
 
+usage_text="$(usage)"
+case "$usage_text" in
+  *"stable install and a version-pinned --update"*) ;;
+  *) fail "help must describe stable macOS update Desktop registration" ;;
+esac
+
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-inst-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -427,9 +433,10 @@ detect_os() { echo darwin; }
 should_install_desktop || fail "ordinary macOS install should register Desktop by default"
 SKIP_DESKTOP=1
 if should_install_desktop; then fail "--skip-desktop must opt out"; fi
-SKIP_DESKTOP=0
 UPDATE_MODE=1
-if should_install_desktop; then fail "--update must not register Desktop"; fi
+if should_install_desktop; then fail "--skip-desktop must opt out during stable update"; fi
+SKIP_DESKTOP=0
+should_install_desktop || fail "stable macOS --update should register Desktop"
 UPDATE_MODE=0
 LATEST_MAIN_MODE=1
 if should_install_desktop; then fail "--latest must not register Desktop"; fi
@@ -442,6 +449,9 @@ if should_install_desktop; then fail "--ref must not register Desktop"; fi
 REF=""
 detect_os() { echo linux; }
 if should_install_desktop; then fail "non-macOS install must not register Desktop"; fi
+UPDATE_MODE=1
+if should_install_desktop; then fail "non-macOS update must not register Desktop"; fi
+UPDATE_MODE=0
 eval "$original_detect_os"
 
 # --ref selects a source build ref.

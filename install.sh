@@ -205,18 +205,20 @@ Options:
                          preserved unchanged so TUI/portal binaries can be
                          installed beside it. --skip-venv is a back-compat alias.
   --skip-desktop        On macOS, do not register the lazy lingtai-desktop
-                         command. Registration is the default only for the
-                         ordinary stable install; it downloads no Desktop App
-                         data. The command's first execution installs Desktop.
-                         Linux, WSL, Windows, --update, --latest, and --ref are
-                         unaffected. This installer pins Desktop v0.1.10 and its
-                         audited four-file installer-support checksums as one
-                         trust set.
+                         command. Registration is the default for an ordinary
+                         stable install and a version-pinned --update; it
+                         downloads no Desktop App data. The command's first
+                         execution installs Desktop. Linux, WSL, Windows,
+                         --latest, --ref, and ordinary existing-receipt
+                         reinstalls are unaffected. This installer pins Desktop
+                         v0.1.10 and its audited four-file installer-support
+                         checksums as one trust set.
   --source <mode>       auto|github|gitee (default: auto, or $LINGTAI_SOURCE).
                          auto prefers Gitee for mainland-China public IPs via
                          a bounded, fail-open country lookup; an explicit
                          override always wins and skips detection.
-  --update             Update an existing source/user-local install in place
+  --update             Update an existing source/user-local install in place;
+                         on macOS, register or refresh the lazy Desktop command
   --non-interactive    Never prompt; never install OS packages; fail instead
   -h, --help           Show this help
 
@@ -325,12 +327,13 @@ detect_os() {
 }
 
 # Desktop has its own release train and verified installer. The public LingTai
-# installer only registers its lazy command on an ordinary stable macOS install;
-# update/current-main/arbitrary-ref workflows keep their existing ownership.
+# installer only registers its lazy command on an ordinary stable macOS install
+# or its version-pinned internal update; current-main/arbitrary-ref workflows
+# keep their existing ownership.
 should_install_desktop() {
   [[ "$SKIP_DESKTOP" != "1" ]] || return 1
   [[ "$(detect_os)" == "darwin" ]] || return 1
-  [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" && -z "$REF" ]]
+  [[ "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" && -z "$REF" ]]
 }
 
 # Register only a self-contained lazy command. It performs no Desktop network
@@ -338,11 +341,14 @@ should_install_desktop() {
 # command downloads the four exact, SHA-pinned installer-support files audited
 # above; that existing Desktop code retains exclusive ownership of release API,
 # archive/manifest verification, atomic App publication, and command semantics.
+# A stable update may atomically refresh only this installer's marked lazy
+# command; complete official Desktop state and every unowned target stay intact.
 register_desktop_bootstrap() {
   local target="$BIN_DIR/lingtai-desktop"
   local app_executable="$HOME/.local/share/lingtai-desktop/current/LingTai.app/Contents/MacOS/LingTai"
   local template="$BUILD_DIR/lingtai-desktop-bootstrap.py.in"
   local staged="$BUILD_DIR/lingtai-desktop-bootstrap.py"
+  local refresh_lazy=0
 
   if [[ -f "$target" && -x "$target" && ! -L "$target" ]]; then
     if grep -Fq '# lingtai-desktop-owned-v1' "$target"; then
@@ -354,11 +360,15 @@ register_desktop_bootstrap() {
       return 1
     fi
     if grep -Fq 'lingtai-desktop-lazy-bootstrap-v1' "$target"; then
-      note "Existing LingTai Desktop lazy command is already registered; keeping it unchanged: $target"
-      return 0
+      if [[ "$UPDATE_MODE" == "1" ]]; then
+        refresh_lazy=1
+      else
+        note "Existing LingTai Desktop lazy command is already registered; keeping it unchanged: $target"
+        return 0
+      fi
     fi
   fi
-  if [[ -e "$target" || -L "$target" ]]; then
+  if [[ "$refresh_lazy" != "1" && ( -e "$target" || -L "$target" ) ]]; then
     echo "error: existing Desktop command target was found; refusing to overwrite it: $target" >&2
     return 1
   fi
@@ -510,7 +520,11 @@ PY
     "$template" > "$staged"
   chmod 755 "$staged"
   install_binary_atomically "$staged" "$target"
-  say "Registered lazy LingTai Desktop command at $target"
+  if [[ "$refresh_lazy" == "1" ]]; then
+    say "Refreshed lazy LingTai Desktop command at $target"
+  else
+    say "Registered lazy LingTai Desktop command at $target"
+  fi
   note "The Desktop App will be downloaded and independently verified only when lingtai-desktop is first run."
 }
 
