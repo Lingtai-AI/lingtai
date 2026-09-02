@@ -156,17 +156,17 @@ curl -fsSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh 
 On the ordinary stable macOS path, `install.sh` registers a self-contained lazy
 `lingtai-desktop` command and stops: it does not contact Desktop, invoke its
 installer, or create any Desktop App/current/receipt/cache/version state. The
-command embeds Desktop `0.1.9` plus SHA-256 pins audited from its commit
-`33fc807b84cd7f2ec2482b629c7cfc2099aa6ad3`. On its first execution only, it
+command embeds Desktop `0.1.10` plus SHA-256 pins audited from its commit
+`fd39dd61e4d123b2835064c1c148566d8b36ceb0`. On its first execution only, it
 downloads the matching `install-macos-app.py`, `desktop_user_cli.py`, and
 independent `verify-app-archive.py`, rejects any byte mismatch, invokes the
 Desktop installer, and then continues the user's requested command. Archive,
 manifest, managed-support generation/update, smoke, atomic-publication, and
-later-update policy stay entirely in the Desktop code. Desktop v0.1.9
-establishes the first public managed-support generation,
-`0.1.9-aa3f6c1c4a84`; its self-update contract is future-only and does not infer
-or migrate private pre-generation layouts. The public LingTai entry pins only
-the raw bootstrap trust set rather than duplicating Desktop's App/support
+later-update policy stay entirely in the Desktop code. Desktop v0.1.10 is the
+verified N→N+1 managed-support generation, `0.1.10-b4575bccdedd`; its
+self-update contract advances from the v0.1.9 public generation without
+inferring or migrating private pre-generation layouts. The public LingTai
+entry pins only the raw bootstrap trust set rather than duplicating Desktop's App/support
 manifest digests. Later command executions delegate to the installed current
 CLI without reinstalling. `--skip-desktop` opts out of registration.
 
@@ -182,7 +182,7 @@ loud no-overwrite failure.
 Linux/WSL, an existing-install re-run, `--update` (including Homebrew
 migration/self-update), `--latest`, or arbitrary `--ref` installs do not
 register the command; Windows is platform-N/A because LingTai Desktop itself is
-macOS-only. The exact [`v0.1.9` public release](https://github.com/Lingtai-AI/lingtai-desktop/releases/tag/v0.1.9)
+macOS-only. The exact [`v0.1.10` public release](https://github.com/Lingtai-AI/lingtai-desktop/releases/tag/v0.1.10)
 provides the tag and assets read by the first `lingtai-desktop` execution.
 Temporary public-support, release, or transport unavailability fails clearly,
 leaves the command retryable, and publishes no partial Desktop state. Version
