@@ -519,7 +519,7 @@ PY
     -e "s|@DESKTOP_BOOTSTRAP_SHA256@|$DESKTOP_BOOTSTRAP_SHA256|g" \
     "$template" > "$staged"
   chmod 755 "$staged"
-  install_binary_atomically "$staged" "$target"
+  install_binary_atomically "$staged" "$target" || return 1
   if [[ "$refresh_lazy" == "1" ]]; then
     say "Refreshed lazy LingTai Desktop command at $target"
   else

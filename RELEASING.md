@@ -153,10 +153,14 @@ curl -fsSL https://lingtai.ai/install.sh | bash
 curl -fsSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
 ```
 
-On the ordinary stable macOS path, `install.sh` registers a self-contained lazy
-`lingtai-desktop` command and stops: it does not contact Desktop, invoke its
-installer, or create any Desktop App/current/receipt/cache/version state. The
-command embeds Desktop `0.1.10` plus SHA-256 pins audited from its commit
+On the ordinary stable macOS path with no existing command, `install.sh`
+registers a self-contained lazy `lingtai-desktop` command and stops. A stable,
+version-pinned `--update` does the same when the command is absent, and may
+atomically refresh only an executable, regular, non-symlink command carrying
+this installer's lazy-bootstrap marker. Registration in either mode does not
+contact Desktop, invoke its installer, or create any Desktop
+App/current/receipt/cache/version state. The command embeds Desktop `0.1.10`
+plus SHA-256 pins audited from its commit
 `fd39dd61e4d123b2835064c1c148566d8b36ceb0`. On its first execution only, it
 downloads the matching `install-macos-app.py`, `desktop_user_cli.py`, and
 independent `verify-app-archive.py`, rejects any byte mismatch, invokes the
@@ -175,14 +179,17 @@ command state because neither is owned by the TUI receipt. A later main install
 therefore treats a regular, executable, non-symlink command target as already satisfied only
 when it is this installer's marked lazy bootstrap, or when it carries Desktop's
 official launcher marker and the managed current App executable is complete.
-The command's bytes and mode are preserved in either case. A symlink, arbitrary
-file, or official-marker launcher without its regular executable App remains a
-loud no-overwrite failure.
+An ordinary stable install preserves the marked lazy command's bytes and mode;
+both ordinary install and stable update preserve a complete official launcher
+and App executable byte-for-byte and mode-for-mode. A symlink, arbitrary file,
+or official-marker launcher without its regular executable App remains a loud
+no-overwrite failure.
 
-Linux/WSL, an existing-install re-run, `--update` (including Homebrew
-migration/self-update), `--latest`, or arbitrary `--ref` installs do not
-register the command; Windows is platform-N/A because LingTai Desktop itself is
-macOS-only. The exact [`v0.1.10` public release](https://github.com/Lingtai-AI/lingtai-desktop/releases/tag/v0.1.10)
+Linux/WSL, an ordinary existing-install re-run, `--latest`, arbitrary `--ref`,
+and `--skip-desktop` installs do not register or refresh the command; the sole
+update exception is stable, version-pinned `--update`. Windows is platform-N/A
+because LingTai Desktop itself is macOS-only. The exact
+[`v0.1.10` public release](https://github.com/Lingtai-AI/lingtai-desktop/releases/tag/v0.1.10)
 provides the tag and assets read by the first `lingtai-desktop` execution.
 Temporary public-support, release, or transport unavailability fails clearly,
 leaves the command retryable, and publishes no partial Desktop state. Version

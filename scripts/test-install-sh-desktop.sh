@@ -466,6 +466,47 @@ grep -Fq '"verify-app-archive.py": "745374c0634709fa235cd7b63af6cd78b79f99ef5d29
 assert_absent "$update_old_lazy/curl.log" "v0.1.9-refresh Desktop transport"
 assert_absent "$update_old_lazy/home/.local/share/lingtai-desktop" "v0.1.9-refresh Desktop managed state"
 
+# Atomic publication failure after the valid TUI receipt must fail the real
+# stable-update journey loudly. An occupied same-PID staging path reproduces
+# the filesystem collision without replacing or removing unowned residue.
+update_publish_failure="$TEST_ROOT/update-v106-v019-publish-failure"
+prepare_v106_install "$update_publish_failure"
+prepare_v019_lazy_command "$update_publish_failure"
+update_publish_failure_target="$update_publish_failure/home/.local/bin/lingtai-desktop"
+update_publish_failure_collision="$update_publish_failure/home/.local/bin/.lingtai-desktop.tmp.$$"
+update_publish_failure_sha="$(file_sha256 "$update_publish_failure_target")"
+update_publish_failure_mode="$(file_mode "$update_publish_failure_target")"
+mkdir "$update_publish_failure_collision"
+printf 'unowned collision sentinel\n' > "$update_publish_failure_collision/unowned-sentinel"
+set +e
+invoke_update_case_with_production_desktop_pins "$update_publish_failure" darwin 0 \
+  > "$update_publish_failure.out" 2>&1
+update_publish_failure_rc=$?
+set -e
+[[ "$update_publish_failure_rc" != "0" ]] \
+  || fail "stable update reported success after Desktop command atomic publication failed"
+check_tui_portal_receipt "$update_publish_failure"
+assert_file_unchanged "$update_publish_failure_target" "$update_publish_failure_sha" \
+  "$update_publish_failure_mode" "atomic-publication-failure old lazy Desktop command"
+[[ -d "$update_publish_failure_collision" ]] \
+  || fail "atomic-publication failure removed the occupied staging path"
+grep -qx 'unowned collision sentinel' "$update_publish_failure_collision/unowned-sentinel" \
+  || fail "atomic-publication failure changed unowned collision residue"
+assert_absent "$update_publish_failure/curl.log" "atomic-publication-failure Desktop transport"
+assert_absent "$update_publish_failure/home/.local/share/lingtai-desktop" \
+  "atomic-publication-failure Desktop managed state"
+if grep -q 'Refreshed lazy LingTai Desktop command' "$update_publish_failure.out"; then
+  fail "atomic-publication failure printed a false Desktop refresh success"
+fi
+if grep -q '^Done\.' "$update_publish_failure.out"; then
+  fail "atomic-publication failure printed a false overall install success"
+fi
+grep -q 'LingTai TUI/runtime installation succeeded and its receipt is valid' \
+  "$update_publish_failure.out" \
+  || fail "atomic-publication failure omitted the valid TUI receipt boundary"
+grep -q 'lazy macOS Desktop command could not be registered' "$update_publish_failure.out" \
+  || fail "atomic-publication failure omitted the top-level Desktop registration error"
+
 # Registration accepts an already-complete official Desktop launcher without
 # touching it or consulting Desktop transport. This is the Desktop-first path.
 official="$TEST_ROOT/existing-official"
