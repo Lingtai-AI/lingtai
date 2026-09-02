@@ -1,7 +1,7 @@
 ---
 product: tui-portal
-release_version: "1.0.7"
-release_tag: "v1.0.7"
+release_version: "1.0.8"
+release_tag: "v1.0.8"
 kernel_tag: "v1.0.4"
 migration: built-in-readers-only
 refresh_required: true
@@ -10,16 +10,16 @@ related_files:
   - install.sh
   - kernel-release.json
 maintenance: |
-  Keep the v1.0.7 release section aligned with the TUI/Portal release behavior,
+  Keep the v1.0.8 release section aligned with the TUI/Portal release behavior,
   kernel pin, and public installer update contract. Preserve the durable
   migration-history and runtime-retirement record below; release tags preserve
   this file's exact historical versions.
 ---
-# LingTai TUI and Portal 1.0.7 migration
+# LingTai TUI and Portal 1.0.8 migration
 
 ## Applies when
 
-The target TUI/Portal release is `1.0.7` / tag `v1.0.7`, paired with kernel
+The target TUI/Portal release is `1.0.8` / tag `v1.0.8`, paired with kernel
 tag `v1.0.4`, and that TUI tag lies in the open update interval
 `(current, target]`.
 
@@ -39,7 +39,7 @@ repair after reviewing the exact source file and authorization boundary.
 
 ## Validate
 
-- Confirm this file was read from the TUI repository at exact tag `v1.0.7`.
+- Confirm this file was read from the TUI repository at exact tag `v1.0.8`.
 - Verify both `lingtai-tui version` and `lingtai-portal --version` when Portal is
   installed, plus the selected runtime's `lingtai.__version__` and import paths.
 - If the product, tag, stable path, mirror content, bundle hash, or kernel pin
