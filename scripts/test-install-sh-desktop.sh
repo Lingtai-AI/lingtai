@@ -471,7 +471,6 @@ assert_absent "$update_old_lazy/home/.local/share/lingtai-desktop" "v0.1.9-refre
 official="$TEST_ROOT/existing-official"
 official_target="$official/home/.local/bin/lingtai-desktop"
 official_app="$official/home/.local/share/lingtai-desktop/current/LingTai.app/Contents/MacOS/LingTai"
-prepare_v106_install "$official"
 mkdir -p "$(dirname "$official_target")" "$(dirname "$official_app")"
 printf '#!/usr/bin/env bash\n# lingtai-desktop-owned-v1\necho official\n' > "$official_target"
 printf '#!/usr/bin/env bash\necho app\n' > "$official_app"
@@ -479,15 +478,37 @@ chmod 751 "$official_target"
 chmod 755 "$official_app"
 official_sha="$(file_sha256 "$official_target")"
 official_mode="$(file_mode "$official_target")"
-official_app_sha="$(file_sha256 "$official_app")"
-official_app_mode="$(file_mode "$official_app")"
-invoke_update_case "$official" darwin 1 > "$official.out" 2>&1
+invoke_case "$official" darwin 1 > "$official.out" 2>&1
 check_tui_portal_receipt "$official"
 assert_file_unchanged "$official_target" "$official_sha" "$official_mode" "official Desktop launcher"
-assert_file_unchanged "$official_app" "$official_app_sha" "$official_app_mode" "managed current Desktop App executable"
 assert_absent "$official/curl.log" "existing official Desktop transport"
 grep -q 'Existing complete LingTai Desktop command is already installed' "$official.out" \
   || fail "existing official Desktop launcher did not produce the truthful keep note"
+
+# Stable update has the same preservation boundary, including both launcher
+# and managed App bytes/modes, in an isolated old-install journey.
+update_official="$TEST_ROOT/update-existing-official"
+update_official_target="$update_official/home/.local/bin/lingtai-desktop"
+update_official_app="$update_official/home/.local/share/lingtai-desktop/current/LingTai.app/Contents/MacOS/LingTai"
+prepare_v106_install "$update_official"
+mkdir -p "$(dirname "$update_official_target")" "$(dirname "$update_official_app")"
+printf '#!/usr/bin/env bash\n# lingtai-desktop-owned-v1\necho official\n' > "$update_official_target"
+printf '#!/usr/bin/env bash\necho app\n' > "$update_official_app"
+chmod 751 "$update_official_target"
+chmod 755 "$update_official_app"
+update_official_sha="$(file_sha256 "$update_official_target")"
+update_official_mode="$(file_mode "$update_official_target")"
+update_official_app_sha="$(file_sha256 "$update_official_app")"
+update_official_app_mode="$(file_mode "$update_official_app")"
+invoke_update_case "$update_official" darwin 1 > "$update_official.out" 2>&1
+check_tui_portal_receipt "$update_official"
+assert_file_unchanged "$update_official_target" "$update_official_sha" "$update_official_mode" \
+  "stable-update official Desktop launcher"
+assert_file_unchanged "$update_official_app" "$update_official_app_sha" "$update_official_app_mode" \
+  "stable-update managed current Desktop App executable"
+assert_absent "$update_official/curl.log" "stable-update existing official Desktop transport"
+grep -q 'Existing complete LingTai Desktop command is already installed' "$update_official.out" \
+  || fail "stable-update existing official Desktop launcher did not produce the truthful keep note"
 
 # Ordinary existing-receipt reinstall keeps its prior ownership boundary: it
 # updates TUI/runtime/receipt but does not add the Desktop command.
@@ -657,12 +678,20 @@ run_desktop_command "$success" 0 version > "$success.second.out" 2>&1
 # Explicit opt-out: the existing TUI/Portal journey remains successful and the
 # Desktop transport is never consulted.
 opt_out="$TEST_ROOT/opt-out"
-prepare_v106_install "$opt_out"
-invoke_update_case "$opt_out" darwin 1 --skip-desktop > "$opt_out.out" 2>&1
+invoke_case "$opt_out" darwin 1 --skip-desktop > "$opt_out.out" 2>&1
 check_tui_portal_receipt "$opt_out"
 assert_absent "$opt_out/home/.local/share/lingtai-desktop" "Desktop opt-out"
 assert_absent "$opt_out/home/.local/bin/lingtai-desktop" "Desktop opt-out command"
 assert_absent "$opt_out/curl.log" "Desktop opt-out transport"
+
+# Stable update honors the same explicit opt-out in its own old-install root.
+update_opt_out="$TEST_ROOT/update-opt-out"
+prepare_v106_install "$update_opt_out"
+invoke_update_case "$update_opt_out" darwin 1 --skip-desktop > "$update_opt_out.out" 2>&1
+check_tui_portal_receipt "$update_opt_out"
+assert_absent "$update_opt_out/home/.local/share/lingtai-desktop" "stable-update Desktop opt-out"
+assert_absent "$update_opt_out/home/.local/bin/lingtai-desktop" "stable-update Desktop opt-out command"
+assert_absent "$update_opt_out/curl.log" "stable-update Desktop opt-out transport"
 
 # Installer support unavailable on first command execution: main installation
 # is still successful, the command stays retryable, and no Desktop state exists.
@@ -730,11 +759,20 @@ grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$release_failure/home/.local/bin/li
 # Linux: byte-for-byte control flow beyond our fixture overrides stays on the
 # pre-existing TUI/Portal/runtime path and never consults Desktop transport.
 linux="$TEST_ROOT/linux-unchanged"
-prepare_v106_install "$linux"
-invoke_update_case "$linux" linux 1 > "$linux.out" 2>&1
+invoke_case "$linux" linux 1 > "$linux.out" 2>&1
 check_tui_portal_receipt "$linux"
 assert_absent "$linux/home/.local/share/lingtai-desktop" "Linux Desktop state"
 assert_absent "$linux/home/.local/bin/lingtai-desktop" "Linux Desktop command"
 assert_absent "$linux/curl.log" "Linux Desktop transport"
+
+# Stable update remains a Desktop no-op on Linux in an isolated old-install
+# root while the pre-existing TUI/Portal/runtime update journey succeeds.
+update_linux="$TEST_ROOT/update-linux-unchanged"
+prepare_v106_install "$update_linux"
+invoke_update_case "$update_linux" linux 1 > "$update_linux.out" 2>&1
+check_tui_portal_receipt "$update_linux"
+assert_absent "$update_linux/home/.local/share/lingtai-desktop" "stable-update Linux Desktop state"
+assert_absent "$update_linux/home/.local/bin/lingtai-desktop" "stable-update Linux Desktop command"
+assert_absent "$update_linux/curl.log" "stable-update Linux Desktop transport"
 
 echo "install.sh Desktop fake-HOME journey passed"
