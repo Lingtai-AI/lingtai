@@ -826,6 +826,74 @@ func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 	}
 }
 
+func TestNormalizePromptPathValue(t *testing.T) {
+	const path = "/Users/ktwu/.lingtai-tui/covenant/en/covenant.md"
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{
+			name:  "single line is kept trimmed",
+			value: "  " + path + " ",
+			want:  path,
+		},
+		{
+			name:  "empty value stays empty",
+			value: "",
+			want:  "",
+		},
+		{
+			name:  "repeated newline copies collapse to one path",
+			value: path + "\n" + path + "\n" + path,
+			want:  path,
+		},
+		{
+			name:  "crlf repeated copies collapse too",
+			value: path + "\r\n" + path + "\r\n" + path,
+			want:  path,
+		},
+		{
+			name:  "blank lines are dropped",
+			value: path + "\n\n" + path + "\n   \n" + path,
+			want:  path,
+		},
+		{
+			name:  "distinct lines keep first-seen order",
+			value: "/a/covenant.md\n/b/covenant.md\n/a/covenant.md",
+			want:  "/a/covenant.md /b/covenant.md",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizePromptPathValue(tt.value); got != tt.want {
+				t.Fatalf("normalizePromptPathValue(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnterAgentNameDirDeduplicatesRepeatedPromptPathLines(t *testing.T) {
+	repeated := "/Users/example/.lingtai-tui/covenant/en/covenant.md\n" +
+		"/Users/example/.lingtai-tui/covenant/en/covenant.md\n" +
+		"/Users/example/.lingtai-tui/covenant/en/covenant.md"
+	m := NewFirstRunModel(t.TempDir(), t.TempDir(), true)
+	m.setupMode = true
+	m.setupKeepInitJSON = map[string]interface{}{
+		"covenant_file": repeated,
+	}
+
+	m.enterAgentNameDir(preset.Preset{Name: "dedupe-test", Manifest: map[string]interface{}{}})
+
+	want := "/Users/example/.lingtai-tui/covenant/en/covenant.md"
+	if got := m.covenantInput.Value(); got != want {
+		t.Fatalf("covenantInput = %q, want deduplicated single path %q", got, want)
+	}
+	if got := strings.Count(m.View(), "covenant/en/covenant.md"); got != 1 {
+		t.Fatalf("view should render the repeated covenant path exactly once, got %d:\n%s", got, m.View())
+	}
+}
+
 func TestPickPreset_CodexEnterShowsMethodChooser(t *testing.T) {
 	dir := t.TempDir()
 	m := FirstRunModel{
