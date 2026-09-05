@@ -69,6 +69,28 @@ assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" "strict parser stores 
 assert_eq "0.16.4" "$(bundle_manifest_field kernel_version)" "strict parser stores kernel version"
 assert_eq "lingtai-kernel-release-manifest.json" "$(bundle_manifest_field kernel_manifest_filename)" "strict parser stores kernel manifest filename"
 
+(
+  # GitHub's v1.0.7/v1.0.8 manifests publish the Windows archive only. On a
+  # POSIX host that is still a valid exact-tag kernel binding; the missing host
+  # binary digest must stay empty so try_release_asset falls back to source.
+  windows_only_manifest="$(printf '%s' "$strict_manifest" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["archives"]=[{"filename":"lingtai-v0.11.0-windows-amd64.zip","sha256":"b"*64}]; print(json.dumps(d))')"
+  assert_eq "" "$(validate_bundle_manifest "$windows_only_manifest" v0.11.0)" \
+    "strict parser accepts a Windows-only manifest on POSIX without inventing a host digest"
+  load_bundle_manifest "$windows_only_manifest" v0.11.0 || \
+    fail "Windows-only manifest should remain a valid exact-tag kernel binding on POSIX"
+  assert_eq "" "$BUNDLE_TUI_ARCHIVE_SHA" \
+    "Windows-only manifest leaves the optional POSIX archive digest empty"
+  assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" \
+    "Windows-only manifest still stores the pinned kernel tag"
+  BUNDLE_MANIFEST_JSON="$windows_only_manifest"
+  BUNDLE_TAG="v0.11.0"
+  if out="$(try_release_asset v0.11.0 2>&1)"; then
+    fail "try_release_asset should fall back when the bundle omits this POSIX host archive"
+  fi
+  echo "$out" | grep -q "does not list.*will build.*from source" ||
+    fail "missing-host fallback should explain the source build, got: $out"
+)
+
 expect_bad_bundle() {
   local label="$1" body="$2" tag="${3:-v0.11.0}"
   if validate_bundle_manifest "$body" "$tag" >/dev/null 2>&1; then

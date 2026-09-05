@@ -795,7 +795,9 @@ fetch_bundle_manifest() {
 }
 
 # Validate the complete bundle contract at the trust boundary and print the
-# canonical digest for this host's one exact archive.
+# canonical digest for this host's archive when the release publishes one.
+# A host archive is optional: the same manifest still binds the exact kernel
+# while the TUI/Portal binaries fall back to an exact-tag source build.
 parse_bundle_manifest() {
   local body="$1" expected_tag="$2"
   BODY="$body" python3 - "$expected_tag" "$(detect_os)" "$(detect_arch)" <<'PY'
@@ -836,7 +838,6 @@ try:
         if not isinstance(archive["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", archive["sha256"]): raise ValueError("archive sha256 must be lowercase 64-hex")
     target = f"lingtai-{expected_tag}-{os_name}-{arch}.tar.gz"
     hits = [archive for archive in data["archives"] if archive["filename"] == target]
-    if len(hits) != 1: raise ValueError(f"expected exactly one archive for {target}, found {len(hits)}")
     exact(data["providers"], ("github", "gitee"), "providers")
     exact(data["providers"]["github"], ("repo",), "github provider")
     exact(data["providers"]["gitee"], ("owner", "repo"), "gitee provider")
@@ -848,7 +849,7 @@ try:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", data["providers"]["gitee"]["repo"]): raise ValueError("gitee repo is invalid")
 except (ValueError, TypeError, json.JSONDecodeError) as exc:
     raise SystemExit(f"invalid strict bundle manifest: {exc}")
-print(hits[0]["sha256"])
+print(hits[0]["sha256"] if hits else "")
 print(data["kernel_tag"])
 print(data["kernel_version"])
 print(data["kernel_manifest_filename"])
@@ -2458,6 +2459,10 @@ try_release_asset() {
   fi
   if ! load_bundle_manifest "$BUNDLE_MANIFEST_JSON" "$tag"; then
     warn "validated bundle manifest could not be loaded for $name; refusing the release asset."
+    return 1
+  fi
+  if [[ -z "$BUNDLE_TUI_ARCHIVE_SHA" ]]; then
+    note "Validated bundle manifest does not list $name; will build TUI/Portal binaries from source."
     return 1
   fi
   if [[ ! "$BUNDLE_TUI_ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]; then
