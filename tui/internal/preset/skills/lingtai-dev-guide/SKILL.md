@@ -7,8 +7,8 @@ description: >
   security, running a runtime self-check, prepping a PR review, or
   stewarding a new skill. For developers and contributors; for end-user
   lessons, use tutorial-guide.
-version: 2.8.0
-last_changed_at: "2026-09-05T00:00:00Z"
+version: 2.9.0
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -44,11 +44,14 @@ generic procedures here for local guidance, or restate local rules from memory.
   TUI-created project venv; do not present bare `pip install/upgrade lingtai` as
   the standard user path. Manual pip/venv commands are for developer,
   diagnostic, or verification contexts only.
-- **Patch-to-self refresh rule:** a merged PR or rebuilt checkout is not live in
-  the agent until the runtime-imported source/package is updated, the agent is
-  refreshed, and a live in-situ probe confirms the new behaviour. For kernel
-  fixes, identify the actual import path and git HEAD first — do not assume the
-  repo you edited is the one this agent imports.
+- **Patch-to-self ownership rule:** a merged PR or rebuilt checkout is not
+  automatically live in the agent. The update/build owner must identify the
+  actual runtime interpreter, imported source/package, HEAD/version, and intended
+  selectors, then hand off the cutover target evidence. Kernel `system-manual` →
+  `reference/refresh-precheck/SKILL.md` alone owns the refresh transaction and
+  targeted receipt. Load `reference/runtime-self-check/SKILL.md` only for the
+  relevant provenance assertion or a suspected mismatch; an ordinary
+  same-runtime reload does not invoke its deep diagnostic library.
 - **Skill-size/progressive-disclosure rule:** when writing or updating skills,
   treat read/context limits as a reason to keep the router lean and link onward,
   not as a reason to paste large content into `SKILL.md`. Put dense material in
@@ -61,8 +64,8 @@ generic procedures here for local guidance, or restate local rules from memory.
   the pollution survives refresh — a plain `refresh` re-inherits it. Debug
   sessions that `export PYTHONPATH=...` for one experiment silently infect every
   agent they launch. See `reference/gotchas/SKILL.md` ("PYTHONPATH pollution")
-  and `reference/runtime-self-check/SKILL.md` §1 for the probe and clean-relaunch
-  recipe.
+  and `reference/runtime-self-check/SKILL.md` §1 for the probe and §8 for the
+  clean-relaunch recipe.
 
 ## ANATOMY frontmatter contract
 
@@ -128,9 +131,10 @@ drill-down files, not standalone top-level skills.
 - name: dev-guide-runtime-self-check
   location: reference/runtime-self-check/SKILL.md
   description: |
-    Probe which lingtai code is actually running after a refresh/checkout/preset/
-    MCP change — editable source, git HEAD, active binary and dev-mode symlinks,
-    whether long-lived runtime objects really rebuilt — and report it safely.
+    Deep, trigger-gated provenance and lifecycle diagnosis for a source/venv/
+    interpreter or TUI-binary cutover, changed or failing MCP source, or a
+    suspected mismatch. Ordinary reload sequencing belongs to kernel
+    `system-manual` → `reference/refresh-precheck/SKILL.md`.
 - name: dev-guide-pr-review-deliverables
   location: reference/pr-review-deliverables/SKILL.md
   description: |
@@ -165,7 +169,8 @@ drill-down files, not standalone top-level skills.
 | Avoid common footguns while coding | `reference/gotchas/SKILL.md` |
 | Diagnose a stuck, errored, or misbehaving LingTai network | `reference/debug-troubleshoot/SKILL.md` |
 | Audit secrets, permissions, MCP config, channels, or data exposure | `reference/security-audit/SKILL.md` |
-| Verify which runtime/binary is actually running after a refresh or rebuild, or why a fix that's on disk still serves stale behaviour | `reference/runtime-self-check/SKILL.md` |
+| Execute an ordinary agent reload, preset swap, or changed-input refresh transaction | Kernel `system-manual` → `reference/refresh-precheck/SKILL.md` |
+| Diagnose source/venv/TUI-binary cutover provenance, changed or failing MCP source, or why on-disk code still serves stale behaviour | `reference/runtime-self-check/SKILL.md` |
 | Get a PR review-ready: review gates, HTML explainer, PR hygiene | `reference/pr-review-deliverables/SKILL.md` |
 | Turn experience into a durable, de-privatized, PR-ready skill | `reference/skill-stewardship/SKILL.md` |
 | Sweep the GitHub org read-only, or install a non-self PR/issue monitor | `reference/repo-watch/SKILL.md` |

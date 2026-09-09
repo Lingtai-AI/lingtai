@@ -2,8 +2,8 @@
 name: dev-guide-debug-troubleshoot
 description: >
   Nested lingtai-dev-guide reference for diagnosing LingTai failures: agent process state, OOM/crashes, avatar spawn issues, post-molt memory loss, mail delivery, scheduled messages, tool timeouts, and escalation.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.0.1
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -235,19 +235,28 @@ See also `web_search(action="manual")` / the `web-search-manual` skill.
 
 ### 4.2 Tool Not Found
 
-A tool returns "not available", or a newly installed MCP tool is invisible. Causes: the MCP server was not refreshed, the capability is missing from init.json, or `servers.json` is malformed.
+A tool returns "not available", or a newly installed MCP tool is invisible.
+Causes include a changed MCP/init input not yet applied to the current runtime, a
+missing capability in `init.json`, malformed `servers.json`, an MCP boot failure,
+or a module-source mismatch.
 
-```
-system(show)        # 1. current capability list
-system(refresh)     # 2. after installing an MCP server or editing init.json
-system(show)        # 3. confirm
-```
+Start from the exact error and inspect only the named owner input:
 
 ```bash
 cat <work-dir>/.lingtai/<name>/mcp/servers.json
 ```
 
-**Pitfalls.** Nothing takes effect without a refresh — after install *and* after any init.json change. See `mcp-manual` for MCP configuration (kernel `mcp` capability).
+`mcp-manual` owns MCP registry/config validation and repair. For a known changed
+MCP input that only needs a same-runtime reload, kernel `system-manual` →
+`reference/refresh-precheck/SKILL.md` owns the transaction and changed-MCP
+assertion. If a refresh already failed or the tool remains absent, route the
+exact error to that reference's failure recovery and then to the owning MCP
+fault. Do not run a generic show/refresh/show loop or retry blindly.
+
+**Pitfalls.** Installing an MCP server or editing `init.json` does not by itself
+prove the changed surface is live. Preserve the error, validate the changed
+owner input, and follow the kernel transaction or failure route instead of
+inventorying unrelated tools.
 
 ### 4.3 Tool Output Truncated
 

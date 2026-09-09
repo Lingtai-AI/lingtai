@@ -1,8 +1,8 @@
 ---
 name: preset-skill-op-activation-session-refresh
 description: How a saved preset becomes the running default, first-run/setup choice semantics, propagation, and what /refresh actually switches.
-version: 1.0.0
-last_changed_at: "2026-07-19T00:00:00Z"
+version: 1.0.1
+last_changed_at: "2026-09-09T00:00:00Z"
 related_files:
   - tui/internal/tui/firstrun.go
   - tui/internal/tui/app.go
@@ -12,11 +12,15 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # Activation / session refresh
 
-Evidence: `tui/internal/tui/firstrun.go:4022-4205`, `tui/internal/tui/app.go:857-906`.
+Evidence: `tui/internal/tui/firstrun.go:3634-3818`,
+`tui/internal/tui/firstrun.go:4527`,
+`tui/internal/tui/firstrun.go:4609`, `tui/internal/tui/app.go:980-1029`,
+`tui/internal/tui/app.go:1249-1351`, `tui/internal/tui/app.go:1416-1500`, and
+`tui/internal/tui/app.go:1711-1737`.
 
 ## The agent-preset page is saved-only
 
-`enterAgentPresets()` (`firstrun.go:4032-4133`) lists only **saved**
+`enterAgentPresets()` (`firstrun.go:3644-3745`) lists only **saved**
 presets (`Source == SourceSaved` via `preset.IsTemplate`), never raw
 templates. A built-in template isn't "endorsed" onto this surface until
 the user has edited and saved it — which materializes a saved preset. See
@@ -29,7 +33,7 @@ The wizard defaults to "nothing allowed except the one the user's cursor
 was on when they entered this step" — the schema invariant is that
 `default` must be a member of `allowed`, and the default row is always
 forced into `presetAllowed`. `allowedPresetRefs()`
-(`firstrun.go:4175-4190`) writes the default preset first, then the rest
+(`firstrun.go:3787-3802`) writes the default preset first, then the rest
 of the user-checked rows in row order, into
 `manifest.preset.{default,allowed}`.
 
@@ -37,10 +41,10 @@ of the user-checked rows in row order, into
 
 Re-running `/setup` on an agent that already has an `init.json` hydrates
 `presetAllowed`/`presetDefaultIdx` from the **existing**
-`manifest.preset.{default,allowed}` (`firstrun.go:4078-4116`) rather than
+`manifest.preset.{default,allowed}` (`firstrun.go:3686-3742`) rather than
 resetting to "nothing allowed" — so re-running setup only changes what the
 user explicitly changes. Path comparison is normalized (`~/...` vs
-absolute) via `presetRefMatches` (`firstrun.go:4143-4168`) so the same file
+absolute) via `presetRefMatches` (`firstrun.go:3759-3780`) so the same file
 referenced two different ways still matches. A preset the wizard's cursor
 now points at, but which isn't in the existing allowed list (e.g. just
 created in the editor), is auto-checked so it doesn't silently stay
@@ -48,7 +52,8 @@ unauthorized — the user can still uncheck it.
 
 ## Propagation is best-effort, network-wide
 
-`propagatePresetPolicyToNetwork()` (`firstrun.go:4192-4206`) treats `/setup`
+`propagatePresetPolicyToNetwork()` (`firstrun.go:3813-3818`; call sites at
+`firstrun.go:4527` and `firstrun.go:4609`) treats `/setup`
 as a network-wide preset-policy reset: the wizard's chosen
 `{default, allowed}` surface is pushed to every other agent in the
 project, not just the one being edited. This is **best-effort** — failures
@@ -57,18 +62,23 @@ already succeeded.
 
 ## `/refresh` — three forms, one thing they don't do
 
-`app.go:857-906` handles three `/refresh` invocations:
+`app.go:980-1029` handles three `/refresh` invocations:
 
-- **`/refresh all`** — hard-refreshes every non-human agent in the project
-  at its current preset; failures per-agent are collected and reported,
-  the operation doesn't stop on the first failure.
+- **`/refresh all`** — for every non-human agent, attempts a best-effort
+  reset of `manifest.preset.active` to that agent's configured
+  `manifest.preset.default`, then hard-refreshes it. A reset failure is silent,
+  so the prior active preset may remain. Returned relaunch/heartbeat failures
+  are collected per agent; the operation does not stop on the first one.
 - **`/refresh <preset>`** — resolves `<preset>` against the target agent's
   `manifest.preset.allowed` list first (`resolvePresetInAllowed`); an
   unresolvable name surfaces a clear status-bar error and does nothing
-  destructive. On success, hard-refreshes the target agent switched to
-  that preset.
-- **bare `/refresh`** — hard-refreshes the target agent at its current
-  preset (no switch).
+  destructive. It then attempts to write that active preset before the hard
+  refresh. Current source continues when the write fails, so a successful
+  relaunch alone does not prove the requested switch happened.
+- **bare `/refresh`** — attempts the same best-effort reset to the configured
+  default before hard-refreshing the target. It can switch an agent that was
+  running a non-default preset, but a reset failure leaves the prior active
+  value in place while relaunch continues.
 
 **Saving a preset alone does not switch a running session.** A saved or
 even newly-activated (`default`) preset only takes effect on the *next*

@@ -149,6 +149,7 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 		"reference/gotchas/SKILL.md",
 		"reference/debug-troubleshoot/SKILL.md",
 		"reference/security-audit/SKILL.md",
+		"reference/runtime-self-check/SKILL.md",
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
 			t.Fatalf("expected bundled lingtai-dev-guide file %s to be extracted: %v", rel, err)
@@ -159,14 +160,51 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootText := string(rootBody)
 	for _, want := range []string{
 		"```yaml",
 		"- name: dev-guide-architecture",
 		"location: reference/architecture/SKILL.md",
 		"Routing table",
 	} {
-		if !strings.Contains(string(rootBody), want) {
+		if !strings.Contains(rootText, want) {
 			t.Errorf("lingtai-dev-guide root missing nested metadata %q", want)
+		}
+	}
+
+	runtimeBody, err := os.ReadFile(filepath.Join(utilitiesDir, "reference", "runtime-self-check", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeText := string(runtimeBody)
+	for _, doc := range []struct {
+		name string
+		text string
+	}{
+		{name: "root", text: rootText},
+		{name: "runtime-self-check", text: runtimeText},
+	} {
+		for _, owner := range []string{"system-manual", "refresh-precheck"} {
+			if !strings.Contains(doc.text, owner) {
+				t.Errorf("lingtai-dev-guide %s missing refresh owner %q", doc.name, owner)
+			}
+		}
+	}
+	for _, trigger := range []string{
+		"Ordinary same-runtime reload does not use this deep checklist",
+		"Source/venv cutover",
+		"suspected mismatch",
+	} {
+		if !strings.Contains(runtimeText, trigger) {
+			t.Errorf("runtime-self-check missing stable trigger/limit %q", trigger)
+		}
+	}
+	for _, stale := range []string{
+		"Right after a `refresh`",
+		"Post-refresh diagnostics checklist",
+	} {
+		if strings.Contains(runtimeText, stale) {
+			t.Errorf("runtime-self-check retains stale universal guidance %q", stale)
 		}
 	}
 

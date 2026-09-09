@@ -2,8 +2,8 @@
 name: dev-guide-gotchas
 description: >
   Nested lingtai-dev-guide reference for known implementation footguns: Bubble Tea v2 paste, textarea theming, dev-mode rebuilds, editable installs, migrations, localization, authorization gates, config conventions, and rebuild-gate test false-passes.
-version: 1.2.1
-last_changed_at: "2026-08-10T00:00:00Z"
+version: 1.2.2
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -80,7 +80,7 @@ A successful PR merge does not prove running agents execute the merged code. The
 
 **Symptom:** a feature present on GitHub is missing at runtime; imports such as `lingtai.mcp_servers` fail; an MCP/addon path still points at an old standalone repo or a detached worktree.
 
-**Fix:** probe the exact Python interpreter the agent uses and print `module.__file__` for `lingtai`, `lingtai.kernel`, and the relevant MCP/addon modules; inspect the git root/HEAD behind those paths; fast-forward or editable-reinstall the intended source; then call `system(action="refresh")` and rerun the probe. Command recipe: `reference/setup/SKILL.md` → "Verify the runtime checkout a running agent actually uses". Discipline: `reference/runtime-self-check/SKILL.md`.
+**Fix:** use `reference/setup/SKILL.md` → "Verify the runtime checkout a running agent actually uses" to probe the exact interpreter and relevant module paths, then fast-forward or editable-reinstall the intended source only with separate authorization. The update/build owner hands off the resulting target evidence. Kernel `system-manual` → `reference/refresh-precheck/SKILL.md` owns any refresh transaction; load `reference/runtime-self-check/SKILL.md` only for the matching provenance assertion or a suspected mismatch.
 
 ## PYTHONPATH pollution shadows the runtime import
 

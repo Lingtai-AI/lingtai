@@ -2,8 +2,8 @@
 name: dev-guide-setup
 description: >
   Nested lingtai-dev-guide reference for local developer environment setup: cloning repos, building TUI/portal, dev-mode symlinks, editable kernel install, MCP addon setup, and verification.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.0.1
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -103,8 +103,9 @@ checkout you just edited. The TUI runtime venv may point at an editable checkout
 that is behind `origin/main`, or at a detached worktree left by an earlier test.
 
 Use the TUI runtime venv unless the agent's `init.json` explicitly names a
-different Python executable. This probe prints the import origin, git root,
-branch, and HEAD for the kernel and each MCP/addon module at once:
+different Python executable. Start with only the kernel modules needed for the
+cutover evidence. Add exactly one MCP/addon entry only when that named module
+changed, failed, or is suspected mismatched:
 
 ```bash
 RUNTIME_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
@@ -113,9 +114,9 @@ import importlib, pathlib, subprocess
 mods = [
     "lingtai",
     ("lingtai.kernel", "lingtai_kernel"),   # new canonical first, old fallback
-    "lingtai.mcp_servers",
-    ("lingtai.mcp_servers.telegram", "lingtai_telegram"),
 ]
+# For one named MCP/addon trigger only, append exactly that module and wrapper:
+# mods.append(("lingtai.mcp_servers.telegram", "lingtai_telegram"))
 for entry in mods:
     names = (entry,) if isinstance(entry, str) else entry
     mod = None
@@ -160,16 +161,18 @@ git switch main                         # only if it is safe to leave a worktree
 git pull --ff-only origin main
 ```
 
-Then `system(action="refresh", reason="pick up updated runtime checkout")` and
-rerun the probe from the same interpreter. For addon/MCP work, verify both the
-curated package path (for example `lingtai.mcp_servers.telegram`) and any
-compatibility wrapper (`lingtai_telegram`) so stale external addon checkouts do
-not masquerade as the active implementation.
+After an authorized source repair, the update/build owner freezes and hands off
+the exact runtime interpreter, imported source, HEAD/version, and intended
+selector evidence. For addon/MCP work, include both the curated package path
+(for example `lingtai.mcp_servers.telegram`) and any compatibility wrapper
+(`lingtai_telegram`) so a stale external addon checkout cannot masquerade as the
+active implementation.
 
-Order matters — update the imported source *before* refreshing, and confirm with
-a live probe afterward. `reference/runtime-self-check/SKILL.md` owns that
-discipline (the patch-to-self checklist and the live-object caveat); this section
-is only the setup-side command recipe.
+Kernel `system-manual` → `reference/refresh-precheck/SKILL.md` owns the
+source/venv cutover transaction and targeted receipt. Load
+`reference/runtime-self-check/SKILL.md` only for the selected provenance
+assertion or a suspected mismatch; this section remains the setup-side source
+probe and repair recipe.
 
 ## Set up MCP addons (optional)
 

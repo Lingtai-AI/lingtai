@@ -2,8 +2,8 @@
 name: dev-guide-contributing
 description: >
   Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, worktree inventory and exact-object approval gates, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
-version: 1.2.2
-last_changed_at: "2026-08-10T00:00:00Z"
+version: 1.2.3
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -230,9 +230,12 @@ With the TUI's runtime venv:
 
 Kernel source changes need no binary rebuild in editable mode, but they are live
 only in the checkout/package the agent actually imports. After a merge in another
-worktree: identify the runtime import path and git HEAD, fast-forward or
-editable-reinstall that source, then `refresh` and verify with an in-situ probe —
-`reference/runtime-self-check/SKILL.md` has the checklist.
+worktree, the update/build owner identifies and, with separate authorization,
+repairs that imported source, then hands off exact interpreter/source/HEAD and
+selector evidence. Kernel `system-manual` →
+`reference/refresh-precheck/SKILL.md` owns the source/venv cutover transaction.
+Use `reference/runtime-self-check/SKILL.md` only for the relevant provenance
+assertion or when live behaviour still suggests a mismatch.
 
 Beware the auto-upgrader: a local `pyproject.toml` version lower than PyPI's lets
 it replace the editable install with a wheel and silently undo dev mode.

@@ -1,66 +1,68 @@
 ---
 name: dev-guide-runtime-self-check
 description: >
-  Nested lingtai-dev-guide reference for developer/operator runtime self-checks
-  after a refresh, checkout, or preset/MCP change: probe which lingtai code is
-  actually running, confirm the editable source and git HEAD, verify the active
-  TUI/portal binary and dev-mode symlinks, rebuild the TUI from a clean release
-  worktree, inspect MCP/addon module sources and tool surface, and report
-  evidence safely with secrets redacted. Includes verifying that long-lived
-  runtime objects (services/adapters/caches) were actually rebuilt after a
-  refresh, not just that new source is imported.
-version: 1.3.1
-last_changed_at: "2026-08-10T00:00:00Z"
+  Nested lingtai-dev-guide reference for deep, trigger-gated provenance and
+  lifecycle diagnosis during a source/venv/interpreter or TUI-binary cutover,
+  for changed or failing MCP source, or when a runtime mismatch is suspected.
+  Use only the matching import/distribution/editable/HEAD, binary, MCP-source,
+  live-object, redaction, or PYTHONPATH-recovery material. Ordinary same-runtime
+  reload sequencing belongs to kernel system-manual -> refresh-precheck.
+version: 2.0.0
+last_changed_at: "2026-09-09T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Runtime Self-Check
 
-Nested lingtai-dev-guide reference. Read this after the top-level router sends
-you here whenever you need to verify *what code is actually running* and report
-it without leaking secrets. It consolidates the most frequently re-implemented
-diagnostic in the network: the post-refresh "which runtime am I executing?" probe.
+Nested lingtai-dev-guide reference. This is a deep diagnostic library selected
+only when a cutover, observed failure, or suspected mismatch raises a provenance
+or lifecycle question. Kernel `system-manual` →
+`reference/refresh-precheck/SKILL.md` is the single owner of ordinary agent
+refresh sequencing; this reference neither repeats nor initiates that
+transaction.
 
 ## Core principle
 
-A **read-only diagnostic** — probe, confirm, report. The only writes allowed are
-developer rebuilds you were asked to do (`make build`, editable reinstall). Never
+Probe, confirm, and report only the assertion named by the trigger. Diagnosis is
+read-only. A rebuild, editable reinstall, relink, source update, process stop, or
+clean relaunch needs separate exact authorization and its owning procedure. Never
 paste secrets into a report: redact tokens, keys, chat IDs, and private absolute
 paths, preferring `<your-lingtai-checkout>` / `~/.lingtai-tui/...` forms.
 
 ## When to use
 
-- Right after a `refresh`, a branch/worktree switch, an editable reinstall, a
-  preset swap, or any MCP/addon config change.
-- A fix is merged/built but old behaviour persists ("did it actually load?").
-- A fix is imported yet a long-lived service/adapter/cache still serves stale
-  behaviour — source-on-disk ≠ rebuilt-at-runtime (see §6).
-- An MCP boot failure needs source-of-truth checks, or a maintainer needs a safe
-  evidence pack.
+- A source/venv/interpreter-selector or editable-install cutover needs one exact
+  runtime provenance assertion.
+- A TUI-binary cutover needs binary, symlink, build, or PATH provenance.
+- Changed or failing MCP source needs its specific module-source assertion, or
+  MCP boot/tool behaviour suggests a source mismatch.
+- On-disk source and live behaviour disagree, including a suspected long-lived
+  service/adapter/cache mismatch.
+- A proven inherited `PYTHONPATH` mismatch needs source diagnosis or the
+  separately authorized clean-relaunch recovery.
 
-## Patch-to-self checklist — merged PR ≠ live runtime
+**Ordinary same-runtime reload does not use this deep checklist.** A routine
+reload or preset swap with no provenance question routes directly to kernel
+`system-manual` → `reference/refresh-precheck/SKILL.md`.
 
-To test a kernel/TUI fix on the agent you are currently speaking through, do
-**all** of these. Skipping step 1 is how agents repeatedly refresh stale code and
-conclude the fix failed.
+## Source/venv cutover diagnostic handoff
 
-1. **Find the runtime import path.** Run the §1 probe — runtime venv Python, not
-   `python` on PATH.
-2. **Compare HEADs.** If the agent imports `/B/lingtai-kernel` but your PR merged
-   in `/A/lingtai-kernel`, update `/B` (`git fetch origin main && git pull
-   --ff-only origin main`) or reinstall the intended checkout into the runtime
-   venv. Do not edit protected dirty checkouts; stop and report if the
-   fast-forward is not clean.
-3. **Refresh only after the imported source/package is right.** `refresh` reloads
-   from the configured runtime environment; it does not fetch or fast-forward a
-   source tree for you.
-4. **Do an in-situ probe.** Verify live behaviour or metadata changed on this
-   agent — a tool result `_meta`, a token-ledger field, another direct
-   observable. Source greps and import probes are necessary but not sufficient.
-5. **Report evidence.** Runtime Python, import path, old/new HEAD, action taken
-   (fast-forward / editable reinstall / rebuild), refresh result, live probe.
+A merged change or correct-looking checkout is not proof of what the live agent
+imports. Keep the owner boundary explicit:
 
-## 1. Agent runtime / kernel source probe
+1. The update/build owner uses the relevant §1 probe to identify the exact
+   runtime interpreter, imported source/package, HEAD/version, and intended
+   selectors. Any source update or reinstall remains that owner's separately
+   authorized action; stop rather than modify a protected dirty checkout.
+2. That owner freezes and hands off the cutover target evidence. Kernel
+   `system-manual` → `reference/refresh-precheck/SKILL.md` owns the transaction
+   and its targeted receipt; this diagnostic does not restate either.
+3. Use only the assertion the trigger needs: §1 for import provenance, §6 when
+   source is present but live behaviour still disagrees, §2–§3 for a TUI-binary
+   cutover, or §4 for changed/failing MCP source.
+4. Report only the selected evidence under §7's redaction rules.
+
+## 1. Agent runtime / kernel source probe (cutover or mismatch only)
 
 Which `lingtai` package the agent venv executes, whether it is editable, and the
 git HEAD behind it. Use the TUI runtime venv Python, not whatever is on PATH:
@@ -142,13 +144,15 @@ print(json.dumps({"lingtai_file": spec.origin if spec else None}))
 PY
 ```
 
-If `ps eww` shows a `PYTHONPATH` and the venv probe differs, a normal
-`system(action="refresh")` will **not** fix it (the watcher re-inherits the
-pollution); use the clean-relaunch recipe in §8 instead.
+If `ps eww` shows a `PYTHONPATH` and the venv probe differs, an ordinary
+refresh will **not** fix it because the watcher re-inherits the pollution; use
+the clean-relaunch recipe in §8 instead.
 
-## 2. Active binary and dev-mode symlink check
+## 2. Active binary and dev-mode symlink check (TUI cutover only)
 
-The TUI binary is `lingtai-tui` (never `lingtai-agent`, which is the Python CLI).
+Use this section only for a TUI/portal binary cutover or suspected PATH/build
+mismatch. The TUI binary is `lingtai-tui` (never `lingtai-agent`, which is
+the Python CLI).
 
 ```bash
 which lingtai-tui
@@ -162,7 +166,9 @@ when the portal is in scope.
 
 ## 3. Rebuild the active TUI from a clean release worktree
 
-To make the running binary reflect `origin/main` (or a release head), rebuild
+Use this section only when a TUI/portal cutover actually requires a rebuild and
+that mutation has separate exact authorization. To make the running binary
+reflect `origin/main` (or a release head), rebuild
 from a clean worktree, not a dirty feature branch. Rebuild both binaries when
 both are in scope — project migrations are retired, so there is no `.lingtai/meta.json`
 version gate to keep in lockstep (see `reference/architecture/SKILL.md`).
@@ -218,57 +224,55 @@ to learn which worktree they target; (b) ensure `/opt` points at *your* rebuilt
 leaves a dangling `/opt` link and a broken `lingtai-tui` on PATH. Clean it up
 only after re-linking `/opt` to a surviving build.
 
-## 4. MCP / addon source and tool-surface check
+## 4. MCP / addon source check (changed or failing module only)
 
-Where MCP/addon modules resolve from, without printing any configured secret:
+Use this only when a named MCP package/config changed, an MCP boot/tool failure
+occurred, or a module-source mismatch is suspected. Probe only the module named
+by that trigger; never inventory unrelated addons or print configured secrets:
 
 ```bash
 VENV_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
+MOD="lingtai.mcp_servers.telegram"  # replace with the one changed/failing module
 
-# Where do addon/MCP modules import from? (sources only, never env values)
-"$VENV_PY" - <<'PY'
-import importlib.util, json
-mods = [
-    "lingtai.mcp_servers.imap",
-    "lingtai.mcp_servers.telegram",
-    "lingtai.mcp_servers.feishu",
-    "lingtai.mcp_servers.wechat",
-    "lingtai.mcp_servers.whatsapp",
-    "lingtai.mcp_servers.cloud_mail",
-]
-out = {}
-for m in mods:
-    spec = importlib.util.find_spec(m)
-    out[m] = spec.origin if spec else None
-print(json.dumps(out, indent=2))
+"$VENV_PY" - "$MOD" <<'PY'
+import importlib.util, json, sys
+module = sys.argv[1]
+spec = importlib.util.find_spec(module)
+print(json.dumps({module: spec.origin if spec else None}, indent=2))
 PY
 ```
 
-For MCP config, audit references — not values: an entry should reference
-`${ENV_VAR}` rather than a hardcoded key, and you report "uses env reference" vs
-"hardcoded (length N)" without echoing the secret. Full audit methodology and
-safe-reporting format: `reference/security-audit/SKILL.md`. MCP boot failures and
-preset/path mismatches: `reference/debug-troubleshoot/SKILL.md`.
+For the relevant MCP config, audit references — not values: an entry should
+reference `${ENV_VAR}` rather than a hardcoded key, and report "uses env
+reference" vs "hardcoded (length N)" without echoing the secret. Full audit
+methodology and safe-reporting format: `reference/security-audit/SKILL.md`.
+MCP boot failures and preset/path mismatches:
+`reference/debug-troubleshoot/SKILL.md`.
 
-## 5. Post-refresh diagnostics checklist
+## 5. Trigger-to-section index
 
-- [ ] Patch-to-self: the imported source/package was updated before refresh, and
-  an in-situ live probe confirms the new behaviour.
-- [ ] §1 import probe: `lingtai.__file__` resolves where you expect (editable vs wheel).
-- [ ] §1 git HEAD of the imported checkout matches the intended commit; tree state noted.
-- [ ] §2 active binary resolves to the expected path; version string matches dev/brew expectation.
-- [ ] §3 if a fix should be live, the relevant binary/kernel was actually rebuilt/reinstalled.
-- [ ] §4 MCP/addon modules import from the expected source; tool surface present.
-- [ ] §6 if behaviour still disagrees, the runtime object was actually rebuilt — verified via metadata/fingerprint, not just the import probe.
-- [ ] No secrets, tokens, chat IDs, or private absolute paths captured for the report.
+| Current trigger | Load only |
+|---|---|
+| Source/venv/interpreter or editable-install cutover; suspected import/distribution/HEAD mismatch | §1 |
+| TUI/portal binary cutover or suspected PATH/symlink/build mismatch | §2; §3 only when an authorized rebuild is required |
+| Named MCP source/config change, boot failure, or module-source mismatch | §4 for that module only |
+| On-disk source disagrees with live service/adapter/cache behaviour | §6 |
+| Need to disclose selected evidence safely | §7 |
+| Proven inherited `PYTHONPATH` pollution requires owner-authorized process recovery | §1 for diagnosis, then §8 |
+
+If no row matches, stop rather than manufacture a cross-subsystem audit. For an
+ordinary same-runtime reload or preset swap, use kernel `system-manual` →
+`reference/refresh-precheck/SKILL.md`, not this index.
 
 ## 6. Live object/adapter lifecycle — source-on-disk ≠ rebuilt-at-runtime
 
-The §1–§2 probes confirm the right *files* are imported. They do **not** prove
-the long-lived runtime *objects* built from those files were rebuilt after a
-`refresh`. A service or adapter constructed once at agent init survives refreshes
-whenever the inputs gating its rebuild did not change — so new source can be on
-disk and imported while the live agent still serves a stale object.
+Use this only when the expected source is present but observed live behaviour
+still disagrees. The selected provenance probe confirms the right *files* are
+imported; it does **not** prove the long-lived runtime *objects* built from those
+files were rebuilt. A service or adapter constructed once at agent init can
+survive lifecycle reloads whenever the inputs gating its rebuild did not change —
+so new source can be on disk and imported while the live agent still serves a
+stale object.
 
 This bit the Codex prompt-cache work (PRs #406/#411): the affinity/cache source
 was present and imported, but after a live `refresh` the token ledger still showed
@@ -299,16 +303,21 @@ was not rebuilt regardless of what the import probe says. That is the bug.
 
 ## 7. Safe evidence reporting
 
-Report runtime state as a compact, source-labeled evidence pack:
+Report a compact, trigger-dependent evidence pack. Omit every subsystem not
+selected by the trigger:
 
 ```text
 runtime self-check @ <iso-timestamp>
-- lingtai source: <package_dir>  (editable=<true|false>)
-- kernel HEAD:    <short-sha> [<dirty|clean>]
-- active binary:  <resolved path>  version=<vX.Y.Z[-N-gSHA]>
-- MCP/addons:     <module>=<source-path>, ... (env-referenced: yes/no)
-- anomalies:      <none | short list>
+- trigger:            <cutover or suspected mismatch>
+- selected assertion: <import | binary | MCP source | live object | PYTHONPATH>
+- result:             <expected vs observed>
+- source evidence:    <only paths/version/HEAD/fingerprint relevant to assertion>
+- anomalies:          <none | short list>
 ```
+
+For example, source/venv evidence may name `lingtai` source and kernel HEAD;
+binary evidence may name the resolved binary and version; MCP evidence may name
+only the changed/failing module's source. Do not report all three by default.
 
 Redaction rules, always: replace any token/key/password with `<REDACTED>` and
 never print env *values*; generalize private absolute paths to
@@ -354,7 +363,10 @@ before `import lingtai` resolved from the intended frozen source.
 
 ## Related references
 
-- `reference/setup/SKILL.md` — establish or recover editable dev mode and symlinks.
+- Kernel `system-manual` → `reference/refresh-precheck/SKILL.md` — own the
+  ordinary refresh transaction and targeted receipt.
+- `reference/setup/SKILL.md` — establish or recover editable dev mode and
+  supply update/build target evidence.
 - `reference/gotchas/SKILL.md` — dev-mode rebuild gotcha, editable-install behaviour.
 - `reference/debug-troubleshoot/SKILL.md` — failing networks, MCP boot, preset/path mismatch.
 - `reference/security-audit/SKILL.md` — full secret/permission audit and safe-reporting format.
