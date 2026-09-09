@@ -2,9 +2,13 @@
 package fs
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func writeAgentRecord(t *testing.T, dir, body string) {
@@ -107,5 +111,207 @@ func TestReadAgentRecordMissingSchemaTreatedAsAbsent(t *testing.T) {
 	writeAgentRecord(t, dir, `{"model": {"provider": "zhipu", "model": "glm-5.2"}}`)
 	if _, ok := ReadAgentRecord(dir); ok {
 		t.Fatal("ReadAgentRecord reported ok for a record with no schema field")
+	}
+}
+
+func validAsyncWorkChild(generatedAt time.Time) string {
+	return fmt.Sprintf(`{
+  "schema":"lingtai.async_work/v1","schema_version":1,
+  "generated_at":%q,"window_seconds":600,
+  "running":3,"queued":2,"done":12,"failed":1,
+  "daemon":{
+    "running":1,"queued":0,"done":4,"failed":0,
+    "backend_counts":{"lingtai":4,"claude-code":1},
+    "model_counts":{"glm-5.2":3,"gpt-5.6/terra":1},
+    "usage":{"input_tokens":1200,"output_tokens":300,"thinking_tokens":40,"cached_tokens":600,"api_calls":7}
+  },
+  "shell":{"running":2,"queued":2,"done":8,"failed":1}
+}`, generatedAt.UTC().Format(time.RFC3339Nano))
+}
+
+func agentRecordWithAsyncWork(child string) string {
+	return fmt.Sprintf(`{
+  "schema":"lingtai.agent_record/v1","schema_version":1,
+  "model":{"provider":"zhipu","model":"glm-5.2"},
+  "usage":{"api_calls":9,"input_tokens":99},
+  "async_work":%s
+}`, child)
+}
+
+func readAsyncWork(t *testing.T, child string, now time.Time) (AsyncWorkSnapshot, bool) {
+	t.Helper()
+	dir := t.TempDir()
+	writeAgentRecord(t, dir, agentRecordWithAsyncWork(child))
+	rec, ok := ReadAgentRecord(dir)
+	if !ok {
+		t.Fatal("valid top-level Agent Record was rejected")
+	}
+	return rec.FreshAsyncWork(now)
+}
+
+func TestFreshAsyncWorkValidMixedSnapshot(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	got, ok := readAsyncWork(t, validAsyncWorkChild(now.Add(-time.Minute)), now)
+	if !ok {
+		t.Fatal("valid fresh mixed async_work child was rejected")
+	}
+	if got.Counts != (AsyncWorkCounts{Running: 3, Queued: 2, Done: 12, Failed: 1}) {
+		t.Fatalf("aggregate = %+v", got.Counts)
+	}
+	if got.Daemon.Counts != (AsyncWorkCounts{Running: 1, Done: 4}) ||
+		got.Shell.Counts != (AsyncWorkCounts{Running: 2, Queued: 2, Done: 8, Failed: 1}) {
+		t.Fatalf("lanes = daemon:%+v shell:%+v", got.Daemon.Counts, got.Shell.Counts)
+	}
+	if got.Daemon.Usage != (AsyncWorkUsage{InputTokens: 1200, OutputTokens: 300, ThinkingTokens: 40, CachedTokens: 600, APICalls: 7}) {
+		t.Fatalf("daemon usage = %+v", got.Daemon.Usage)
+	}
+	if got.Daemon.BackendCounts["lingtai"] != 4 || got.Daemon.ModelCounts["glm-5.2"] != 3 {
+		t.Fatalf("daemon details = backends:%v models:%v", got.Daemon.BackendCounts, got.Daemon.ModelCounts)
+	}
+}
+
+func TestFreshAsyncWorkExactAgeBoundary(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	if _, ok := readAsyncWork(t, validAsyncWorkChild(now.Add(-600*time.Second)), now); !ok {
+		t.Fatal("snapshot exactly 600 seconds old must remain valid")
+	}
+}
+
+func TestFreshAsyncWorkAcceptsStrictRFC3339Forms(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	base := validAsyncWorkChild(now)
+	baseTimestamp := now.Format(time.RFC3339Nano)
+	for _, timestamp := range []string{
+		"2026-09-08T11:59:59.123456789Z",
+		"2026-09-08T13:59:00.25+02:00",
+	} {
+		t.Run(timestamp, func(t *testing.T) {
+			child := strings.Replace(base, baseTimestamp, timestamp, 1)
+			if _, ok := readAsyncWork(t, child, now); !ok {
+				t.Fatalf("valid RFC3339 timestamp %q was rejected", timestamp)
+			}
+		})
+	}
+}
+
+func TestFreshAsyncWorkRejectsInvalidChildren(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	valid := validAsyncWorkChild(now)
+	overflowingLane := strings.NewReplacer(
+		`"running":3`, `"running":9223372036854775807`,
+		`"daemon":{
+    "running":1`, `"daemon":{
+    "running":9223372036854775807`,
+	).Replace(valid)
+	var overflowCheck struct {
+		Daemon struct {
+			Running int64 `json:"running"`
+		} `json:"daemon"`
+	}
+	if err := json.Unmarshal([]byte(overflowingLane), &overflowCheck); err != nil || overflowCheck.Daemon.Running != 9223372036854775807 {
+		t.Fatalf("overflow fixture did not set daemon running to MaxInt64: value=%d err=%v", overflowCheck.Daemon.Running, err)
+	}
+	duplicateEmptyShell := strings.TrimSuffix(valid, "\n}") + ",\n  \"shell\":{}\n}"
+	baseTimestamp := now.Format(time.RFC3339Nano)
+	commaTimestamp := now.Format("2006-01-02T15:04:05") + ",000Z"
+	invalidOffsetTimestamp := now.Add(24*time.Hour).Format("2006-01-02T15:04:05") + "+24:00"
+	tests := []struct {
+		name  string
+		child string
+	}{
+		{"missing child", "__MISSING__"},
+		{"null child", "null"},
+		{"wrong shape", `[]`},
+		{"malformed child", `{`},
+		{"future schema", strings.Replace(valid, `lingtai.async_work/v1`, `lingtai.async_work/v2`, 1)},
+		{"future version", strings.Replace(valid, `"schema_version":1`, `"schema_version":2`, 1)},
+		{"wrong window", strings.Replace(valid, `"window_seconds":600`, `"window_seconds":601`, 1)},
+		{"capitalized required count", strings.Replace(valid, `"running":3`, `"Running":3`, 1)},
+		{"duplicate empty shell lane", duplicateEmptyShell},
+		{"negative count", strings.Replace(valid, `"running":3`, `"running":-1`, 1)},
+		{"null zero-valued daemon count", strings.Replace(valid, `"queued":0`, `"queued":null`, 1)},
+		{"fractional count", strings.Replace(valid, `"running":3`, `"running":3.5`, 1)},
+		{"boolean count", strings.Replace(valid, `"running":3`, `"running":true`, 1)},
+		{"aggregate mismatch", strings.Replace(valid, `"running":3`, `"running":4`, 1)},
+		{"missing daemon usage", strings.Replace(valid, `"usage":`, `"usage_missing":`, 1)},
+		{"negative daemon usage", strings.Replace(valid, `"input_tokens":1200`, `"input_tokens":-1`, 1)},
+		{"null daemon usage", strings.Replace(valid, `"input_tokens":1200`, `"input_tokens":null`, 1)},
+		{"unsafe model name", strings.Replace(valid, `glm-5.2`, "bad\\nmodel", 1)},
+		{"zero model count", strings.Replace(valid, `"glm-5.2":3`, `"glm-5.2":0`, 1)},
+		{"invalid timestamp", strings.Replace(valid, baseTimestamp, `not-a-time`, 1)},
+		{"comma fractional timestamp", strings.Replace(valid, baseTimestamp, commaTimestamp, 1)},
+		{"invalid 24-hour offset", strings.Replace(valid, baseTimestamp, invalidOffsetTimestamp, 1)},
+		{"future timestamp", validAsyncWorkChild(now.Add(time.Nanosecond))},
+		{"stale timestamp", validAsyncWorkChild(now.Add(-600*time.Second - time.Nanosecond))},
+		{"overflowing lane sum", overflowingLane},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := agentRecordWithAsyncWork(tc.child)
+			if tc.child == "__MISSING__" {
+				body = `{"schema":"lingtai.agent_record/v1","schema_version":1,"model":{"model":"still-visible"},"usage":{"api_calls":5}}`
+			}
+			writeAgentRecord(t, dir, body)
+			rec, topOK := ReadAgentRecord(dir)
+			if tc.name == "malformed child" {
+				// An actually truncated child also truncates the enclosing document;
+				// this is invalid top-level JSON, not merely an invalid optional value.
+				if topOK {
+					t.Fatal("truncated document unexpectedly parsed")
+				}
+				return
+			}
+			if !topOK {
+				t.Fatal("invalid optional child poisoned the valid top-level record")
+			}
+			if _, ok := rec.FreshAsyncWork(now); ok {
+				t.Fatal("invalid async_work child was accepted")
+			}
+		})
+	}
+}
+
+func TestMalformedAsyncWorkDoesNotPoisonTopLevelTelemetry(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentRecord(t, dir, agentRecordWithAsyncWork(`{"schema":17,"daemon":"bad"}`))
+	rec, ok := ReadAgentRecord(dir)
+	if !ok {
+		t.Fatal("malformed optional child poisoned top-level Agent Record")
+	}
+	if rec.Model.Model != "glm-5.2" || rec.Usage.APICalls != 9 {
+		t.Fatalf("top-level telemetry was lost: model=%+v usage=%+v", rec.Model, rec.Usage)
+	}
+	if _, ok := rec.FreshAsyncWork(time.Now()); ok {
+		t.Fatal("malformed optional child was accepted")
+	}
+}
+
+func TestCapitalizedTopSchemaVersionOnlyDisablesAsyncWork(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	body := strings.Replace(agentRecordWithAsyncWork(validAsyncWorkChild(now)), `"schema_version":1`, `"Schema_Version":1`, 1)
+	writeAgentRecord(t, dir, body)
+	rec, ok := ReadAgentRecord(dir)
+	if !ok || rec.Model.Model != "glm-5.2" || rec.Usage.APICalls != 9 {
+		t.Fatal("capitalized top schema_version poisoned valid top-level telemetry")
+	}
+	if _, ok := rec.FreshAsyncWork(now); ok {
+		t.Fatal("async_work accepted without canonical top-level schema_version")
+	}
+}
+
+func TestMalformedTopSchemaVersionOnlyDisablesAsyncWork(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	body := strings.Replace(agentRecordWithAsyncWork(validAsyncWorkChild(now)), `"schema_version":1`, `"schema_version":"one"`, 1)
+	writeAgentRecord(t, dir, body)
+	rec, ok := ReadAgentRecord(dir)
+	if !ok || rec.Model.Model != "glm-5.2" {
+		t.Fatal("top-level schema_version shape poisoned valid top-level telemetry")
+	}
+	if _, ok := rec.FreshAsyncWork(now); ok {
+		t.Fatal("async_work accepted under malformed top-level schema_version")
 	}
 }

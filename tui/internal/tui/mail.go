@@ -270,10 +270,9 @@ type MailModel struct {
 	directUnreadOpInFlight  bool
 	directUnreadSyncPending bool
 
-	// Home telemetry is resolved asynchronously off the render/input path (its
-	// I/O reads one .status.json snapshot plus context-only fallbacks, which can
-	// stall on a slow volume). View()/hasHomeTelemetry()/syncViewportHeight() read
-	// this cached snapshot ONLY; the fetchHomeTelemetry background command
+	// Home telemetry is resolved asynchronously off the render/input path from
+	// the kernel-published Agent Record. View()/hasHomeTelemetry()/
+	// syncViewportHeight() read this cached snapshot ONLY; fetchHomeTelemetry
 	// refreshes it via homeTelemetryMsg. See home_telemetry.go's async note.
 	homeTelemetry          homeTelemetry // last-known snapshot; zero value renders no row
 	homeTelemetryLoaded    bool          // true once a background fetch has completed at least once
@@ -287,8 +286,9 @@ type MailModel struct {
 	// through NewMailModel — the render path only ever walks a legal order.
 	homeTelemetryDisplay []homeTelemetrySegment
 
-	// Home async-work stats resolve exactly like home telemetry: one bounded
-	// dispatch-ledger snapshot, cached result, in-flight debounce, and TTL floor.
+	// Home async-work stats resolve exactly like home telemetry: one background
+	// Agent-Record-first fetch (bounded daemon-ledger compatibility fallback),
+	// cached result, in-flight debounce, and TTL floor.
 	homeAsyncStats          homeAsyncStats // last-known snapshot; zero value renders an all-zero row once loaded
 	homeAsyncStatsLoaded    bool           // true once a background fetch has completed at least once
 	homeAsyncStatsInFlight  bool           // true while a fetchHomeAsyncStats command is running (debounce)
