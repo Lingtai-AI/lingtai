@@ -23,6 +23,7 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool-standalone/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
@@ -42,7 +43,7 @@ the matching name under `reference/<name>/SKILL.md`. That child owns the
 provider's official latest-model lookup, route distinctions, exact TUI surfaces,
 vision/capability facts, and named-preset revision instructions.
 
-## Direct children: the 13 BuiltinPresets names
+## Direct children: the 14 BuiltinPresets names
 
 | Name | Direct child | Route hint |
 |---|---|---|
@@ -57,6 +58,7 @@ vision/capability facts, and named-preset revision instructions.
 | openrouter | reference/openrouter/SKILL.md | OpenRouter gateway |
 | codex | reference/codex/SKILL.md | ChatGPT OAuth Codex route |
 | codex-pool | reference/codex-pool/SKILL.md | pooled ChatGPT OAuth route |
+| codex-pool-standalone | reference/codex-pool-standalone/SKILL.md | local generic-OpenAI Responses route to the independent codex-pool CLI/service |
 | claude | reference/claude/SKILL.md | Claude Code CLI/OAuth aliases |
 | custom | reference/custom/SKILL.md | user-supplied compatible endpoint |
 
@@ -83,6 +85,8 @@ vision/capability facts, and named-preset revision instructions.
   location: reference/codex/SKILL.md
 - name: preset-skill-codex-pool
   location: reference/codex-pool/SKILL.md
+- name: preset-skill-codex-pool-standalone
+  location: reference/codex-pool-standalone/SKILL.md
 - name: preset-skill-claude
   location: reference/claude/SKILL.md
 - name: preset-skill-custom

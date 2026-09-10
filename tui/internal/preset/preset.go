@@ -231,7 +231,7 @@ func List() ([]Preset, error) {
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
 		"kimi": 4, "grok": 5, "nvidia": 6, "openrouter": 7,
-		"codex": 8, "codex-pool": 9, "claude": 10, "custom": 11,
+		"codex": 8, "codex-pool": 9, "codex-pool-standalone": 10, "claude": 11, "custom": 12,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -704,6 +704,7 @@ func BuiltinPresets() []Preset {
 		openrouterPreset(),
 		codexPreset(),
 		codexPoolPreset(),
+		codexPoolStandalonePreset(),
 		claudePreset(),
 		customPreset(),
 	}
@@ -715,23 +716,24 @@ func BuiltinPresets() []Preset {
 // loaded Preset).
 // Legacy provider spellings remain recognized for flat-layout migration.
 var builtinNames = map[string]bool{
-	"minimax":          true,
-	"zhipu":            true,
-	"mimo":             true,
-	"deepseek":         true,
-	"gemini":           true,
-	"kimi":             true,
-	"grok":             true,
-	"nvidia":           true,
-	"openrouter":       true,
-	"codex":            true,
-	"codex_oauth":      true,
-	"codex-pool":       true,
-	"codex_pool":       true,
-	"claude":           true,
-	"claude-agent-sdk": true,
-	"claude_agent_sdk": true,
-	"custom":           true,
+	"minimax":               true,
+	"zhipu":                 true,
+	"mimo":                  true,
+	"deepseek":              true,
+	"gemini":                true,
+	"kimi":                  true,
+	"grok":                  true,
+	"nvidia":                true,
+	"openrouter":            true,
+	"codex":                 true,
+	"codex_oauth":           true,
+	"codex-pool":            true,
+	"codex_pool":            true,
+	"codex-pool-standalone": true,
+	"claude":                true,
+	"claude-agent-sdk":      true,
+	"claude_agent_sdk":      true,
+	"custom":                true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.
@@ -1493,6 +1495,43 @@ func codexPoolPreset() Preset {
 				"web_search": cx,
 				"vision":     cx,
 				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
+// codexPoolStandalonePreset binds the independent `codex-pool` CLI/service
+// (an independent Python package, not this repo, not this preset's builtin
+// `codex-pool` provider above). That service speaks the kernel's generic
+// OpenAI-compatible Responses route (provider "custom", api_compat "openai",
+// wire_api "responses") on a local loopback port the user starts themselves
+// (`codex-pool serve`) — it is never launched or supervised by LingTai. This
+// is deliberately NOT the "codex-pool" provider: that string still means the
+// builtin OAuth multi-account pool file. api_key_env names an env var the
+// user sets from `codex-pool`'s own local API key; LingTai stores no key of
+// its own for it.
+func codexPoolStandalonePreset() Preset {
+	return Preset{
+		Name: "codex-pool-standalone",
+		Description: PresetDescription{
+			Summary: "codex-pool standalone service — local OpenAI-compatible Responses proxy (separate CLI)",
+		},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "custom", "model": "", "api_compat": "openai",
+				"wire_api": "responses",
+				// Codex does not implement generic server-side context_management.
+				"compact_threshold": nil,
+				"api_key":           nil, "api_key_env": "CODEX_POOL_API_KEY",
+				"base_url": "http://127.0.0.1:8765/v1",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": e(),
+				// Inherit vision through the LLM's own endpoint, same as the
+				// generic custom preset — no promise about what the local
+				// service actually serves.
+				"vision": map[string]interface{}{"provider": "inherit"},
+				"skills": skillsDefault(),
 			},
 		},
 	}

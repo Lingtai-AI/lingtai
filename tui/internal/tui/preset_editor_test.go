@@ -1131,7 +1131,7 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 func TestPresetEditorServiceTierAvailableForEveryBuiltin(t *testing.T) {
 	wantNames := []string{
 		"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok",
-		"nvidia", "openrouter", "codex", "codex-pool", "claude", "custom",
+		"nvidia", "openrouter", "codex", "codex-pool", "codex-pool-standalone", "claude", "custom",
 	}
 	gotNames := make([]string, 0, len(preset.BuiltinPresets()))
 	for _, p := range preset.BuiltinPresets() {
@@ -2978,5 +2978,82 @@ func TestPresetEditorDeepseekRegionCycleRoundTrip(t *testing.T) {
 	m.cycleFocused(-1) // OpenCode Go -> DeepSeek API
 	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
 		t.Fatalf("reverse ->DeepSeek API api_key_env = %q, want DEEPSEEK_API_KEY", got)
+	}
+}
+
+// TestPresetEditorStandaloneCommitPreservesFixedServiceEnv models the shared
+// commit -> host-stamp boundary used by both first-run and preset-library.
+// The standalone service's key name is an interoperability contract, so a
+// blank-model edit must not be converted into a provider-numbered custom slot.
+func TestPresetEditorStandaloneCommitPreservesFixedServiceEnv(t *testing.T) {
+	p := builtinPresetForEditorTest(t, "codex-pool-standalone")
+	p.Source = preset.SourceTemplate
+	keys := map[string]string{"CODEX_POOL_API_KEY": "proxy-key"}
+	m := NewPresetEditorModel(p, "en", keys, "")
+	m.cursor = editorFieldOrderIndex(t, feModel)
+	updated, _ := m.openInline()
+	if updated.mode != emInline {
+		t.Fatalf("blank standalone model should open inline editor, got mode %v", updated.mode)
+	}
+	updated.applyInline("served-model")
+
+	_, cmd := updated.commit()
+	if cmd == nil {
+		t.Fatal("standalone model edit should produce a commit command")
+	}
+	raw := cmd()
+	msg, ok := raw.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit command returned %T, want PresetEditorCommitMsg", raw)
+	}
+	committedLLM := msg.Preset.Manifest["llm"].(map[string]interface{})
+	if got, _ := committedLLM["api_key_env"].(string); got != "CODEX_POOL_API_KEY" {
+		t.Fatalf("standalone commit api_key_env = %q, want CODEX_POOL_API_KEY", got)
+	}
+	if got, _ := committedLLM["model"].(string); got != "served-model" {
+		t.Fatalf("standalone commit model = %q, want served-model", got)
+	}
+
+	// This is the exact pure stamping boundary both hosts call before their
+	// respective persistence code; no real preset/config state is written here.
+	stamped := stampAutoEnvVar(msg.Preset, keys)
+	stampedLLM := stamped.Manifest["llm"].(map[string]interface{})
+	if got, _ := stampedLLM["api_key_env"].(string); got != "CODEX_POOL_API_KEY" {
+		t.Fatalf("host stamp rewrote standalone api_key_env to %q", got)
+	}
+}
+
+// TestPresetEditorOrdinaryBuiltinCloneStillGetsFreshAPIKeyEnv guards the
+// intentional contrast: only the standalone service contract keeps its fixed
+// env name. Ordinary builtin clones still clear their inherited template slot
+// and receive the existing fresh-slot allocation from the host boundary.
+func TestPresetEditorOrdinaryBuiltinCloneStillGetsFreshAPIKeyEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "custom", want: "CUSTOM_1_API_KEY"},
+		{name: "deepseek", want: "DEEPSEEK_1_API_KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := builtinPresetForEditorTest(t, tc.name)
+			p.Source = preset.SourceTemplate
+			m := NewPresetEditorModel(p, "en", map[string]string{"CODEX_POOL_API_KEY": "proxy-key"}, "")
+			m.cursor = editorFieldOrderIndex(t, feModel)
+			m.applyInline("edited-model")
+			_, cmd := m.commit()
+			if cmd == nil {
+				t.Fatal("ordinary builtin edit should produce a commit command")
+			}
+			msg := cmd().(PresetEditorCommitMsg)
+			llm := msg.Preset.Manifest["llm"].(map[string]interface{})
+			if _, ok := llm["api_key_env"]; ok {
+				t.Fatalf("ordinary builtin clone retained inherited api_key_env %#v before host stamping", llm["api_key_env"])
+			}
+			stamped := stampAutoEnvVar(msg.Preset, map[string]string{"CODEX_POOL_API_KEY": "proxy-key"})
+			if got, _ := stamped.Manifest["llm"].(map[string]interface{})["api_key_env"].(string); got != tc.want {
+				t.Fatalf("ordinary %s clone host env = %q, want fresh slot %q", tc.name, got, tc.want)
+			}
+		})
 	}
 }
