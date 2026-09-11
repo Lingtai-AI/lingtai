@@ -237,6 +237,7 @@ type MailModel struct {
 	generation               uint64           // activation token; stale async messages are ignored without rescheduling
 	pollEpoch                uint64           // timer-chain token; one tick/pulse loop is current inside an activation
 	beforeRebuild            func()           // optional deterministic test hook before deferred rebuild I/O
+	afterInitialMailRefresh  func()           // optional deterministic test hook after the initial mailbox snapshot
 
 	// The one monotonic refresh request serial with its newest-accepted
 	// completion watermark. Requests are issued only on the serialized Update
@@ -344,14 +345,15 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	return m
 }
 
-// initialRebuild performs the one-time authoritative bounded content rebuild off
-// the synchronous launch path. Every source it touches is bounded before any
-// body is read: the newest fs.RecentMessageLimit() mailbox entries, the newest
-// contentWindow() canonical event entries, plus current auxiliary sources,
-// merged chronologically. Nothing scans the full mailbox or full history, and
-// no exact total is computed — the page is painted from the window alone.
-// The one exception is the explicit LINGTAI_TUI_MESSAGE_LIMIT=0 opt-in, which
-// resolves to an unlimited window and asks for exactly that full load.
+// initialRebuild performs the one-time authoritative content rebuild off the
+// synchronous launch path. Mailbox bodies are capped at the newest
+// fs.RecentMessageLimit() entries and canonical event content at contentWindow();
+// auxiliary inquiry and legacy soul-flow sources retain their existing rebuild
+// semantics. The one mailbox snapshot feeds both session reconstruction and the
+// prepared projections. Once accepted, Update starts an ordinary
+// single-flight refresh to catch mail published during reconstruction. No exact
+// total is computed. The explicit LINGTAI_TUI_MESSAGE_LIMIT=0 opt-in still asks
+// for a full mailbox and event-history load.
 // Running this as a tea.Cmd keeps the first frame instant. It returns a
 // mailRefreshMsg carrying command-local mail and session caches; the live model
 // installs and persists them only after accepting the message's generation, so
@@ -364,6 +366,9 @@ func (m MailModel) initialRebuild() tea.Msg {
 	// The bounded variant reads at most fs.RecentMessageLimit() message bodies
 	// regardless of how much mail the mailbox holds.
 	cache := m.cache.RefreshRecent(fs.RecentMessageLimit())
+	if m.afterInitialMailRefresh != nil {
+		m.afterInitialMailRefresh()
+	}
 	// Always rebuild from authoritative sources on launch. Keep both the in-memory
 	// snapshot and its session.jsonl write command-local until Update accepts this
 	// generation; stale work must have no effect on the installed cache.
@@ -373,7 +378,7 @@ func (m MailModel) initialRebuild() tea.Msg {
 	// Tag the resulting refresh as the initial one so the handler can clear the
 	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
 	// produce untagged mailRefreshMsg values and never re-show the banner.
-	msg := m.refreshMail()
+	msg := m.prepareMailRefresh(cache)
 	if rm, ok := msg.(mailRefreshMsg); ok {
 		rm.initial = true
 		rm.generation = m.generation
@@ -698,18 +703,20 @@ func resolveDirectLifecycleStates(rows []agentSelectorRow) map[string]agentLifec
 }
 
 func (m MailModel) refreshMail() tea.Msg {
-	// Every value below is prepared on this tea.Cmd invocation, before Bubble
-	// Tea receives the completion: the incremental cache refresh, the deep
-	// accepted snapshot clone, canonical selector-row discovery, immutable
-	// direct publication, and target lifecycle states. Update only validates
-	// and installs these
-	// detached results; it performs no manifest, unread, or clone work.
-	//
-	// The refresh is bounded: new mail still lands every tick (that is what keeps
-	// the live conversation current), but the retained snapshot never grows past
-	// the newest fs.RecentMessageLimit() entries, so neither the first frame nor
-	// a steady-state tick pays for the whole mailbox.
 	cache := m.cache.RefreshRecent(fs.RecentMessageLimit())
+	return m.prepareMailRefresh(cache)
+}
+
+// prepareMailRefresh builds every projection carried by a refresh completion
+// from one already-refreshed cache. The initial rebuild uses this seam to reuse
+// the mailbox snapshot that its SessionCache reconstructed from; ordinary poll
+// refreshes still call refreshMail above and perform their own incremental scan.
+func (m MailModel) prepareMailRefresh(cache fs.MailCache) tea.Msg {
+	// Every value below is prepared on this tea.Cmd invocation, before Bubble
+	// Tea receives the completion: the deep accepted snapshot clone, canonical
+	// selector-row discovery, immutable direct publication, and target lifecycle
+	// states. Update only validates and installs these detached results; it
+	// performs no manifest, unread, or clone work.
 	acceptedSnapshot := newAcceptedMailSnapshot(cache)
 	selectorRows := discoverAgentSelectorRows(m.baseDir)
 	directPublication := fs.NewDirectMailPublication(
@@ -1154,6 +1161,11 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			go fs.UpdateHumanLocation(m.humanDir)
 		}
 		var persistCmd tea.Cmd
+		var initialCatchupCmd tea.Cmd
+		// The initial session transition is accepted independently of mailbox/direct
+		// freshness. Capture its one-shot edge before clearing initialLoading so a
+		// serial-stale initial payload still earns the promised ordinary catch-up.
+		acceptedInitialSession := msg.initial && msg.sessionCache != nil && m.initialLoading
 		if msg.sessionCache != nil {
 			m.sessionCache = msg.sessionCache
 			// A superseding first frame resets the revealed-extra window; the fresh
@@ -1234,6 +1246,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			}
 			m.wasActive = isActive
 		}
+		// Once the initial session transition is accepted, start or coalesce one
+		// ordinary refresh. Its mailbox/direct payload may itself be serial-stale
+		// because a periodic result landed first; the catch-up is still required for
+		// mail published after that newer result's scan.
+		if acceptedInitialSession {
+			m, initialCatchupCmd = m.issueRefreshRequest()
+		}
 		m.buildMessages()
 		// Track /btw inquiry lifecycle
 		if !staleRequest && m.orchestrator != "" {
@@ -1266,18 +1285,18 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// The command itself performs no I/O; mailPersistMsg re-enters Update for a
 		// second generation/cache-identity gate and serialized persistence.
 		if persistCmd != nil {
-			return m, tea.Batch(refreshFollowupCmd, persistCmd, directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, persistCmd, directVisibilityCmd, directUnreadCmd, initialCatchupCmd)
 		}
 		// Kick off the first background telemetry fetch as soon as a refresh has
 		// landed (including ordinary refreshes), so the row can appear without
 		// waiting a full poll tick. Initial rebuilds schedule it after persistence.
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
-			return m, tea.Batch(refreshFollowupCmd, cmd, directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, cmd, directVisibilityCmd, directUnreadCmd, initialCatchupCmd)
 		}
 		if directUnreadCmd != nil {
-			return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd, directUnreadCmd)
+			return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd, directUnreadCmd, initialCatchupCmd)
 		}
-		return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd)
+		return m, tea.Batch(refreshFollowupCmd, directVisibilityCmd, initialCatchupCmd)
 
 	case mailPersistMsg:
 		// Persist only the cache still installed for this activation. This runs on
