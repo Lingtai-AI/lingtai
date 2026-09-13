@@ -169,7 +169,7 @@ function Write-LogFileTail {
 # installer might read/write, is redirected under one test root. Original
 # values are captured and restored in the finally block.
 # ---------------------------------------------------------------------------
-$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'OS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'LINGTAI_TEST_WINGET_LOG', 'LINGTAI_TEST_WINGET_TOOL_DIR', 'LINGTAI_TEST_WINGET_EXIT', 'LINGTAI_TEST_MACHINE_PATH', 'LINGTAI_TEST_USER_PATH', 'LINGTAI_TEST_PATH_LOG')
+$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'OS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'LINGTAI_TEST_WINGET_LOG', 'LINGTAI_TEST_WINGET_TOOL_DIR', 'LINGTAI_TEST_WINGET_EXIT', 'LINGTAI_TEST_MACHINE_PATH', 'LINGTAI_TEST_USER_PATH', 'LINGTAI_TEST_PATH_LOG', 'LINGTAI_SOURCE', 'LINGTAI_WEB_BASE', 'LINGTAI_GITHUB_API_BASE', 'LINGTAI_KERNEL_GITHUB_API_BASE')
 $SavedEnv = @{}
 foreach ($name in $IsolatedVars) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -437,6 +437,7 @@ function New-FixtureArchive {
 $script:FakeApiListener = $null
 $script:FakeApiPrefix = $null
 $script:FakeApiRoutes = @{}
+$script:FakeApiRequests = $null
 $script:FakeApiJob = $null
 $script:FakeApiPs = $null
 
@@ -455,10 +456,12 @@ function Start-FakeGitHubApi {
     # via a synchronized hashtable (thread-safe cross-runspace sharing).
     $sync = [hashtable]::Synchronized($script:FakeApiRoutes)
     $script:FakeApiRoutes = $sync
+    $requests = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+    $script:FakeApiRequests = $requests
 
     $ps = [powershell]::Create()
     $ps.AddScript({
-        param($listener, $routes)
+        param($listener, $routes, $requests)
         while ($listener.IsListening) {
             try {
                 $context = $listener.GetContext()
@@ -477,6 +480,7 @@ function Start-FakeGitHubApi {
             # response) and keep looping.
             try {
                 $path = $context.Request.Url.AbsolutePath
+                $requests.Add($path) | Out-Null
                 $route = $routes[$path]
                 if ($route) {
                     $context.Response.StatusCode = $route.Status
@@ -518,6 +522,7 @@ function Start-FakeGitHubApi {
     }) | Out-Null
     $ps.AddArgument($listener) | Out-Null
     $ps.AddArgument($sync) | Out-Null
+    $ps.AddArgument($requests) | Out-Null
     $script:FakeApiJob = $ps.BeginInvoke()
     $script:FakeApiPs = $ps
 
@@ -579,6 +584,33 @@ function Register-FakeApiRoute {
 function Register-FakeApiRouteText {
     param([string]$Path, [string]$Text, [int]$Status = 200, [string]$ContentType = '')
     Register-FakeApiRoute -Path $Path -BodyBytes ([System.Text.Encoding]::UTF8.GetBytes($Text)) -Status $Status -ContentType $ContentType
+}
+
+function Clear-FakeApiRequests {
+    if ($script:FakeApiRequests) { $script:FakeApiRequests.Clear() }
+}
+
+function Get-FakeApiRequests {
+    if (-not $script:FakeApiRequests) { return @() }
+    return @($script:FakeApiRequests.ToArray())
+}
+
+function Get-BytesSha256 {
+    param([byte[]]$Bytes)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hasher.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $hasher.Dispose() }
+}
+
+function Register-FakeMirrorAsset {
+    param([string]$Repo, [string]$Tag, [string]$Name, [byte[]]$Bytes)
+    Register-FakeApiRoute -Path "/dl/$Repo/$Tag/$Name" -BodyBytes $Bytes -ContentType 'application/octet-stream'
+    return @{ name = $Name; sha256 = (Get-BytesSha256 -Bytes $Bytes); size = $Bytes.Length }
+}
+
+function Register-FakeMirrorLatest {
+    param([string]$Repo, [string]$Tag, [array]$Assets)
+    $body = [ordered]@{ schema = 'lingtai.release_mirror.latest/v1'; source_repo = $Repo; release_id = 42; tag = $Tag; assets = $Assets } | ConvertTo-Json -Depth 6
+    Register-FakeApiRouteText -Path "/dl/$Repo/latest.json" -Text $body -ContentType 'application/json; charset=utf-8'
 }
 
 function Register-FakeApiAsset {
@@ -1237,6 +1269,106 @@ try {
     Assert-True (-not [string]::IsNullOrWhiteSpace($apiPrefix)) 'fake GitHub API server started'
     [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai", 'Process')
     [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai-kernel", 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_WEB_BASE', $apiPrefix.TrimEnd('/'), 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_SOURCE', 'github', 'Process')
+
+    # -----------------------------------------------------------------------
+    # ROUTING CONTRACTS: default mirror, terminal mirror failure, explicit old
+    # version, and explicit GitHub. These use the same native PE fixture as the
+    # existing public-release tests and assert the listener's exact route log.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: default release uses only canonical lingtai.ai routes'
+    $routeTag = 'v10.9.0'
+    $routeFx = New-FixtureArchive -Version $routeTag
+    $routeZipName = "lingtai-$routeTag-windows-amd64.zip"
+    $routeZipBytes = [System.IO.File]::ReadAllBytes($routeFx.ArchivePath)
+    $routeShaText = "{0}  {1}" -f $routeFx.Sha256, $routeZipName
+    $routeShaBytes = [System.Text.Encoding]::ASCII.GetBytes($routeShaText)
+    $routeBundleJson = New-BundleManifestJson -Tag $routeTag -ArchiveFilename $routeZipName -ArchiveSha256 $routeFx.Sha256
+    $routeBundleBytes = [System.Text.Encoding]::UTF8.GetBytes($routeBundleJson)
+    $routeMirrorAssets = @(
+        (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $routeTag -Name 'lingtai-bundle-manifest.json' -Bytes $routeBundleBytes),
+        (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $routeTag -Name $routeZipName -Bytes $routeZipBytes),
+        (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $routeTag -Name "$routeZipName.sha256" -Bytes $routeShaBytes)
+    )
+    Register-FakeMirrorLatest -Repo 'Lingtai-AI/lingtai' -Tag $routeTag -Assets $routeMirrorAssets
+
+    $routeHome = New-IsolatedHome
+    $routeBin = Join-Path $routeHome 'bin dir'
+    Clear-FakeApiRequests
+    [Environment]::SetEnvironmentVariable('LINGTAI_SOURCE', $null, 'Process')
+    $routeResult = Invoke-Installer @{
+        BinDir       = $routeBin
+        GlobalDir    = (Join-Path $routeHome '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    [Environment]::SetEnvironmentVariable('LINGTAI_SOURCE', 'github', 'Process')
+    Assert-Equal 0 $routeResult.ExitCode "default mirror install exits zero (stderr: $($routeResult.Stderr))"
+    Assert-True (Test-Path -LiteralPath (Join-Path $routeBin 'lingtai-tui.exe')) 'default mirror installed runnable TUI fixture'
+    Assert-True (Test-Path -LiteralPath (Join-Path $routeBin 'lingtai-portal.exe')) 'default mirror installed runnable Portal fixture'
+    $routeRequests = @(Get-FakeApiRequests)
+    Assert-Equal 4 $routeRequests.Count 'default mirror makes one metadata plus three selected-asset requests'
+    Assert-Equal 0 (@($routeRequests | Where-Object { $_ -notlike '/dl/Lingtai-AI/lingtai/*' }).Count) 'default mirror makes no request outside canonical /dl TUI routes'
+    Assert-Equal 0 (@($routeRequests | Where-Object { $_ -like '/repos/*' -or $_ -like '/assets/*' }).Count) 'default mirror makes zero GitHub fixture requests'
+
+    Write-Section 'contract: selected mirror failure never falls back to GitHub'
+    Register-FakeApiRoute -Path "/dl/Lingtai-AI/lingtai/$routeTag/lingtai-bundle-manifest.json" -BodyBytes ([byte[]]@()) -Status 503
+    $failureHome = New-IsolatedHome
+    Clear-FakeApiRequests
+    [Environment]::SetEnvironmentVariable('LINGTAI_SOURCE', $null, 'Process')
+    $failureResult = Invoke-Installer @{
+        BinDir       = (Join-Path $failureHome 'bin dir')
+        GlobalDir    = (Join-Path $failureHome '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    [Environment]::SetEnvironmentVariable('LINGTAI_SOURCE', 'github', 'Process')
+    $failureOutput = "$($failureResult.Stdout)`n$($failureResult.Stderr)"
+    Assert-True ($failureResult.ExitCode -ne 0) 'selected mirror asset failure exits nonzero'
+    Assert-Contains $failureOutput '-Source github' 'selected mirror failure explains the explicit GitHub switch'
+    $failureRequests = @(Get-FakeApiRequests)
+    Assert-Equal 0 (@($failureRequests | Where-Object { $_ -like '/repos/*' -or $_ -like '/assets/*' }).Count) 'selected mirror failure makes zero GitHub fixture requests'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $failureHome 'bin dir\lingtai-tui.exe'))) 'selected mirror failure installs no TUI'
+
+    # Restore the healthy mirror asset, then register the identical release on
+    # the fake GitHub API for both explicit routes.
+    Register-FakeApiRoute -Path "/dl/Lingtai-AI/lingtai/$routeTag/lingtai-bundle-manifest.json" -BodyBytes $routeBundleBytes -ContentType 'application/octet-stream'
+    $ghZip = Register-FakeApiAsset -Name $routeZipName -Bytes $routeZipBytes
+    $ghSha = Register-FakeApiAssetText -Name "$routeZipName.sha256" -Text $routeShaText
+    $ghBundle = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $routeBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $routeTag -Assets @($ghZip, $ghSha, $ghBundle) -Latest
+
+    Write-Section 'contract: explicit old version routes only to GitHub'
+    $oldHome = New-IsolatedHome
+    Clear-FakeApiRequests
+    $oldResult = Invoke-Installer @{
+        Version      = $routeTag
+        Source       = 'mirror'
+        BinDir       = (Join-Path $oldHome 'bin dir')
+        GlobalDir    = (Join-Path $oldHome '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $oldResult.ExitCode "explicit old version succeeds through GitHub (stderr: $($oldResult.Stderr))"
+    $oldRequests = @(Get-FakeApiRequests)
+    Assert-Equal 0 (@($oldRequests | Where-Object { $_ -like '/dl/*' }).Count) 'explicit old version makes zero mirror requests'
+    Assert-True (@($oldRequests | Where-Object { $_ -like '/repos/*' }).Count -gt 0) 'explicit old version uses GitHub release API'
+
+    Write-Section 'contract: explicit GitHub source makes zero mirror requests'
+    $githubHome = New-IsolatedHome
+    Clear-FakeApiRequests
+    $githubResult = Invoke-Installer @{
+        Source       = 'github'
+        BinDir       = (Join-Path $githubHome 'bin dir')
+        GlobalDir    = (Join-Path $githubHome '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $githubResult.ExitCode "explicit GitHub latest succeeds (stderr: $($githubResult.Stderr))"
+    $githubRequests = @(Get-FakeApiRequests)
+    Assert-Equal 0 (@($githubRequests | Where-Object { $_ -like '/dl/*' }).Count) 'explicit GitHub makes zero mirror requests'
+    Assert-True (@($githubRequests | Where-Object { $_ -like '/repos/*' }).Count -gt 0) 'explicit GitHub uses release API'
 
     # -----------------------------------------------------------------------
     # CONTRACT 1: local fixture install (download/expand equivalent).
@@ -1529,7 +1661,7 @@ try {
     }
     Assert-True ($r8f.ExitCode -ne 0) '-Source bogus exits non-zero'
     Assert-NotContains (Get-InstallerOutput $r8f) 'parameter cannot be found' '-Source binds as a real switch'
-    Assert-Contains (Get-InstallerOutput $r8f) 'auto|github|gitee' '-Source names the valid values as the reason'
+    Assert-Contains (Get-InstallerOutput $r8f) 'mirror|github|auto' '-Source names the valid values as the reason'
 
     # -----------------------------------------------------------------------
     # CONTRACT 9: SkipVenv is honored -- no runtime venv is created under
@@ -2006,11 +2138,27 @@ version = "0.18.0"
             $manifestAsset18 = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $bundleJson18
             Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $tag18 -Assets @($zipAsset18, $shaAsset18, $manifestAsset18)
 
+            # Register the same real archive/wheel on canonical mirror routes.
+            # The first full-runtime pass below omits -Version so both independent
+            # TUI and kernel latest metadata plus every selected byte use /dl.
+            $mirrorTuiAssets18 = @(
+                (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $tag18 -Name "lingtai-$tag18-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($fx18.ArchivePath))),
+                (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $tag18 -Name "lingtai-$tag18-windows-amd64.zip.sha256" -Bytes ([System.Text.Encoding]::ASCII.GetBytes(("{0}  lingtai-$tag18-windows-amd64.zip" -f $fx18.Sha256)))),
+                (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai' -Tag $tag18 -Name 'lingtai-bundle-manifest.json' -Bytes ([System.Text.Encoding]::UTF8.GetBytes($bundleJson18)))
+            )
+            Register-FakeMirrorLatest -Repo 'Lingtai-AI/lingtai' -Tag $tag18 -Assets $mirrorTuiAssets18
+            $mirrorKernelAssets18 = @(
+                (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Name 'lingtai-kernel-release-manifest.json' -Bytes ([System.Text.Encoding]::UTF8.GetBytes($kernelManifestJson))),
+                (Register-FakeMirrorAsset -Repo 'Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Name (Split-Path -Leaf $renamedWheel) -Bytes $wheelBytes)
+            )
+            Register-FakeMirrorLatest -Repo 'Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Assets $mirrorKernelAssets18
+
             $home18 = New-IsolatedHome
             $binDir18 = Join-Path $home18 'bin dir'
             $globalDir18 = Join-Path $home18 '.lingtai-tui'
+            Clear-FakeApiRequests
             $r18 = Invoke-Installer @{
-                Version      = $tag18
+                Source       = 'mirror'
                 BinDir       = $binDir18
                 GlobalDir    = $globalDir18
                 NoModifyPath = $true
@@ -2026,11 +2174,15 @@ version = "0.18.0"
             $meta18 = $null
             try { $meta18 = Get-Content -LiteralPath (Join-Path $globalDir18 'install.json') -Raw | ConvertFrom-Json } catch {}
             if ($null -ne $meta18) {
-                Assert-Equal 'bundle' $meta18.kernel_source 'full runtime install.json records kernel_source=bundle'
+                Assert-Equal 'release-pin' $meta18.kernel_source 'default mirror runtime records independently selected release-pin source'
                 Assert-Equal '0.18.0' $meta18.kernel_version 'full runtime install.json records the installed kernel version'
+                Assert-Equal 'mirror' $meta18.kernel_provider 'default mirror runtime records mirror provider'
             } else {
                 Assert-True $false 'full runtime install wrote a parseable install.json'
             }
+            $mirrorRuntimeRequests = @(Get-FakeApiRequests)
+            Assert-Equal 7 $mirrorRuntimeRequests.Count 'default mirror full-runtime route makes exactly seven metadata/asset requests'
+            Assert-Equal 0 (@($mirrorRuntimeRequests | Where-Object { $_ -notlike '/dl/*' }).Count) 'default mirror full-runtime route makes zero GitHub requests'
 
             # Wheel digest mismatch must fail loud and touch no BinDir/venv.
             Write-Section 'contract: kernel wheel checksum mismatch fails loud, installs nothing'
