@@ -170,6 +170,7 @@ done
 key="\$(printf '%s' "\$url" | tr -c 'A-Za-z0-9' '_')"
 resp_file="$FAKE_CURL_DIR/\$key"
 status_file="\$resp_file.status"
+[[ -z "\${FAKE_CURL_LOG:-}" ]] || printf '%s\n' "\$url" >> "\$FAKE_CURL_LOG"
 if [[ ! -f "\$resp_file" ]]; then
   echo "fake curl: no registered response for \$url" >&2
   exit 22
@@ -205,193 +206,225 @@ register_response_text() {
   register_response "$url" "$f" "$status"
 }
 
-# --- detect_country_cn: success / failure / fail-open ------------------------
+# --- deterministic provider routing and latest mirror records ----------------
 
 (
-  fakebin="$tmp/country-fakebin-cn"
-  setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "CN"
-  export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
-  detect_country_cn || fail "CN response from provider 1 should report country_cn=true"
-)
-
-(
-  fakebin="$tmp/country-fakebin-us"
-  setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "US"
-  export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
-  if detect_country_cn; then
-    fail "US response should report country_cn=false"
-  fi
-)
-
-(
-  # Provider 1 fails outright (nonzero exit); provider 2 succeeds with CN.
-  fakebin="$tmp/country-fakebin-fallback"
-  setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "" 22
-  register_response_text "https://ifconfig.co/country-iso" "CN"
-  export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
-  detect_country_cn || fail "provider-2 fallback should still detect CN"
-)
-
-(
-  # Both providers fail: detect_country_cn must fail OPEN (report false), not error out.
-  fakebin="$tmp/country-fakebin-both-fail"
-  setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "" 22
-  register_response_text "https://ifconfig.co/country-iso" "" 22
-  export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
-  if detect_country_cn; then
-    fail "both providers failing must fail OPEN (report not-CN), never report CN"
-  fi
-)
-
-# --- resolve_source_provider: explicit override bypasses detection ----------
-
-(
-  SOURCE_ARG="github"
-  BUNDLE_PROVIDER=""
+  SOURCE_ARG="auto"; VERSION=""; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
   resolve_source_provider
-  assert_eq "github" "$BUNDLE_PROVIDER" "explicit --source github bypasses detection"
+  assert_eq "mirror" "$BUNDLE_PROVIDER" "default/no-version route selects lingtai.ai"
 )
-
 (
-  SOURCE_ARG="mirror"
-  BUNDLE_PROVIDER=""
+  SOURCE_ARG="github"; VERSION=""; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
   resolve_source_provider
-  assert_eq "mirror" "$BUNDLE_PROVIDER" "explicit --source mirror bypasses detection"
+  assert_eq "github" "$BUNDLE_PROVIDER" "explicit GitHub route stays GitHub"
+)
+(
+  SOURCE_ARG="auto"; VERSION="v0.10.0"; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
+  resolve_source_provider
+  assert_eq "github" "$BUNDLE_PROVIDER" "explicit version routes to GitHub before metadata/assets"
+)
+(
+  SOURCE_ARG="mirror"; VERSION=""; REF="main"; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
+  resolve_source_provider
+  assert_eq "github" "$BUNDLE_PROVIDER" "explicit source mode remains GitHub"
 )
 
+# Build a latest/v1 fixture from exact bytes, then prove metadata and the
+# selected asset both use /dl and the asset is size/SHA verified.
 (
-  # auto + CN + mirror reachable -> mirror
-  fakebin="$tmp/resolve-fakebin-cn-reachable"
+  fakebin="$tmp/latest-route-fakebin"
   setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "CN"
-  register_response_text "https://lingtai.ai/" "<!doctype html>"
   export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  export FAKE_CURL_LOG="$tmp/latest-route.log"
+  : > "$FAKE_CURL_LOG"
   LINGTAI_WEB_BASE="https://lingtai.ai"
-  SOURCE_ARG="auto"
-  BUNDLE_PROVIDER=""
-  resolve_source_provider
-  assert_eq "mirror" "$BUNDLE_PROVIDER" "auto + CN + mirror reachable resolves to mirror"
+  asset="$tmp/latest-route.asset"
+  printf 'selected-mirror-bytes' > "$asset"
+  sha="$(shasum -a 256 "$asset" | cut -d' ' -f1)"
+  size="$(wc -c < "$asset" | tr -d '[:space:]')"
+  latest="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai","release_id":7,"tag":"v1.2.3","assets":[{"name":"selected.bin","sha256":"%s","size":%s}]}' "$sha" "$size")"
+  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/latest.json" "$latest"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai/v1.2.3/selected.bin" "$asset"
+  MIRROR_TUI_LATEST_JSON=""; MIRROR_TUI_LATEST_TAG=""
+  fetch_mirror_latest "$REPO_SLUG" || fail "valid latest/v1 metadata should resolve"
+  assert_eq "v1.2.3" "$MIRROR_TUI_LATEST_TAG" "mirror latest tag"
+  out="$tmp/latest-route.out"
+  download_mirror_asset "$REPO_SLUG" v1.2.3 selected.bin "$out" || fail "selected mirror asset should download and verify"
+  cmp "$asset" "$out" || fail "selected mirror bytes changed"
+  grep -qx 'https://lingtai.ai/dl/Lingtai-AI/lingtai/latest.json' "$FAKE_CURL_LOG" || fail "latest metadata route missing"
+  grep -qx 'https://lingtai.ai/dl/Lingtai-AI/lingtai/v1.2.3/selected.bin' "$FAKE_CURL_LOG" || fail "selected asset route missing"
+  ! grep -q 'github.com' "$FAKE_CURL_LOG" || fail "healthy mirror helper route made a GitHub request"
 )
 
+# Default bundle resolution consumes mirror latest.json and its selected,
+# independently verified bundle manifest without crossing providers.
 (
-  # auto + CN but mirror UNREACHABLE -> falls open to github
-  fakebin="$tmp/resolve-fakebin-cn-unreachable"
+  fakebin="$tmp/bundle-mirror-fakebin"
   setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "CN"
-  register_response_text "https://lingtai.ai/" "" 22
   export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  export FAKE_CURL_LOG="$tmp/bundle-mirror.log"
+  : > "$FAKE_CURL_LOG"
   LINGTAI_WEB_BASE="https://lingtai.ai"
-  SOURCE_ARG="auto"
-  BUNDLE_PROVIDER=""
+  bundle_file="$tmp/bundle-mirror.json"
+  archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
+  printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$archive/" > "$bundle_file"
+  bundle_sha="$(shasum -a 256 "$bundle_file" | cut -d' ' -f1)"
+  bundle_size="$(wc -c < "$bundle_file" | tr -d '[:space:]')"
+  latest="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai","release_id":8,"tag":"v0.11.0","assets":[{"name":"lingtai-bundle-manifest.json","sha256":"%s","size":%s}]}' "$bundle_sha" "$bundle_size")"
+  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/latest.json" "$latest"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai/v0.11.0/lingtai-bundle-manifest.json" "$bundle_file"
+  SOURCE_ARG="auto"; VERSION=""; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
+  BUNDLE_TAG=""; BUNDLE_MANIFEST_JSON=""; MIRROR_TUI_LATEST_JSON=""; MIRROR_TUI_LATEST_TAG=""
   resolve_source_provider
-  assert_eq "github" "$BUNDLE_PROVIDER" "auto + CN + mirror unreachable falls back to github"
+  fetch_bundle_manifest || fail "default mirror bundle should resolve"
+  assert_eq "mirror" "$BUNDLE_PROVIDER" "default bundle provider remains mirror"
+  assert_eq "v0.11.0" "$BUNDLE_TAG" "default mirror bundle uses latest tag"
+  ! grep -q 'github.com' "$FAKE_CURL_LOG" || fail "default mirror bundle made a GitHub request"
 )
 
-(
-  # auto + non-CN -> github, no mirror probe needed
-  fakebin="$tmp/resolve-fakebin-us"
+# Explicit old-version and explicit-GitHub requests use only existing GitHub
+# metadata/assets. No /dl request is permitted for either route.
+exercise_github_bundle_route() (
+  local source="$1" version="$2" label="$3" fakebin manifest archive
+  fakebin="$tmp/${label}-fakebin"
   setup_fake_curl "$fakebin"
-  register_response_text "https://ipapi.co/country/" "US"
   export PATH="$fakebin:/usr/bin:/bin"
-  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
-  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
-  SOURCE_ARG="auto"
-  BUNDLE_PROVIDER=""
-  resolve_source_provider
-  assert_eq "github" "$BUNDLE_PROVIDER" "auto + non-CN resolves to github"
-)
-
-# --- mirror_release_asset_url -------------------------------------------------
-#
-# Unlike Gitee's API-listing lookup, the lingtai.ai mirror's URLs are fully
-# deterministic (releases/<repo>/<tag>/<asset>); availability is confirmed
-# with a bounded HEAD-style probe of that exact URL rather than a separate
-# listing call, matching the mirror's actual route contract (see
-# Lingtai-AI/lingtai-web's docs/release-mirror/CONTRACT.md: 404 for anything not
-# mirrored, never a listing).
-
-(
-  fakebin="$tmp/mirror-asset-fakebin"
-  setup_fake_curl "$fakebin"
-  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/v0.11.0/lingtai-v0.11.0-darwin-arm64.tar.gz" \
-    "fixture-tarball-bytes"
-  export PATH="$fakebin:/usr/bin:/bin"
-  LINGTAI_WEB_BASE="https://lingtai.ai"
-  assert_eq \
-    "https://lingtai.ai/dl/Lingtai-AI/lingtai/v0.11.0/lingtai-v0.11.0-darwin-arm64.tar.gz" \
-    "$(mirror_release_asset_url "Lingtai-AI/lingtai" v0.11.0 lingtai-v0.11.0-darwin-arm64.tar.gz)" \
-    "mirror_release_asset_url returns the deterministic URL once it is confirmed reachable"
-  if out="$(mirror_release_asset_url "Lingtai-AI/lingtai" v0.11.0 does-not-exist.tar.gz)"; then
-    fail "mirror_release_asset_url should fail for an asset the mirror does not have, got '$out'"
-  fi
-)
-
-# --- fetch_bundle_manifest: same-tag fallback, never re-resolves latest -----
-
-(
-  # Preferred provider (mirror) has NO manifest for the resolved tag (not yet
-  # synced). GitHub has it for the SAME tag. Must fall back without
-  # re-querying "latest".
-  fakebin="$tmp/bundle-fallback-fakebin"
-  setup_fake_curl "$fakebin"
-  # Mirror: this exact tag/asset has not been mirrored yet -> curl fails.
-  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/v0.11.0/lingtai-bundle-manifest.json" "" 22
-  # GitHub: has the manifest for the SAME tag v0.11.0.
-  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v0.11.0" \
-    '{"tag_name":"v0.11.0","assets":[{"name":"lingtai-bundle-manifest.json"}]}'
-  fallback_archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
-  fallback_manifest="$(printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$fallback_archive/")"
-  register_response_text \
-    "https://github.com/Lingtai-AI/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json" \
-    "$fallback_manifest"
-  export PATH="$fakebin:/usr/bin:/bin"
-  LINGTAI_WEB_BASE="https://lingtai.ai"
+  export FAKE_CURL_LOG="$tmp/${label}.log"
+  : > "$FAKE_CURL_LOG"
+  archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
+  manifest="$(printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$archive/")"
+  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/latest" '{"tag_name":"v0.11.0"}'
+  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v0.11.0" '{"tag_name":"v0.11.0","assets":[{"name":"lingtai-bundle-manifest.json"}]}'
+  register_response_text "https://github.com/Lingtai-AI/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json" "$manifest"
   API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
   DOWNLOAD_BASE="https://github.com/Lingtai-AI/lingtai/releases/download"
+  SOURCE_ARG="$source"; VERSION="$version"; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
+  BUNDLE_TAG=""; BUNDLE_MANIFEST_JSON=""
+  resolve_source_provider
+  fetch_bundle_manifest || fail "$label should resolve through GitHub"
+  assert_eq "github" "$BUNDLE_PROVIDER" "$label provider"
+  ! grep -q '/dl/' "$FAKE_CURL_LOG" || fail "$label made a mirror request"
+)
+exercise_github_bundle_route auto v0.11.0 explicit-old-version
+exercise_github_bundle_route github '' explicit-github
 
-  BUNDLE_PROVIDER="mirror"
-  VERSION="v0.11.0"
-  BUNDLE_TAG=""
-  BUNDLE_MANIFEST_JSON=""
-  fetch_bundle_manifest || fail "fetch_bundle_manifest should succeed via same-tag GitHub fallback"
-  assert_eq "v0.11.0" "$BUNDLE_TAG" "fetch_bundle_manifest resolves the explicit tag, not a re-queried latest"
-  assert_eq "github" "$BUNDLE_PROVIDER" "fetch_bundle_manifest updates BUNDLE_PROVIDER to the provider that actually served the manifest"
-  assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" "bundle_manifest_field reads the fetched manifest"
+# A selected mirror asset failure is terminal, points to the explicit switch,
+# and makes no GitHub request.
+(
+  fakebin="$tmp/mirror-failure-fakebin"
+  setup_fake_curl "$fakebin"
+  export PATH="$fakebin:/usr/bin:/bin"
+  export FAKE_CURL_LOG="$tmp/mirror-failure.log"
+  : > "$FAKE_CURL_LOG"
+  LINGTAI_WEB_BASE="https://lingtai.ai"
+  missing_sha="$(printf missing | shasum -a 256 | cut -d' ' -f1)"
+  MIRROR_TUI_LATEST_TAG="v1.2.3"
+  MIRROR_TUI_LATEST_JSON="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai","release_id":9,"tag":"v1.2.3","assets":[{"name":"missing.bin","sha256":"%s","size":7}]}' "$missing_sha")"
+  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/v1.2.3/missing.bin" '' 22
+  if out="$(download_mirror_asset "$REPO_SLUG" v1.2.3 missing.bin "$tmp/missing.out" 2>&1)"; then
+    fail "selected mirror asset failure should be terminal"
+  fi
+  echo "$out" | grep -q -- '--source github' || fail "mirror failure lacks explicit GitHub-switch guidance: $out"
+  ! grep -q 'github.com' "$FAKE_CURL_LOG" || fail "mirror failure made a GitHub request"
 )
 
+# End-to-end selected-byte journey through the existing TUI and kernel install
+# functions. Every release request must be one of the seven canonical /dl URLs.
 (
-  # Neither provider has a manifest for the explicit tag -> nonzero, no crash.
-  fakebin="$tmp/bundle-neither-fakebin"
+  case_dir="$tmp/default-mirror-journey"
+  fakebin="$case_dir/fakebin"
+  mkdir -p "$case_dir/archive" "$case_dir/bin" "$case_dir/venv/bin"
   setup_fake_curl "$fakebin"
-  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/v9.9.9/lingtai-bundle-manifest.json" "" 22
-  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v9.9.9" "" 22
   export PATH="$fakebin:/usr/bin:/bin"
+  export FAKE_CURL_LOG="$case_dir/requests.log"
+  : > "$FAKE_CURL_LOG"
   LINGTAI_WEB_BASE="https://lingtai.ai"
-  API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
+  tag="v8.8.8"
+  kernel_tag="v0.18.0"
+  os="$(detect_os)"; arch="$(detect_arch)"
+  archive_name="$(asset_name "$tag" "$os" "$arch")"
 
-  BUNDLE_PROVIDER="mirror"
-  VERSION="v9.9.9"
-  BUNDLE_TAG=""
-  BUNDLE_MANIFEST_JSON=""
-  if fetch_bundle_manifest; then
-    fail "fetch_bundle_manifest should fail when neither provider has the manifest"
+  cat > "$case_dir/archive/lingtai-tui" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == version ]] && echo 'lingtai-tui v8.8.8' || echo 'tui-runnable'
+EOF
+  cat > "$case_dir/archive/lingtai-portal" <<'EOF'
+#!/usr/bin/env bash
+echo 'portal-runnable'
+EOF
+  chmod +x "$case_dir/archive/lingtai-tui" "$case_dir/archive/lingtai-portal"
+  tar -czf "$case_dir/$archive_name" -C "$case_dir/archive" lingtai-tui lingtai-portal
+  archive_sha="$(shasum -a 256 "$case_dir/$archive_name" | cut -d' ' -f1)"
+  printf '%s  %s\n' "$archive_sha" "$archive_name" > "$case_dir/$archive_name.sha256"
+
+  bundle_file="$case_dir/lingtai-bundle-manifest.json"
+  printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v8.8.8","tui_tag":"v8.8.8","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.17.0","kernel_version":"0.17.0","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"ARCHIVE_SHA"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' \
+    | sed "s/ARCHIVE_SHA/$archive_sha/; s/ARCHIVE/$archive_name/" > "$bundle_file"
+
+  wheel_name="lingtai-0.18.0-cp312-cp312-macosx_11_0_arm64.whl"
+  printf 'fake-wheel-selected-by-mirror' > "$case_dir/$wheel_name"
+  wheel_sha="$(shasum -a 256 "$case_dir/$wheel_name" | cut -d' ' -f1)"
+  kernel_file="$case_dir/lingtai-kernel-release-manifest.json"
+  printf '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.18.0","kernel_tag":"v0.18.0","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","generated_at":"2026-07-15T00:00:00Z","artifacts":[{"filename":"%s","sha256":"%s","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"}],"sdist_fallback":""}' "$wheel_name" "$wheel_sha" > "$kernel_file"
+
+  asset_json() {
+    local name="$1" file="$2" sha size
+    sha="$(shasum -a 256 "$file" | cut -d' ' -f1)"
+    size="$(wc -c < "$file" | tr -d '[:space:]')"
+    printf '{"name":"%s","sha256":"%s","size":%s}' "$name" "$sha" "$size"
+  }
+  tui_latest="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai","release_id":88,"tag":"%s","assets":[%s,%s,%s,%s]}' "$tag" \
+    "$(asset_json lingtai-bundle-manifest.json "$bundle_file")" \
+    "$(asset_json "$archive_name" "$case_dir/$archive_name")" \
+    "$(asset_json "$archive_name.sha256" "$case_dir/$archive_name.sha256")" \
+    "$(asset_json unused.txt "$case_dir/$archive_name.sha256")")"
+  kernel_latest="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai-kernel","release_id":89,"tag":"%s","assets":[%s,%s]}' "$kernel_tag" \
+    "$(asset_json lingtai-kernel-release-manifest.json "$kernel_file")" \
+    "$(asset_json "$wheel_name" "$case_dir/$wheel_name")")"
+
+  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai/latest.json" "$tui_latest"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai/$tag/lingtai-bundle-manifest.json" "$bundle_file"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai/$tag/$archive_name" "$case_dir/$archive_name"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai/$tag/$archive_name.sha256" "$case_dir/$archive_name.sha256"
+  register_response_text "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/latest.json" "$kernel_latest"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/lingtai-kernel-release-manifest.json" "$kernel_file"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$wheel_name" "$case_dir/$wheel_name"
+
+  py="$case_dir/venv/bin/python"
+  cat > "$py" <<EOF
+#!/usr/bin/env bash
+case "\${1:-}" in
+  -) cat >/dev/null; echo cp312-cp312-macosx_11_0_arm64 ;;
+  -c) printf 'kernel-runnable\n' > "$case_dir/kernel-runnable" ;;
+esac
+exit 0
+EOF
+  uv="$case_dir/uv"
+  cat > "$uv" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$case_dir/kernel-install-argv"
+exit 0
+EOF
+  chmod +x "$py" "$uv"
+
+  SOURCE_ARG="auto"; VERSION=""; REF=""; FROM_SOURCE=0; UPDATE_MODE=0; LATEST_MAIN_MODE=0
+  BUNDLE_PROVIDER=""; BUNDLE_REQUIRED=1; BUNDLE_TAG=""; BUNDLE_MANIFEST_JSON=""
+  MIRROR_TUI_LATEST_JSON=""; MIRROR_TUI_LATEST_TAG=""; MIRROR_KERNEL_LATEST_JSON=""; MIRROR_KERNEL_LATEST_TAG=""
+  BIN_DIR="$case_dir/bin"; BUILD_DIR="$case_dir/build"; SKIP_PORTAL=0; PORTAL_PATH=""
+  KERNEL_SOURCE=""; KERNEL_LATEST_TAG=""; KERNEL_MANIFEST_JSON=""; KERNEL_MANIFEST_PROVIDER=""
+  resolve_source_provider
+  fetch_bundle_manifest || fail "default journey could not resolve the mirror bundle"
+  try_release_asset "$BUNDLE_TAG" || fail "default journey could not install mirror TUI/Portal"
+  install_kernel_from_bundle "$py" "$uv" || fail "default journey could not install mirror kernel"
+
+  [[ "$($BIN_DIR/lingtai-tui)" == tui-runnable ]] || fail "installed TUI is not runnable"
+  [[ "$($BIN_DIR/lingtai-portal)" == portal-runnable ]] || fail "installed Portal is not runnable"
+  [[ -f "$case_dir/kernel-runnable" && -s "$case_dir/kernel-install-argv" ]] || fail "kernel install/import path was not runnable"
+  assert_eq "7" "$(wc -l < "$FAKE_CURL_LOG" | tr -d '[:space:]')" "default mirror journey request count"
+  if grep -v '^https://lingtai.ai/dl/' "$FAKE_CURL_LOG" >/dev/null; then
+    fail "default mirror journey left canonical /dl routes: $(cat "$FAKE_CURL_LOG")"
   fi
+  ! grep -q 'github' "$FAKE_CURL_LOG" || fail "default mirror journey made a GitHub request"
 )
 
 # --- kernel manifest handoff survives provider selection in the same shell ---
@@ -400,10 +433,7 @@ register_response_text() {
   BUNDLE_PROVIDER="mirror"
   KERNEL_MANIFEST_PROVIDER=""
   KERNEL_MANIFEST_JSON=""
-  kernel_manifest_url_for_provider() {
-    [[ "$1" == "mirror" ]] && printf 'https://example.invalid/%s/manifest.json' "$2"
-  }
-  curl() {
+  mirror_asset_text() {
     printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","kernel_tag":"v0.16.4","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","sdist_fallback":"lingtai-0.16.4.tar.gz","artifacts":[{"filename":"lingtai-0.16.4.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}]}'
   }
 
@@ -530,6 +560,7 @@ TAGS
 PYEOF
   chmod +x "$fake_py"
 
+  BUNDLE_PROVIDER="github"
   BUNDLE_MANIFEST_JSON='{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","kernel_tag":"v0.16.4"}'
   BUILD_DIR="$tmp/install-checksum-fail-build"
   KERNEL_SOURCE=""
@@ -632,7 +663,14 @@ STUB_UV
   local mirror_dl="https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/v0.16.4"
 
   if [[ "$kernel_provider" == "mirror" ]]; then
-    register_response_text "$mirror_dl/lingtai-kernel-release-manifest.json" "$kernel_manifest"
+    local manifest_file="$case_dir/kernel-manifest.json" manifest_sha manifest_size wheel_size
+    printf '%s' "$kernel_manifest" > "$manifest_file"
+    manifest_sha="$(shasum -a 256 "$manifest_file" | cut -d' ' -f1)"
+    manifest_size="$(wc -c < "$manifest_file" | tr -d '[:space:]')"
+    wheel_size="$(wc -c < "$wheel_body" | tr -d '[:space:]')"
+    MIRROR_KERNEL_LATEST_TAG="v0.16.4"
+    MIRROR_KERNEL_LATEST_JSON="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai-kernel","release_id":10,"tag":"v0.16.4","assets":[{"name":"lingtai-kernel-release-manifest.json","sha256":"%s","size":%s},{"name":"%s","sha256":"%s","size":%s}]}' "$manifest_sha" "$manifest_size" "$KERNEL_ARTIFACT_NAME" "$wheel_sha" "$wheel_size")"
+    register_response "$mirror_dl/lingtai-kernel-release-manifest.json" "$manifest_file"
     register_response "$mirror_dl/$KERNEL_ARTIFACT_NAME" "$wheel_body"
   else
     # The mirror is probed first whenever the bundle came from the mirror;
@@ -706,20 +744,6 @@ assert_single_local_artifact_install() {
   assert_single_local_artifact_install "$log" "mirror/pip"
 )
 
-(
-  # The FINAL BUNDLE provider decides — not whichever provider happened to serve
-  # the kernel manifest. Here the bundle came from the mirror but the kernel
-  # manifest fell back to GitHub for the SAME kernel tag; the index must stay
-  # TUNA.
-  unset LINGTAI_PYPI_INDEX_URL
-  case_dir="$tmp/argv-mirror-bundle-github-kernel"
-  log="$(capture_bundle_install_argv "$case_dir" uv mirror github)" ||
-    fail "install_kernel_from_bundle should succeed when the kernel manifest falls back to GitHub"
-  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" \
-    "$(argv_value_after "$log" "--index-url")" \
-    "a same-kernel-tag GitHub manifest fallback does not move the index off the mirror bundle provider"
-  assert_single_local_artifact_install "$log" "mirror-bundle/github-kernel"
-)
 
 (
   # FINAL provider github + no override -> official PyPI, unchanged.

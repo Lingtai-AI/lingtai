@@ -8,11 +8,12 @@
     the PowerShell counterpart to install.sh and parses/runs identically under
     Windows PowerShell 5.1 (Desktop) and PowerShell 7+ (Core).
 
-    Three install sources are supported:
+    Three install modes are supported:
 
-      * PUBLIC MODE (no -ArchivePath, the default): resolve one exact vX.Y.Z TUI
-        release tag from GitHub (an explicit -Version, or the latest release
-        resolved once), download and strictly validate that release's
+      * PUBLIC MODE (no -ArchivePath, the default): without -Version, resolve
+        current TUI and kernel metadata plus all selected release assets from
+        lingtai.ai /dl routes. An explicit -Version or -Source github uses the
+        existing GitHub release behavior. Download and strictly validate the
         lingtai-bundle-manifest.json (schema lingtai.tui.bundle/v1), download the
         lingtai-<tag>-windows-amd64.zip archive plus its .sha256 sidecar, verify
         the archive's SHA-256 against the manifest before extraction, and confirm
@@ -34,13 +35,12 @@
         checkout, build both native Windows binaries from the pinned TUI tree,
         and install the pinned kernel checkout by local path into the runtime venv.
 
-    Both release modes provision the Python runtime venv (default, non -SkipVenv) ONLY
-    from the resolved release's pinned kernel bundle: the bundle manifest's
-    kernel_tag/kernel_manifest_filename select the lingtai-kernel release
-    manifest, a wheel matching the venv's actual CPython 3.11/3.12/3.13 win_amd64
-    interpreter is selected and SHA-256 verified, and only that local wheel path
-    is installed -- LingTai is never installed from a package index by name and
-    the kernel tag is never resolved as "latest" or changed from the pin.
+    Release modes provision the Python runtime venv (default, non -SkipVenv)
+    from a verified local kernel wheel. The default route independently reads
+    lingtai-kernel latest metadata and assets from lingtai.ai; explicit GitHub
+    release modes retain the bundle's pinned kernel. A wheel matching the venv's
+    CPython 3.11/3.12/3.13 win_amd64 interpreter is selected and SHA-256 verified.
+    LingTai is never installed from a package index by name.
     -SkipVenv is the explicit binary-only mode that skips all of this and creates
     no venv; it still requires and installs both the TUI and portal unless
     -SkipPortal is also given. -SkipPortal is the TUI-only opt-out (mirrors
@@ -119,12 +119,11 @@
     Cannot be combined with -Latest or local-artifact mode.
 
 .PARAMETER Source
-    Release source provider: auto|github|gitee (default: auto, or
-    $env:LINGTAI_SOURCE). Mirrors install.sh's --source. auto prefers Gitee
-    for mainland-China hosts via a bounded, fail-open country lookup; an
-    explicit override always wins and skips detection. gitee resolves release
-    tags, bundle manifests, and kernel releases from the Gitee mirror
-    (huangzesen1997/lingtai + huangzesen1997/lingtai-kernel).
+    Release source provider: auto|mirror|github (default: mirror when unset).
+    auto is a compatibility alias for the ordinary no-version lingtai.ai route.
+    No geography detection or automatic GitHub fallback occurs. Explicit
+    versions and source/current-main modes use GitHub; github forces it. gitee
+    is retired.
 
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
@@ -186,21 +185,17 @@ $ProgressPreference = 'SilentlyContinue'
 $Repo    = 'Lingtai-AI/lingtai'
 $RepoUrl = "https://github.com/$Repo"
 # Overridable only for the offline contract suite (env vars, same pattern as
-# install.sh's LINGTAI_GITEE_OWNER/LINGTAI_GITEE_REPO); production installs
-# always use the real GitHub API.
+# install.sh's test URL overrides); production explicit-GitHub installs use
+# the real GitHub API.
 $ApiBase = if ($env:LINGTAI_GITHUB_API_BASE) { $env:LINGTAI_GITHUB_API_BASE } else { "https://api.github.com/repos/$Repo" }
 $KernelApiBase = if ($env:LINGTAI_KERNEL_GITHUB_API_BASE) { $env:LINGTAI_KERNEL_GITHUB_API_BASE } else { "https://api.github.com/repos/Lingtai-AI/lingtai-kernel" }
 
-# --- Source provider (--source auto|github|gitee) ----------------------------
-# Gitee mirror: a real repository mirror of the TUI/kernel; release assets may
-# not exist for every tag yet (same fail-open stance as install.sh -- URLs are
-# only returned after the Gitee API confirms presence, never invented).
-$GiteeOwner = if ($env:LINGTAI_GITEE_OWNER) { $env:LINGTAI_GITEE_OWNER } else { 'huangzesen1997' }
-$GiteeRepo = if ($env:LINGTAI_GITEE_REPO) { $env:LINGTAI_GITEE_REPO } else { 'lingtai' }
-$GiteeKernelRepo = if ($env:LINGTAI_GITEE_KERNEL_REPO) { $env:LINGTAI_GITEE_KERNEL_REPO } else { 'lingtai-kernel' }
-$GiteeApiBase = if ($env:LINGTAI_GITEE_API_BASE) { $env:LINGTAI_GITEE_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeRepo" }
-$GiteeKernelApiBase = if ($env:LINGTAI_GITEE_KERNEL_API_BASE) { $env:LINGTAI_GITEE_KERNEL_API_BASE } else { "https://gitee.com/api/v5/repos/$GiteeOwner/$GiteeKernelRepo" }
-$script:BundleProvider = 'github'  # resolved by Resolve-SourceProvider: github|gitee
+# --- Source provider (default mirror; explicit modes use GitHub) --------------
+$KernelRepo = 'Lingtai-AI/lingtai-kernel'
+$MirrorBase = if ($env:LINGTAI_WEB_BASE) { $env:LINGTAI_WEB_BASE.TrimEnd('/') } else { 'https://lingtai.ai' }
+$script:BundleProvider = 'mirror'
+$script:MirrorTuiLatest = $null
+$script:MirrorKernelLatest = $null
 
 # --- Output helpers ----------------------------------------------------------
 
@@ -627,121 +622,127 @@ function Get-TextAssetContent {
     return $text
 }
 
-# Resolve-PublicTag resolves $Requested to an exact vX.Y.Z tag: validated as-is
-# if given, or the repo's latest release tag if empty. "latest" is resolved
-# through the release API exactly once -- never re-queried on a fallback.
+# Parse the already-live latest/v1 projection with PowerShell's native JSON
+# parser. The returned hashtable binds one tag to its named size/SHA records.
+function ConvertFrom-MirrorLatest {
+    param([string]$RawJson, [string]$ExpectedRepo)
+    try { $data = $RawJson | ConvertFrom-Json } catch { Fail "Invalid lingtai.ai latest metadata: $($_.Exception.Message)" }
+    $keys = @($data.psobject.Properties.Name | Sort-Object)
+    if (($keys -join ',') -ne 'assets,release_id,schema,source_repo,tag') { Fail 'Invalid lingtai.ai latest metadata shape.' }
+    if ($data.schema -ne 'lingtai.release_mirror.latest/v1' -or $data.source_repo -ne $ExpectedRepo) {
+        Fail "Invalid lingtai.ai latest metadata schema/source_repo for $ExpectedRepo."
+    }
+    if ($data.tag -isnot [string] -or $data.tag -notmatch '^v\d+\.\d+\.\d+$') { Fail 'Invalid lingtai.ai latest tag.' }
+    try { $releaseId = [int64]$data.release_id } catch { Fail 'Invalid lingtai.ai release_id.' }
+    if ($releaseId -le 0) { Fail 'Invalid lingtai.ai release_id.' }
+    $assets = @{}
+    foreach ($asset in @($data.assets)) {
+        $assetKeys = @($asset.psobject.Properties.Name | Sort-Object)
+        if (($assetKeys -join ',') -ne 'name,sha256,size') { Fail 'Invalid lingtai.ai asset metadata shape.' }
+        if ($asset.name -isnot [string] -or $asset.name -notmatch '^[A-Za-z0-9._+-]+$' -or $assets.ContainsKey($asset.name)) {
+            Fail 'Invalid or duplicate lingtai.ai asset name.'
+        }
+        if ($asset.sha256 -isnot [string] -or $asset.sha256 -notmatch '^[0-9a-f]{64}$') { Fail "Invalid lingtai.ai SHA256 for $($asset.name)." }
+        try { $size = [int64]$asset.size } catch { Fail "Invalid lingtai.ai size for $($asset.name)." }
+        if ($size -le 0) { Fail "Invalid lingtai.ai size for $($asset.name)." }
+        $assets[$asset.name] = @{ Sha256 = $asset.sha256; Size = $size }
+    }
+    if ($assets.Count -eq 0) { Fail 'Invalid lingtai.ai latest metadata: assets is empty.' }
+    return @{ Tag = $data.tag; Assets = $assets }
+}
+
+function Get-MirrorLatest {
+    param([string]$RequestedRepo)
+    if ($RequestedRepo -eq $Repo -and $script:MirrorTuiLatest) { return $script:MirrorTuiLatest }
+    if ($RequestedRepo -eq $KernelRepo -and $script:MirrorKernelLatest) { return $script:MirrorKernelLatest }
+    $url = "$MirrorBase/dl/$RequestedRepo/latest.json"
+    try {
+        $raw = Get-TextAssetContent -Url $url
+        $latest = ConvertFrom-MirrorLatest -RawJson $raw -ExpectedRepo $RequestedRepo
+    } catch {
+        Fail "lingtai.ai could not provide valid latest metadata at $url. Choose GitHub explicitly with -Source github."
+    }
+    if ($RequestedRepo -eq $Repo) { $script:MirrorTuiLatest = $latest }
+    if ($RequestedRepo -eq $KernelRepo) { $script:MirrorKernelLatest = $latest }
+    return $latest
+}
+
+function Get-MirrorAssetRecord {
+    param([string]$RequestedRepo, [string]$Tag, [string]$Name)
+    $latest = Get-MirrorLatest -RequestedRepo $RequestedRepo
+    if ($latest.Tag -ne $Tag -or -not $latest.Assets.ContainsKey($Name)) {
+        Fail "lingtai.ai latest metadata does not select $RequestedRepo/$Tag/$Name. Choose GitHub explicitly with -Source github."
+    }
+    return $latest.Assets[$Name]
+}
+
+function Get-MirrorAssetBytes {
+    param([string]$RequestedRepo, [string]$Tag, [string]$Name)
+    $record = Get-MirrorAssetRecord -RequestedRepo $RequestedRepo -Tag $Tag -Name $Name
+    $url = "$MirrorBase/dl/$RequestedRepo/$Tag/$Name"
+    try { $response = Invoke-WebRequest -Uri $url -UseBasicParsing } catch {
+        Fail "Selected lingtai.ai asset failed: $url. Choose GitHub explicitly with -Source github."
+    }
+    $bytes = $response.RawContentStream.ToArray()
+    if ($bytes.Length -ne $record.Size) { Fail "Size mismatch for selected lingtai.ai asset $url. Choose GitHub explicitly with -Source github." }
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try { $actual = ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() } finally { $hasher.Dispose() }
+    if ($actual -ne $record.Sha256) { Fail "SHA256 mismatch for selected lingtai.ai asset $url. Choose GitHub explicitly with -Source github." }
+    return ,$bytes
+}
+
+function Get-MirrorAssetText {
+    param([string]$RequestedRepo, [string]$Tag, [string]$Name)
+    $bytes = Get-MirrorAssetBytes -RequestedRepo $RequestedRepo -Tag $Tag -Name $Name
+    return [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+}
+
+function Save-MirrorAsset {
+    param([string]$RequestedRepo, [string]$Tag, [string]$Name, [string]$Destination)
+    $bytes = Get-MirrorAssetBytes -RequestedRepo $RequestedRepo -Tag $Tag -Name $Name
+    [System.IO.File]::WriteAllBytes($Destination, $bytes)
+}
+
 function Resolve-PublicTag {
     param([string]$Requested)
     if (-not [string]::IsNullOrWhiteSpace($Requested)) {
-        if ($Requested -notmatch '^v\d+\.\d+\.\d+$') {
-            Fail "-Version '$Requested' is not an exact vX.Y.Z release tag."
-        }
+        if ($Requested -notmatch '^v\d+\.\d+\.\d+$') { Fail "-Version '$Requested' is not an exact vX.Y.Z release tag." }
         return $Requested
     }
-    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/latest"
+    if ($script:BundleProvider -eq 'mirror') { return (Get-MirrorLatest -RequestedRepo $Repo).Tag }
+    $release = Invoke-GitHubApi -Url "$ApiBase/releases/latest"
     $tag = $release.tag_name
-    if ([string]::IsNullOrWhiteSpace($tag) -or $tag -notmatch '^v\d+\.\d+\.\d+$') {
-        Fail "Could not resolve an exact vX.Y.Z tag from the latest $($script:BundleProvider) release (got '$tag')."
-    }
+    if ([string]::IsNullOrWhiteSpace($tag) -or $tag -notmatch '^v\d+\.\d+\.\d+$') { Fail "Could not resolve an exact vX.Y.Z tag from GitHub (got '$tag')." }
     return $tag
 }
 
-# --- Source provider (auto|github|gitee) -------------------------------------
-
-# Test-CountryCn does a bounded, fail-open public-IP country lookup and returns
-# $true when the caller appears to be in mainland China, $false otherwise
-# (including "could not tell"). Mirrors install.sh's detect_country_cn: only
-# the two-letter country code is requested; every probe is short-timeout and
-# its result is discarded on any error.
-function Test-CountryCn {
-    $timeout = 3
-    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
-    foreach ($url in @('https://ipapi.co/country/', 'https://ifconfig.co/country-iso')) {
-        try {
-            $body = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop).Content
-            $country = ($body | Out-String).Trim()
-            if ($country -match '^(?i)cn$') { return $true }
-        } catch {
-            # fail-open: try the next endpoint
-        }
-    }
-    return $false
-}
-
-# Test-GiteeReachable is a cheap liveness probe for the Gitee API, bounded the
-# same way install.sh's gitee_reachable is: a short-timeout HEAD/GET on the
-# repo metadata, discarded on any error.
-function Test-GiteeReachable {
-    $timeout = 3
-    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
-    try {
-        $probe = Invoke-WebRequest -Uri $GiteeApiBase -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop
-        return ($null -ne $probe)
-    } catch {
-        return $false
-    }
-}
-
-# Resolve-SourceProvider sets $script:BundleProvider to 'github' or 'gitee'
-# per the -Source/LINGTAI_SOURCE override: explicit github|gitee wins with no
-# detection; auto runs a bounded country lookup, preferring gitee for
-# mainland-China hosts when gitee is reachable, else github (fail-open).
-# Mirrors install.sh's resolve_source_provider.
+# No geography detection: only the ordinary no-version release route uses the
+# mirror. Explicit versions, source/update/current-main, and -Source github use
+# the existing GitHub behavior before any release asset is requested.
 function Resolve-SourceProvider {
-    $arg = if ([string]::IsNullOrWhiteSpace($Source)) { 'auto' } else { $Source.ToLowerInvariant() }
+    $arg = if ([string]::IsNullOrWhiteSpace($Source)) { 'mirror' } else { $Source.ToLowerInvariant() }
     switch ($arg) {
-        'github' { $script:BundleProvider = 'github'; return }
-        'gitee'  { $script:BundleProvider = 'gitee';  return }
-        'auto'   { break }
-        default  { Fail "-Source must be one of auto|github|gitee, got: $Source" }
+        'mirror' { $script:BundleProvider = 'mirror' }
+        'auto'   { $script:BundleProvider = 'mirror' }
+        'github' { $script:BundleProvider = 'github' }
+        'gitee'  { Fail '-Source gitee is retired. Use -Source mirror or -Source github.' }
+        default  { Fail "-Source must be one of mirror|github|auto, got: $Source" }
     }
-    $script:BundleProvider = 'github'
-    # The offline contract suite overrides the API base env vars; country
-    # detection would add bounded network probes that are meaningless there,
-    # so skip detection and stay on GitHub when an API override is present
-    # (same spirit as install.sh's test shims -- production auto still probes).
-    if ($env:LINGTAI_GITHUB_API_BASE -or $env:LINGTAI_KERNEL_GITHUB_API_BASE -or $env:LINGTAI_GITEE_API_BASE) {
-        return
-    }
-    if (Test-CountryCn) {
-        if (Test-GiteeReachable) {
-            $script:BundleProvider = 'gitee'
-            Write-Step "Country lookup suggests mainland China and Gitee is reachable; using Gitee release provider."
-        } else {
-            Write-Step "Country lookup suggests mainland China but Gitee is unreachable; using GitHub release provider."
-        }
+    if (-not [string]::IsNullOrWhiteSpace($Version) -or $Ref -or $FromSource -or $Update -or $Latest -or $ArchivePath) {
+        $script:BundleProvider = 'github'
     }
 }
 
-# Get-TuiApiBase returns the provider-correct release API base for the TUI
-# repo. GitHub is the default; Gitee is the mirror.
-function Get-TuiApiBase {
-    if ($script:BundleProvider -eq 'gitee') { return $GiteeApiBase }
-    return $ApiBase
-}
+function Get-TuiApiBase { return $ApiBase }
+function Get-KernelApiBase { return $KernelApiBase }
 
-# Get-KernelApiBase returns the provider-correct release API base for the
-# kernel repo, mirroring install.sh's kernel_gitee_api_base per-lookup.
-function Get-KernelApiBase {
-    if ($script:BundleProvider -eq 'gitee') { return $GiteeKernelApiBase }
-    return $KernelApiBase
-}
-
-# Get-ReleaseAssetUrl returns the download URL for a named asset on an exact
-# tag's release, or $null if that release has no such asset. Provider-aware:
-# GitHub uses the release's assets[]; Gitee v5 uses attach_files[] with
-# browserDownloadUrl (or browser_download_url). Uses the release-by-tag
-# listing so a missing asset is detected before any download.
 function Get-ReleaseAssetUrl {
     param([string]$Tag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$(Get-TuiApiBase)/releases/tags/$Tag"
-    if ($script:BundleProvider -eq 'gitee') {
-        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
-        if (-not $asset) { return $null }
-        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
-        if ($asset.browser_download_url) { return $asset.browser_download_url }
-        return $null
+    if ($script:BundleProvider -eq 'mirror') {
+        Get-MirrorAssetRecord -RequestedRepo $Repo -Tag $Tag -Name $Name | Out-Null
+        return "$MirrorBase/dl/$Repo/$Tag/$Name"
     }
+    $release = Invoke-GitHubApi -Url "$ApiBase/releases/tags/$Tag"
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
@@ -899,30 +900,20 @@ function Confirm-BundleManifest {
 
 # Get-BundleManifest resolves the tag's lingtai-bundle-manifest.json asset and
 # returns the Confirm-BundleManifest result. Mirrors install.sh's
-# fetch_bundle_manifest: if the preferred provider has no bundle manifest for
-# the tag, falls back to the OTHER provider for the SAME tag (never re-resolves
-# "latest"). Fails loud only if neither provider has a valid manifest.
+# fetch_bundle_manifest on exactly the selected provider. Mirror failures are
+# terminal and point to the explicit GitHub switch.
 function Get-BundleManifest {
     param([string]$Tag)
-    foreach ($provider in @($script:BundleProvider, $(if ($script:BundleProvider -eq 'gitee') { 'github' } else { 'gitee' }))) {
-        $saved = $script:BundleProvider
-        $script:BundleProvider = $provider
-        try {
-            $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
-            if ($url) {
-                $raw = Get-TextAssetContent -Url $url
-                $result = Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
-                if ($provider -ne $saved) {
-                    Write-Step "$saved has no bundle manifest for $Tag; validated it from $provider for the same tag."
-                }
-                return $result
-            }
-        } finally {
-            $script:BundleProvider = $saved
-        }
+    if ($script:BundleProvider -eq 'mirror') {
+        $raw = Get-MirrorAssetText -RequestedRepo $Repo -Tag $Tag -Name 'lingtai-bundle-manifest.json'
+        return Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
     }
-    Fail "Release $Tag has no lingtai-bundle-manifest.json on either provider. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
+    $url = Get-ReleaseAssetUrl -Tag $Tag -Name 'lingtai-bundle-manifest.json'
+    if (-not $url) { Fail "Release $Tag has no lingtai-bundle-manifest.json on GitHub. LingTai's Windows install requires a pinned bundle." }
+    $raw = Get-TextAssetContent -Url $url
+    return Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
 }
+
 
 # --- Kernel release manifest (schema lingtai.kernel.release/v1) --------------
 
@@ -971,34 +962,35 @@ function Confirm-KernelManifest {
 
 # Get-KernelAssetUrl returns the browser_download_url for a named asset on the
 # pinned kernel release, or $null if that release has no such asset -- the
-# kernel-repo analogue of Get-ReleaseAssetUrl (provider-aware for Gitee).
+# kernel-repo analogue of Get-ReleaseAssetUrl for mirror or GitHub.
 function Get-KernelAssetUrl {
     param([string]$KernelTag, [string]$Name)
-    $release = Invoke-GitHubApi -Url "$(Get-KernelApiBase)/releases/tags/$KernelTag"
-    if ($script:BundleProvider -eq 'gitee') {
-        $asset = $release.attach_files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
-        if (-not $asset) { return $null }
-        if ($asset.browserDownloadUrl) { return $asset.browserDownloadUrl }
-        if ($asset.browser_download_url) { return $asset.browser_download_url }
-        return $null
+    if ($script:BundleProvider -eq 'mirror') {
+        Get-MirrorAssetRecord -RequestedRepo $KernelRepo -Tag $KernelTag -Name $Name | Out-Null
+        return "$MirrorBase/dl/$KernelRepo/$KernelTag/$Name"
     }
+    $release = Invoke-GitHubApi -Url "$KernelApiBase/releases/tags/$KernelTag"
     $asset = $release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
     if (-not $asset) { return $null }
     return $asset.browser_download_url
 }
+
 
 # Get-KernelManifest fetches and validates the kernel release manifest for the
 # bundle's pinned kernel_tag from Lingtai-AI/lingtai-kernel. Fails loud if the
 # kernel release or its manifest asset is missing.
 function Get-KernelManifest {
     param([string]$KernelTag, [string]$ManifestFilename)
-    $url = Get-KernelAssetUrl -KernelTag $KernelTag -Name $ManifestFilename
-    if (-not $url) {
-        Fail "Pinned kernel release $KernelTag has no $ManifestFilename asset."
+    if ($script:BundleProvider -eq 'mirror') {
+        $raw = Get-MirrorAssetText -RequestedRepo $KernelRepo -Tag $KernelTag -Name $ManifestFilename
+        return Confirm-KernelManifest -RawJson $raw -ExpectedKernelTag $KernelTag
     }
+    $url = Get-KernelAssetUrl -KernelTag $KernelTag -Name $ManifestFilename
+    if (-not $url) { Fail "Pinned kernel release $KernelTag has no $ManifestFilename asset." }
     $raw = Get-TextAssetContent -Url $url
     return Confirm-KernelManifest -RawJson $raw -ExpectedKernelTag $KernelTag
 }
+
 
 # --- Runtime venv (fail-loud; no PyPI-by-name; mirrors install.sh) -----------
 
@@ -1152,10 +1144,14 @@ function Install-KernelWheel {
     if (-not $downloadUrl) { Fail "Pinned kernel release $KernelTag has no $($Wheel.filename) asset even though its manifest references it." }
     $dest = Join-Path $StageDir $Wheel.filename
     Write-Info "Downloading kernel wheel: $($Wheel.filename) (kernel $KernelTag) ..."
-    try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $dest -UseBasicParsing
-    } catch {
-        Fail "Download failed for $downloadUrl ($($_.Exception.Message))"
+    if ($script:BundleProvider -eq 'mirror') {
+        Save-MirrorAsset -RequestedRepo $KernelRepo -Tag $KernelTag -Name $Wheel.filename -Destination $dest
+    } else {
+        try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $dest -UseBasicParsing
+        } catch {
+            Fail "Download failed for $downloadUrl ($($_.Exception.Message))"
+        }
     }
     $actual = Get-Sha256Hex -Path $dest
     if ($actual -ne $Wheel.sha256) {
@@ -1540,23 +1536,34 @@ function Install-Venv {
 
     Remove-OrphanedKernelDistInfo -VenvDir $venvDir
 
+    $kernelTag = $Bundle.KernelTag
+    $kernelManifestFilename = $Bundle.KernelManifestFilename
+    $kernelSource = 'bundle'
+    $kernelBundleId = $Bundle.BundleId
+    if ($script:BundleProvider -eq 'mirror') {
+        $kernelTag = (Get-MirrorLatest -RequestedRepo $KernelRepo).Tag
+        $kernelManifestFilename = 'lingtai-kernel-release-manifest.json'
+        $kernelSource = 'release-pin'
+        $kernelBundleId = ''
+    }
+
     $wheelTag = Get-VenvWheelTag -VenvPython $venvPython
-    $kernelManifest = Get-KernelManifest -KernelTag $Bundle.KernelTag -ManifestFilename $Bundle.KernelManifestFilename
+    $kernelManifest = Get-KernelManifest -KernelTag $kernelTag -ManifestFilename $kernelManifestFilename
     $wheel = Select-KernelWheel -KernelManifest $kernelManifest -WheelTag $wheelTag
 
     $stage = New-StagingDir
-    Install-KernelWheel -VenvPython $venvPython -Wheel $wheel -KernelTag $Bundle.KernelTag -StageDir $stage | Out-Null
+    Install-KernelWheel -VenvPython $venvPython -Wheel $wheel -KernelTag $kernelTag -StageDir $stage | Out-Null
     $installedVersion = Confirm-KernelImport -VenvPython $venvPython -ExpectedVersion $kernelManifest.kernel_version
 
-    Write-KernelProvenance -VenvDir $venvDir -TuiTag $TuiTag -TuiCommit $Bundle.TuiCommit -BundleId $Bundle.BundleId `
-        -KernelTag $Bundle.KernelTag -KernelVersion $installedVersion -WheelFilename $wheel.filename `
-        -WheelSha256 $wheel.sha256 -Provider 'github' | Out-Null
+    Write-KernelProvenance -VenvDir $venvDir -TuiTag $TuiTag -TuiCommit $Bundle.TuiCommit -BundleId $kernelBundleId `
+        -KernelTag $kernelTag -KernelVersion $installedVersion -WheelFilename $wheel.filename `
+        -WheelSha256 $wheel.sha256 -Provider $script:BundleProvider | Out-Null
 
     return @{
-        KernelSource   = 'bundle'
-        KernelBundleId = $Bundle.BundleId
+        KernelSource   = $kernelSource
+        KernelBundleId = $kernelBundleId
         KernelVersion  = $installedVersion
-        KernelProvider = 'github'
+        KernelProvider = $script:BundleProvider
     }
 }
 
@@ -2316,11 +2323,16 @@ function Install-FromPublicRelease {
     $archivePath = Join-Path $stage $bundle.ArchiveFilename
     $sidecarPath = "$archivePath.sha256"
     Write-Info "Downloading $($bundle.ArchiveFilename) (release $tag) ..."
-    try {
-        Invoke-WebRequest -Uri $zipUrl -OutFile $archivePath -UseBasicParsing
-        Invoke-WebRequest -Uri $shaUrl -OutFile $sidecarPath -UseBasicParsing
-    } catch {
-        Fail "Download failed ($($_.Exception.Message)). Staging kept for inspection: $stage"
+    if ($script:BundleProvider -eq 'mirror') {
+        Save-MirrorAsset -RequestedRepo $Repo -Tag $tag -Name $bundle.ArchiveFilename -Destination $archivePath
+        Save-MirrorAsset -RequestedRepo $Repo -Tag $tag -Name "$($bundle.ArchiveFilename).sha256" -Destination $sidecarPath
+    } else {
+        try {
+            Invoke-WebRequest -Uri $zipUrl -OutFile $archivePath -UseBasicParsing
+            Invoke-WebRequest -Uri $shaUrl -OutFile $sidecarPath -UseBasicParsing
+        } catch {
+            Fail "Download failed ($($_.Exception.Message)). Staging kept for inspection: $stage"
+        }
     }
 
     # The sidecar is fetched from the SAME release as the archive; verify it
@@ -2346,9 +2358,8 @@ function Invoke-Main {
     Write-Host "------------------------------------" -ForegroundColor Magenta
     if ($DryRun) { Write-Warn "DRY RUN: no filesystem, PATH, or config writes will be made." }
 
-    # Resolve the release source provider up front (explicit -Source override
-    # wins; auto runs a bounded country lookup) so every API helper below uses
-    # one consistent provider for tag/asset/bundle/kernel resolution.
+    # Resolve one provider up front. The ordinary no-version route uses
+    # lingtai.ai; explicit release/source/current-main modes use GitHub.
     Resolve-SourceProvider
     Write-Info "Release provider: $($script:BundleProvider)"
 
