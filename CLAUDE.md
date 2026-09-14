@@ -61,10 +61,10 @@ Named after 灵台方寸山 — where 孙悟空 learned his 72 transformations. 
 
 ### Repository Scope
 
-All Python code (kernel runtime and batteries-included wrapper) now lives in the `lingtai-kernel` repo and is published as the `lingtai` package on PyPI. This repo contains only the Go TUI and portal frontends.
+All Python code (kernel runtime and batteries-included wrapper) now lives in the `lingtai-kernel` repo and is published as the `lingtai` package on PyPI. This repo contains the Go TUI and the retained, deprecated Portal codebase.
 
 - **`tui/`** — Terminal UI (Go + Bubble Tea). Launches and monitors agents from the command line. Builds to `tui/bin/lingtai-tui`.
-- **`portal/`** — Web portal (Go + embedded web frontend). Provides a browser-based interface. Builds to `portal/bin/lingtai-portal`.
+- **`portal/`** — Retained, deprecated web portal (Go + embedded web frontend). It remains separately buildable for repository development and builds to `portal/bin/lingtai-portal`; the installers, release workflow, and Homebrew do not build or install it.
 
 Neither binary has a direct Python dependency. Both communicate with Python agents exclusively through the filesystem (`.lingtai/` directory, heartbeat files, signal files). Agents are launched by the TUI via `python -m lingtai run <dir>` as a subprocess.
 
@@ -104,8 +104,8 @@ Cross-compilation targets (darwin/linux/windows, amd64/arm64) are available via 
 See `RELEASING.md` for the full process. Key points:
 
 1. Tag and push: `git tag v0.X.Y && git push origin v0.X.Y`
-2. The root `.github/workflows/release.yml` workflow runs on the pushed `v*` tag and updates `Lingtai-AI/homebrew-lingtai`
-3. Create GitHub release: `gh release create v0.X.Y --title "v0.X.Y" --notes "..."` (no binary assets — Homebrew builds from source)
+2. The root `.github/workflows/release.yml` workflow validates the tag, peels it to a commit SHA, and publishes the deterministic TUI source archive plus checksum; it also relays source-only asset metadata to `lingtai-web`
+3. `update-homebrew` consumes that producer-owned source archive and writes a TUI-only source-build formula (there is no Portal or Windows bundle release job)
 4. Edit the Homebrew tap manually only as a fallback/debug step if the workflow failed or could not run
 
 ## Projects
@@ -196,7 +196,7 @@ Authorization is declared in `allowed` — the kernel refuses runtime swap to an
 
 When writing `manifest.preset.*` paths from Go code, always use `preset.RefFor(p)` — it picks the right subdirectory based on `Source` instead of hardcoding `presets/`.
 
-### Portal (`portal/`)
+### Portal (`portal/`, deprecated)
 
 Go server with an embedded web frontend. Key facts:
 

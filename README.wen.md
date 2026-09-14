@@ -97,7 +97,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 
 </details>
 
-安装脚本通 macOS、Linux 与 WSL，装 `lingtai-tui`、`lingtai-portal`；于 macOS 又备 `lingtai-desktop`。
+安装脚本通 macOS、Linux 与 WSL，装 `lingtai-tui`；于 macOS 又备 `lingtai-desktop`。仓中所留 `lingtai-portal` 代码库已废，不由安装脚本、发布工作流或 Homebrew 构建或安装。
 
 原生 Windows/PowerShell 今已可用：
 
@@ -105,7 +105,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 irm https://lingtai.ai/install.ps1 | iex
 ```
 
-此令解析最新之发布标签，校 Windows 二进制包与所锁内核发布之验证码，遂装 `lingtai-tui`、`lingtai-portal` 及 Python 运行时之虚环境。加 `-SkipVenv` 则唯装 TUI/portal 二进制。其详见 [`RELEASING.md`](RELEASING.md)。
+此令经 `lingtai.ai` 分别解析并验证最新 TUI 源码与内核发布，各有其 GitHub 之回退；于本地构建 `lingtai-tui.exe`，并将内核资产装入 Python 运行时之虚环境。加 `-SkipVenv` 则唯装 TUI。其详见 [`RELEASING.md`](RELEASING.md)。
 
 <details>
 <summary><b>原生 Windows 主线调试之安装</b>——<code>install.ps1 -Latest</code></summary>
@@ -114,7 +114,7 @@ irm https://lingtai.ai/install.ps1 | iex
 
 欲于原生 Windows 调试今之主线，可行 `.\install.ps1 -Latest`。此唯支 amd64；ARM64 宜用 WSL2 与 `install.sh --latest`。
 
-此会一次检查 Git、Go、Node.js/npm（Node 20.19+、22.12+，或更高主版本；Node 21 及 Node 22.<12 不支）与 64 位 CPython 3.11–3.13；凡缺失或版本/架构不合者，唯以 `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent` 装其所需（`Git.Git`、`GoLang.Go`、`OpenJS.NodeJS.LTS` 与/或 `Python.Python.3.13`）。前置条件装成者，乃 winget 对机身之外部变更；若后续包、检出或构建失败，不自动回滚，然 LingTai 目标目录之写入仍待验证/构建成功之后。安装器刷新当前进程 PATH 而后再验，再钉住两仓 `main` 之完整 SHA、构建两二进制，并以非 editable 之本地构建将确切内核检出装入 `%USERPROFILE%\.lingtai-tui\runtime\venv`。winget 或包之策略/提权阻其修复时，必以精确补救命令失败。
+此会一次检查 Git、Go 与 64 位 CPython 3.11–3.13；凡缺失或版本/架构不合者，唯以 `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent` 装其所需（`Git.Git`、`GoLang.Go` 与/或 `Python.Python.3.13`）。前置条件装成者，乃 winget 对机身之外部变更；若后续包、检出或构建失败，不自动回滚，然 LingTai 目标目录之写入仍待验证/构建成功之后。安装器刷新当前进程 PATH 而后再验，再钉住两仓 `main` 之完整 SHA、构建 TUI，并以非 editable 之本地构建将确切内核检出装入 `%USERPROFILE%\.lingtai-tui\runtime\venv`。此模式不构建 Portal。winget 或包之策略/提权阻其修复时，必以精确补救命令失败。
 
 `-Latest -DryRun` 只报精确修复计划，不召 winget，亦不写目标目录、PATH 或配置；`-Latest` 不得与 `-Version`、`-ArchivePath` 或 `-SkipVenv` 同用。网站仓库仍须另补相应安装说明。
 
@@ -134,7 +134,7 @@ irm https://lingtai.ai/install.ps1 | iex
 
 **TUI——`lingtai-tui`** 者，灵台之终端面也：设项目与模型、对谈读信、察器灵之状；欲深观，则入 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。入 `/help` 可观斜杠命令之全录（其权威之目，乃内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.wen.md)，此 README 不复述之）。升级之后若有不谐，行 `lingtai-tui doctor`。
 
-**Portal——`lingtai-portal`** 者，可视之服也。读项目之状，显器灵之网、书信之边、历史之拓扑——一项目中器灵非一，或欲观其事之所以演，则用之。
+**Portal——`lingtai-portal`** 者，仓中所留而已废之可视代码库也。仍可为仓库开发而单独构建，读项目之状，显器灵之网、书信之边、历史之拓扑；然不由安装脚本、发布工作流或 Homebrew 构建或安装。
 
 **外接诸渠**，接**同一**格物者于君素用之台——记忆、诸器、往史，通乎诸渠之间；其为一助理之众门，非各立之机器人也。其设置当循当前 MCP/精选插件文档，且须得明示授权；TUI 之 `/mcp` 台为只读，仅察既设之桥接及其状态。凭证藏于本地 `.secrets/`（绝不入 Git）；凡外部之副作用（发讯、提 issue）皆按真行待之；渠道插件支持发件者白名单，随附示例配置默认启之——开放访问，须显而择焉。
 

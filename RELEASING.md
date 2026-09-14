@@ -1,13 +1,13 @@
-# Releasing lingtai-tui and lingtai-portal
+# Releasing lingtai-tui
 
 ## Release Process
 
 ### 1. Commit and push all changes
 
-Bump [`migration/migration.md`](migration/migration.md)'s frontmatter
-(`release_version`, `release_tag`, `kernel_tag`) to the release being tagged
-and [`kernel-release.json`](kernel-release.json)'s pinned kernel — the exact
-tagged copy of that file is the migration record the update contract reads.
+Update [`migration/migration.md`](migration/migration.md) only when the release
+needs a user-facing migration note. Its versioned release sections are history;
+there is no repo-owned kernel pin to update for a current release. The retained
+`lingtai-portal` codebase is deprecated and is not a release artifact.
 
 ```bash
 git push origin main
@@ -21,41 +21,29 @@ git push origin v0.X.Y
 ```
 
 Pushing a `v*` tag triggers the root GitHub Actions workflow at
-`.github/workflows/release.yml`, which has three jobs:
+`.github/workflows/release.yml`, which has two jobs:
 
-- **`source-release`** — verifies the pushed tag and creates the public GitHub
-  Release when it does not already exist. GitHub supplies the tag source archives;
-  this job does not build or upload prebuilt binaries, checksums, or bundles.
-- **`update-homebrew`** — computes the GitHub source-tarball checksum and updates
-  the source-build formula in `Lingtai-AI/homebrew-lingtai`. It **fails closed**
-  before the tap checkout unless the pushed tag is an exact `vX.Y.Z` — the same
-  shape `windows-release` already requires — so a tag name can never reach the
-  formula writer or the cross-repo tap token as unvalidated data. Prerelease and
-  other non-exact `v*` tags still create a GitHub source release, but are not
-  published to Homebrew.
-- **`windows-release`** (`needs: source-release`) — builds both
-  `lingtai-tui.exe` and `lingtai-portal.exe` for `windows/amd64`; the portal web
-  build is mandatory. It packages the dual-binary
-  `lingtai-<tag>-windows-amd64.zip` plus its `.sha256` sidecar, generates
-  `lingtai-bundle-manifest.json` (schema `lingtai.tui.bundle/v1`) binding the tag's
-  exact commit to the archive digest and to [`kernel-release.json`](kernel-release.json)'s
-  pinned kernel tag, and uploads all three to the release. It **fails closed**
-  before building anything unless `kernel-release.json`'s pinned kernel release
-  already exists and publishes a `cp311`/`cp312`/`cp313` `win_amd64` wheel with a
-  verified digest — it never resolves "latest kernel."
+- **`source-release`** — validates the exact `vX.Y.Z` tag, peels annotated tags
+  to the commit SHA, creates a deterministic `lingtai-<tag>-source.tar.gz`,
+  writes its checksum sidecar, and publishes both assets to the GitHub release.
+  It also sends a source-only `release-asset-published` dispatch describing the
+  verified archive and checksum to `Lingtai-AI/lingtai-web`.
+- **`update-homebrew`** (`needs: source-release`) — consumes the producer-owned
+  source archive and checksum and writes a TUI-only source-build formula in
+  `Lingtai-AI/homebrew-lingtai`. It fails closed unless the tag is exactly
+  `vX.Y.Z`; prerelease and other `v*` tags are rejected by `source-release` and
+  do not publish current release or Homebrew assets.
 
-### Kernel compatibility metadata
+The workflow does not build or publish Portal, a Windows bundle, or a coupled
+kernel artifact. The TUI and kernel are released and resolved independently;
+there is no repository-owned kernel pin or workflow-side “latest kernel” pin.
 
-[`kernel-release.json`](kernel-release.json) is the repo-owned pin the
-`windows-release` job reads to bind a TUI release to one exact kernel release.
-Bump it deliberately, in the same PR/commit that intends to ship a new kernel
-version with the next TUI release; the workflow never resolves "latest kernel"
-on its own.
+### Legacy Gitee publication tools
 
-### Gitee publication
-
-The tag workflow does not synchronize to Gitee and does not publish TUI
-binary/bundle assets there. The existing
+The tag workflow does not synchronize to Gitee or publish current release
+assets there. The existing scripts may still handle historical binary/bundle
+publication when explicitly invoked by an authorized maintainer; they are not
+current installer inputs. The existing
 [`scripts/sync_gitee_mirror.sh`](scripts/sync_gitee_mirror.sh) and
 [`scripts/publish_bundle_to_gitee.sh`](scripts/publish_bundle_to_gitee.sh)
 remain explicit maintainer tools; running them requires separate release authority
@@ -69,45 +57,44 @@ irm https://lingtai.ai/install.ps1 | iex
 &([scriptblock]::Create((irm https://lingtai.ai/install.ps1))) -Version v0.X.Y
 ```
 
-`install.ps1`'s public (default) mode resolves one exact release tag, downloads
-and strictly validates `lingtai-bundle-manifest.json`, downloads and SHA-256
-verifies the Windows archive, confirms the staged `lingtai-tui.exe` reports
-exactly that tag, and — unless `-SkipVenv` is passed — provisions
-`%USERPROFILE%\.lingtai-tui\runtime\venv` from the bundle's pinned kernel
-release: it selects the `cp311`/`cp312`/`cp313` `win_amd64` wheel matching the
-venv's actual interpreter, verifies its digest, and installs it by explicit
-local file path. LingTai is never installed by package name from any index —
-the same "no PyPI fallback" contract `install.sh` holds itself to. `-SkipVenv`
-skips only the kernel venv and still installs both required TUI/portal binaries;
-`-DryRun` performs the same resolution/validation reads but writes nothing. The
-Windows Installer Smoke workflow covers the contract suite under PowerShell 5.1
-and PowerShell 7 on PR/push; its tag-only exact-tag smoke waits for the published
-asset and verifies both installed binaries. See
+`install.ps1`'s public (default) mode resolves and verifies the latest TUI source
+and latest kernel release independently through `lingtai.ai`, with each
+component's own GitHub fallback. It always builds `lingtai-tui.exe` locally and
+installs the verified kernel artifact into
+`%USERPROFILE%\.lingtai-tui\runtime\venv` unless `-SkipVenv` is passed. It
+never installs LingTai by package name from an index. `-ArchivePath` plus
+`-ChecksumPath` is the explicit local TUI-artifact mode; `-DryRun` is a
+mode-specific, read-only plan: source and current-main paths check prerequisites
+and report the relevant TUI selection, without downloading or verifying source
+archives or resolving/installing a kernel release or artifact; local-artifact
+mode validates its supplied checksum. No writes occur. Portal is not built or
+installed by this path. The Windows Installer Smoke workflow covers the
+contract suite under PowerShell 5.1 and PowerShell 7 on PR/push. See
 [`scripts/test-install-ps1.ps1`](scripts/test-install-ps1.ps1) for the full
 contract and [`.github/workflows/windows-installer-smoke.yml`](.github/workflows/windows-installer-smoke.yml)
 for its Windows PowerShell 5.1 / PowerShell 7 CI coverage.
 
 ### 3. Create the GitHub release
 
-The `source-release` job creates the GitHub release, and `windows-release` adds
-the dual-binary ZIP, checksum sidecar, and bundle manifest. To create a release
-manually (or to add richer notes), run:
+The `source-release` job creates the GitHub release and publishes the
+deterministic source archive plus checksum. To create a release manually (or to
+add richer notes), run:
 
 ```bash
 gh release create v0.X.Y --title "v0.X.Y" --notes "release notes here..."
 ```
 
-Binary assets are attached by the workflow. If the workflow could not run, the
-release still installs — `install.sh` falls back to building from the release
-source tarball.
+The workflow owns the source assets. If it could not run, the release can be
+created manually with the same source archive and checksum; installers build
+the TUI from verified source and resolve the kernel separately.
 
-Immediately after the release above is published, `windows-release`'s
+Immediately after the release above is published, `source-release`'s
 "Notify lingtai-web download mirror" step sends one `repository_dispatch`
 (`release-asset-published`) to `Lingtai-AI/lingtai-web` naming this release's
-tag and the three uploaded assets (the Windows zip, its `.sha256` sidecar,
-and `lingtai-bundle-manifest.json`) with sha256/size recomputed fresh from
-the still-on-disk bytes. This exists solely so `lingtai.ai` can mirror the
-same bytes for mainland-China download acceleration; GitHub remains the sole
+tag and the source archive/checksum with sha256/size recomputed fresh from the
+still-on-disk bytes. This exists solely so `lingtai.ai` can relay the same
+verified producer assets for mainland-China download acceleration; it is a
+generic relay and does not build or reinterpret source. GitHub remains the sole
 official release authority, and a missing or failed dispatch never edits,
 retries, or undoes the GitHub release itself. Requires the
 `LINGTAI_WEB_DISPATCH_TOKEN` repository secret (a token with
@@ -139,8 +126,8 @@ Use this only when the root release workflow failed or cannot run. Do not race a
 successful workflow with a hand edit.
 
 ```bash
-# Get the source tarball checksum
-curl -sL "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/v0.X.Y.tar.gz" | shasum -a 256
+# Get the producer-owned source archive checksum
+curl -sL "https://github.com/Lingtai-AI/lingtai/releases/download/v0.X.Y/lingtai-v0.X.Y-source.tar.gz" | shasum -a 256
 
 # Edit the formula
 cd $(brew --repository)/Library/Taps/lingtai-ai/homebrew-lingtai
@@ -152,15 +139,16 @@ git push
 
 The inactive `tui/.github/workflows/release.yml` path is intentionally not part
 of the release process; GitHub only runs workflows from the repository-root
-`.github/workflows/` directory. Existing npm package files are outside this
-release checklist and are not decided here.
+`.github/workflows/` directory. Existing npm package files and historical
+release assets are outside this current installer input contract.
 
 ## Installing without Homebrew
 
-The tag workflow publishes both GitHub source archives and the verified Windows
-bundle assets described above. Homebrew and the manual commands below still
-build `lingtai-tui` and `lingtai-portal` from the tagged source when a source
-build is preferred:
+The tag workflow publishes a deterministic GitHub source archive and checksum.
+The installer and Homebrew consume TUI source; the kernel is resolved and
+verified independently. The retained Portal codebase is deprecated and can be
+built separately for repository development, but it is not part of the
+installer, release workflow, or Homebrew:
 
 ```bash
 curl -fsSL https://lingtai.ai/install.sh | bash
@@ -222,7 +210,8 @@ cd ../portal && make build
 # Binary at portal/bin/lingtai-portal
 ```
 
-Requires Go toolchain and Node.js (for portal web frontend).
+Requires the Go toolchain for a TUI build; the separate deprecated Portal
+development build additionally requires Node.js/npm.
 
 ### Source selection (GitHub vs the lingtai.ai mirror) and the Python runtime
 
@@ -237,82 +226,37 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 builds the TUI from source, and installs the kernel from the checked-out local
 source tree. It prints both SHAs and records them in `~/.lingtai-tui/install.json`
 under `source_mode: "latest-main"`, `tui_commit`, and `kernel_commit`. This mode
-is deliberately separate from the no-argument/latest-release, `--version`,
+is deliberately separate from the default stable release, `--version`,
 `--ref`, and `--update` paths; conflicts fail before network access, and a
 failed main checkout or kernel install never falls back to a stable release or
-package-index install. It is POSIX-only; `install.ps1` is unchanged.
+package-index install. `install.ps1 -Latest` preserves the same independent
+full-SHA TUI/kernel main-source behavior with Windows-specific prerequisites.
 
-The behavior below applies to the bundle assets published by the tag workflow
-and to compatible bundle releases published separately. After the Windows
-release assets above are uploaded and the release is public, this job's final
-step dispatches a `repository_dispatch` to `Lingtai-AI/lingtai-web` so it can
-mirror those same bytes for download acceleration — see the post-publication
-dispatch described above; that mirror never publishes an
-independent release, so it has no "latest" of its own. The legacy Gitee
-synchronization/publish maintainer tools remain unrelated to this path; the
-tag workflow does not invoke them (see "Gitee publication" above).
+For the ordinary stable install, `--source auto|github|mirror` (or
+`LINGTAI_SOURCE`; `gitee` is retired) controls the TUI source transport only.
+The normal `auto`/`mirror` route obtains producer-owned source metadata through
+`lingtai.ai`, verifies the source archive, and builds `lingtai-tui` locally. The
+release workflow separately peels annotated tags to commit SHAs for its archive
+and provenance. If that TUI route fails, it falls back only to the latest
+GitHub TUI source release. Explicit version/ref/source/update modes retain
+their existing distinctions, and every stable TUI route builds locally from
+verified source. The GitHub fallback uses its verified source archive or an
+exact peeled-tag source checkout; `--from-source` remains a backwards-
+compatible selector for that GitHub source path.
 
-`install.sh --source auto|github|mirror` (or `LINGTAI_SOURCE` env var; `gitee`
-is retired) controls where the TUI/portal archives, the bundle manifest, and
-the pinned kernel release come from. `auto` (the default) runs a bounded,
-fail-open public-IP country lookup and prefers the lingtai.ai mirror for
-mainland-China installs; any lookup or provider-reachability failure falls
-back to GitHub. A fallback always re-fetches the SAME resolved tag/bundle from
-the other provider — it never independently resolves "latest" a second time
-(the mirror has no listing/"latest" capability of its own; version identity
-always comes from GitHub), so a TUI archive from one release can never be
-paired with a kernel artifact from a different one.
+The kernel has its own latest-release resolution through `lingtai.ai`, its own
+GitHub fallback, and its own manifest/artifact checksum verification. The
+verified wheel or source distribution is installed by explicit local path;
+package indexes are used only for third-party dependencies. No provider switch
+or release bundle couples the TUI to a kernel version, and no repository-owned
+kernel pin is an installer or release input. The PowerShell
+installer follows the same independent TUI/kernel contract; `-SkipVenv` is the
+explicit runtime opt-out, while `-ArchivePath` plus `-ChecksumPath` is an
+explicit local TUI-artifact mode.
 
-The Python `lingtai` runtime installs from the bundle's pinned kernel release
-artifact (a platform wheel matched to the venv's actual interpreter, or the
-pinned sdist as a fallback) by **explicit local file path**. LingTai is
-**never** installed by requesting the package name `lingtai` from any package
-index — there is no PyPI fallback for LingTai itself. SHA256 is verified
-before install. A package index is used only to resolve `lingtai`'s
-third-party dependencies once the local artifact is being installed, and
-`install.sh` consults exactly one: a non-empty `LINGTAI_PYPI_INDEX_URL` always
-wins, otherwise the provider that actually served the bundle manifest (after
-any same-tag fallback) picks a default it can reach — the mirror →
-`https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`, GitHub →
-`https://pypi.org/simple`. There is no `--extra-index-url`.
-
-That default exists because `pypi.org` is not reliably reachable from
-mainland-China hosts: on the earlier Gitee path, sending third-party
-dependencies to `pypi.org` left an Aliyun-host install failing at dependency
-resolution. The new mirror retains that index default; this historical
-observation is not production/mainland acceptance of lingtai.ai downloads.
-Tsinghua TUNA is a cloud-neutral domestic default, not a reachability
-guarantee; `LINGTAI_PYPI_INDEX_URL` is the explicit escape hatch. This applies
-to the POSIX verified-bundle path only — `install.ps1` and `--latest` are
-unchanged, and the `/update-tui`/Homebrew migration bootstrap still fetches the
-version-pinned GitHub raw `install.sh`
-([`tui/internal/config/tui_updater.go`](tui/internal/config/tui_updater.go))
-before any provider selection happens.
-
-On the default one-command path (no `--ref`, not `--update`) a resolved
-bundle + a successful kernel-artifact install are **mandatory**: if no bundle
-manifest can be resolved on either provider (same-tag fallback attempted), or
-the resolved bundle's kernel artifact fails to verify or install, `install.sh`
-**fails loud** with the provider/tag/error rather than degrading to any other
-install source. `--ref`/source-ref builds have no bundle to pin against and
-fail loud the same way. `--skip-python` (alias `--skip-venv`) is the explicit,
-honest opt-out for a TUI/portal-only install — you then provision the Python
-runtime yourself (for example an editable install against a local
-`lingtai-kernel` checkout). When a Homebrew-to-native migration finds a legacy
-`~/.lingtai-tui/runtime` but no native receipt, this mode deliberately preserves
-that real runtime root and lets the native TUI/portal binaries and receipt be
-installed beside it; a later explicit `fix.sh` repair can provision a parallel
-runtime without adopting or overwriting the legacy one.
-
-`install.json`'s `kernel_source` field is written only on a verified bundle
-install (`kernel_source: "bundle"`, plus `kernel_bundle_id`/`kernel_version`/
-`kernel_provider`); it is omitted otherwise. The TUI's own runtime updater
-(`tui/internal/config/venv.go`) reads this field and skips **both routine and
-forced** PyPI queries/installs for a bundle-provisioned runtime — `force=true`
-(`doctor`/`/update --force`) reports that the kernel is pinned to the
-compatible bundle and directs the user to the one-command installer rather
-than reinterpreting "force" as "discard the pin and install latest PyPI."
-Legacy runtimes with no `kernel_source` metadata are unaffected: the updater's
-existing PyPI-compare/upgrade behavior is unchanged for them, since retracting
-that established capability is out of scope here — but the CLI no longer
-*introduces* a new PyPI install source for LingTai on a fresh install.
+The release workflow's `source-release` job sends only the verified source
+archive/checksum metadata to `Lingtai-AI/lingtai-web`. That service is a generic
+relay of producer assets for `lingtai.ai`; it does not build or reinterpret
+source. Existing historical release assets remain valid history but are not
+current installer inputs. The explicit Gitee synchronization and publication
+tools remain separate maintainer tools and are not invoked by the tag workflow.

@@ -247,38 +247,27 @@ invoke_case() (
   fi
 
   detect_os() { printf '%s\n' "$platform"; }
-  resolve_source_provider() { BUNDLE_PROVIDER="github"; }
-  fetch_bundle_manifest() {
-    BUNDLE_TAG="v9.9.9"
-    BUNDLE_MANIFEST_JSON='offline-fixture'
-    return 0
-  }
-  bundle_manifest_field() { printf '%s\n' "v1.2.3"; }
-  try_release_asset() {
+  resolve_source_provider() { TUI_PROVIDER="github"; }
+  build_from_source() {
     local tag="$1"
     mkdir -p "$BIN_DIR"
     cat > "$BIN_DIR/lingtai-tui" <<'BIN'
 #!/usr/bin/env bash
 echo "lingtai-tui v9.9.9"
 BIN
-    cat > "$BIN_DIR/lingtai-portal" <<'BIN'
-#!/usr/bin/env bash
-echo "lingtai-portal v9.9.9"
-BIN
-    chmod 755 "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai-portal"
+    chmod 755 "$BIN_DIR/lingtai-tui"
     ln -sfn "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai"
     VERSION="$tag"
     RESOLVED_REF="$tag"
     RESOLVED_COMMIT=""
-    INSTALL_KIND="release-asset"
-    PORTAL_PATH="$BIN_DIR/lingtai-portal"
+    INSTALL_KIND="source-build"
   }
   ensure_runtime_venv() {
     RUNTIME_VENV_DIR="$HOME/.lingtai-tui/runtime/venv"
     mkdir -p "$RUNTIME_VENV_DIR"
-    KERNEL_SOURCE="bundle"
-    KERNEL_BUNDLE_ID="offline-bundle"
-    KERNEL_VERSION_INSTALLED="1.2.3"
+    KERNEL_SOURCE="release"
+    KERNEL_RELEASE_TAG="v8.8.8"
+    KERNEL_VERSION_INSTALLED="8.8.8"
     KERNEL_PROVIDER="github"
   }
 
@@ -313,10 +302,14 @@ run_desktop_command() (
   "$case_root/home/.local/bin/lingtai-desktop" "$@"
 )
 
-check_tui_portal_receipt() {
-  local case_root="$1"
+check_tui_receipt() {
+  local case_root="$1" legacy_portal="${2:-0}"
   assert_file "$case_root/home/.local/bin/lingtai-tui" "TUI install"
-  assert_file "$case_root/home/.local/bin/lingtai-portal" "Portal install"
+  if [[ "$legacy_portal" == "1" ]]; then
+    assert_file "$case_root/home/.local/bin/lingtai-portal" "historical legacy Portal input"
+  else
+    assert_absent "$case_root/home/.local/bin/lingtai-portal" "TUI-only install Portal binary"
+  fi
   assert_file "$case_root/home/.lingtai-tui/install.json" "install receipt"
   python3 - "$case_root/home/.lingtai-tui/install.json" "$case_root/home/.local/bin" <<'PY'
 import json
@@ -329,12 +322,19 @@ bin_dir = Path(sys.argv[2])
 assert receipt["stamped_version"] == "v9.9.9"
 assert [os.path.normpath(value) for value in receipt["managed_binaries"]] == [
     os.path.normpath(bin_dir / "lingtai-tui"),
-    os.path.normpath(bin_dir / "lingtai-portal"),
 ]
-assert receipt["kernel_source"] == "bundle"
+assert receipt["kernel_source"] == "release"
+assert receipt["kernel_release_tag"] == "v8.8.8"
+assert receipt["kernel_version"] == "8.8.8"
+assert receipt["kernel_provider"] == "github"
+assert receipt["tui_provider"] == "github"
+assert "kernel_bundle_id" not in receipt
+assert "bundle_provider" not in receipt
 PY
 }
 
+# Deliberately historical v1.0.6 input: the old Portal binary and bundle
+# provenance exercise migration to the current TUI-only receipt below.
 prepare_v106_install() {
   local case_root="$1"
   local home="$case_root/home"
@@ -404,7 +404,7 @@ prepare_v019_lazy_command() (
 update_missing="$TEST_ROOT/update-v106-missing-desktop"
 prepare_v106_install "$update_missing"
 invoke_update_case "$update_missing" darwin 0 > "$update_missing.out" 2>&1
-check_tui_portal_receipt "$update_missing"
+check_tui_receipt "$update_missing" 1
 assert_file "$update_missing/home/.local/bin/lingtai-desktop" "stable update Desktop launcher"
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$update_missing/home/.local/bin/lingtai-desktop" \
   || fail "stable update did not register the installer-owned lazy command"
@@ -446,7 +446,7 @@ grep -Fq '"support_bootstrap.py": "6c246f7af6602eeee0d697bcd5c830029939bd786ba3e
 update_old_sha="$(file_sha256 "$update_old_target")"
 assert_absent "$update_old_lazy/home/.local/share/lingtai-desktop" "unrun v0.1.9 Desktop managed state"
 invoke_update_case_with_production_desktop_pins "$update_old_lazy" darwin 0 > "$update_old_lazy.out" 2>&1
-check_tui_portal_receipt "$update_old_lazy"
+check_tui_receipt "$update_old_lazy" 1
 [[ "$(file_sha256 "$update_old_target")" != "$update_old_sha" ]] \
   || fail "stable update preserved the obsolete v0.1.9 lazy command"
 [[ -f "$update_old_target" && -x "$update_old_target" && ! -L "$update_old_target" ]] \
@@ -485,7 +485,7 @@ update_publish_failure_rc=$?
 set -e
 [[ "$update_publish_failure_rc" != "0" ]] \
   || fail "stable update reported success after Desktop command atomic publication failed"
-check_tui_portal_receipt "$update_publish_failure"
+check_tui_receipt "$update_publish_failure" 1
 assert_file_unchanged "$update_publish_failure_target" "$update_publish_failure_sha" \
   "$update_publish_failure_mode" "atomic-publication-failure old lazy Desktop command"
 [[ -d "$update_publish_failure_collision" ]] \
@@ -501,7 +501,7 @@ fi
 if grep -q '^Done\.' "$update_publish_failure.out"; then
   fail "atomic-publication failure printed a false overall install success"
 fi
-grep -q 'LingTai TUI/runtime installation succeeded and its receipt is valid' \
+grep -q 'LingTai TUI/runtime installation succeeded, but the lazy macOS Desktop command could not be registered.' \
   "$update_publish_failure.out" \
   || fail "atomic-publication failure omitted the valid TUI receipt boundary"
 grep -q 'lazy macOS Desktop command could not be registered' "$update_publish_failure.out" \
@@ -520,7 +520,7 @@ chmod 755 "$official_app"
 official_sha="$(file_sha256 "$official_target")"
 official_mode="$(file_mode "$official_target")"
 invoke_case "$official" darwin 1 > "$official.out" 2>&1
-check_tui_portal_receipt "$official"
+check_tui_receipt "$official"
 assert_file_unchanged "$official_target" "$official_sha" "$official_mode" "official Desktop launcher"
 assert_absent "$official/curl.log" "existing official Desktop transport"
 grep -q 'Existing complete LingTai Desktop command is already installed' "$official.out" \
@@ -542,7 +542,7 @@ update_official_mode="$(file_mode "$update_official_target")"
 update_official_app_sha="$(file_sha256 "$update_official_app")"
 update_official_app_mode="$(file_mode "$update_official_app")"
 invoke_update_case "$update_official" darwin 1 > "$update_official.out" 2>&1
-check_tui_portal_receipt "$update_official"
+check_tui_receipt "$update_official" 1
 assert_file_unchanged "$update_official_target" "$update_official_sha" "$update_official_mode" \
   "stable-update official Desktop launcher"
 assert_file_unchanged "$update_official_app" "$update_official_app_sha" "$update_official_app_mode" \
@@ -556,7 +556,7 @@ grep -q 'Existing complete LingTai Desktop command is already installed' "$updat
 reinstall_missing="$TEST_ROOT/reinstall-v106-missing-desktop"
 prepare_v106_install "$reinstall_missing"
 invoke_case "$reinstall_missing" darwin 0 > "$reinstall_missing.out" 2>&1
-check_tui_portal_receipt "$reinstall_missing"
+check_tui_receipt "$reinstall_missing" 1
 assert_absent "$reinstall_missing/home/.local/bin/lingtai-desktop" "ordinary reinstall Desktop command"
 assert_absent "$reinstall_missing/curl.log" "ordinary reinstall Desktop transport"
 assert_absent "$reinstall_missing/home/.local/share/lingtai-desktop" "ordinary reinstall Desktop managed state"
@@ -571,7 +571,7 @@ chmod 710 "$orphan_target"
 orphan_sha="$(file_sha256 "$orphan_target")"
 orphan_mode="$(file_mode "$orphan_target")"
 invoke_case "$orphan" darwin 1 > "$orphan.out" 2>&1
-check_tui_portal_receipt "$orphan"
+check_tui_receipt "$orphan"
 assert_file_unchanged "$orphan_target" "$orphan_sha" "$orphan_mode" "existing lazy Desktop command"
 assert_absent "$orphan/curl.log" "existing lazy Desktop transport"
 grep -q 'Existing LingTai Desktop lazy command is already registered' "$orphan.out" \
@@ -595,7 +595,7 @@ invoke_case "$nonexec_official" darwin 1 > "$nonexec_official.out" 2>&1
 nonexec_official_rc=$?
 set -e
 [[ "$nonexec_official_rc" != "0" ]] || fail "non-executable official Desktop target must fail registration"
-check_tui_portal_receipt "$nonexec_official"
+check_tui_receipt "$nonexec_official"
 assert_file_unchanged "$nonexec_official_target" "$nonexec_official_sha" "$nonexec_official_mode" "non-executable official Desktop target"
 assert_absent "$nonexec_official/curl.log" "non-executable official Desktop transport"
 
@@ -611,7 +611,7 @@ invoke_case "$nonexec_lazy" darwin 1 > "$nonexec_lazy.out" 2>&1
 nonexec_lazy_rc=$?
 set -e
 [[ "$nonexec_lazy_rc" != "0" ]] || fail "non-executable lazy Desktop target must fail registration"
-check_tui_portal_receipt "$nonexec_lazy"
+check_tui_receipt "$nonexec_lazy"
 assert_file_unchanged "$nonexec_lazy_target" "$nonexec_lazy_sha" "$nonexec_lazy_mode" "non-executable lazy Desktop target"
 assert_absent "$nonexec_lazy/curl.log" "non-executable lazy Desktop transport"
 
@@ -628,7 +628,7 @@ invoke_case "$foreign" darwin 1 > "$foreign.out" 2>&1
 foreign_rc=$?
 set -e
 [[ "$foreign_rc" != "0" ]] || fail "foreign Desktop target must fail registration"
-check_tui_portal_receipt "$foreign"
+check_tui_receipt "$foreign"
 assert_file_unchanged "$foreign_target" "$foreign_sha" "$foreign_mode" "foreign Desktop target"
 assert_absent "$foreign/curl.log" "foreign-target Desktop transport"
 
@@ -644,7 +644,7 @@ invoke_case "$incomplete" darwin 1 > "$incomplete.out" 2>&1
 incomplete_rc=$?
 set -e
 [[ "$incomplete_rc" != "0" ]] || fail "incomplete official Desktop target must fail registration"
-check_tui_portal_receipt "$incomplete"
+check_tui_receipt "$incomplete"
 assert_file_unchanged "$incomplete_target" "$incomplete_sha" "$incomplete_mode" "incomplete official Desktop target"
 assert_absent "$incomplete/curl.log" "incomplete-official Desktop transport"
 
@@ -662,7 +662,7 @@ invoke_case "$symlink_case" darwin 1 > "$symlink_case.out" 2>&1
 symlink_rc=$?
 set -e
 [[ "$symlink_rc" != "0" ]] || fail "symlink Desktop target must fail registration"
-check_tui_portal_receipt "$symlink_case"
+check_tui_receipt "$symlink_case"
 [[ -L "$symlink_target" && "$(readlink "$symlink_target")" == "$symlink_backing" ]] \
   || fail "symlink Desktop target changed"
 assert_file_unchanged "$symlink_backing" "$symlink_sha" "$symlink_mode" "symlink backing target"
@@ -672,7 +672,7 @@ assert_absent "$symlink_case/curl.log" "symlink-target Desktop transport"
 # perform zero Desktop reads and publish zero Desktop managed App state.
 success="$TEST_ROOT/default-success"
 invoke_case "$success" darwin 0 > "$success.out" 2>&1
-check_tui_portal_receipt "$success"
+check_tui_receipt "$success"
 assert_file "$success/home/.local/bin/lingtai-desktop" "Desktop launcher"
 grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$success/home/.local/bin/lingtai-desktop" \
   || fail "main install did not register the lazy command"
@@ -716,11 +716,11 @@ run_desktop_command "$success" 0 version > "$success.second.out" 2>&1
 [[ "$(tail -n 1 "$success/command.log")" == "version" ]] \
   || fail "second invocation did not use the installed current command"
 
-# Explicit opt-out: the existing TUI/Portal journey remains successful and the
+# Explicit opt-out: the existing TUI/runtime journey remains successful and the
 # Desktop transport is never consulted.
 opt_out="$TEST_ROOT/opt-out"
 invoke_case "$opt_out" darwin 1 --skip-desktop > "$opt_out.out" 2>&1
-check_tui_portal_receipt "$opt_out"
+check_tui_receipt "$opt_out"
 assert_absent "$opt_out/home/.local/share/lingtai-desktop" "Desktop opt-out"
 assert_absent "$opt_out/home/.local/bin/lingtai-desktop" "Desktop opt-out command"
 assert_absent "$opt_out/curl.log" "Desktop opt-out transport"
@@ -729,7 +729,7 @@ assert_absent "$opt_out/curl.log" "Desktop opt-out transport"
 update_opt_out="$TEST_ROOT/update-opt-out"
 prepare_v106_install "$update_opt_out"
 invoke_update_case "$update_opt_out" darwin 1 --skip-desktop > "$update_opt_out.out" 2>&1
-check_tui_portal_receipt "$update_opt_out"
+check_tui_receipt "$update_opt_out" 1
 assert_absent "$update_opt_out/home/.local/share/lingtai-desktop" "stable-update Desktop opt-out"
 assert_absent "$update_opt_out/home/.local/bin/lingtai-desktop" "stable-update Desktop opt-out command"
 assert_absent "$update_opt_out/curl.log" "stable-update Desktop opt-out transport"
@@ -738,7 +738,7 @@ assert_absent "$update_opt_out/curl.log" "stable-update Desktop opt-out transpor
 # is still successful, the command stays retryable, and no Desktop state exists.
 failure="$TEST_ROOT/bootstrap-failure"
 invoke_case "$failure" darwin 1 > "$failure.out" 2>&1
-check_tui_portal_receipt "$failure"
+check_tui_receipt "$failure"
 assert_file "$failure/home/.local/bin/lingtai-desktop" "retryable Desktop bootstrap"
 assert_absent "$failure/curl.log" "main-install failed-route transport"
 set +e
@@ -757,7 +757,7 @@ grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$failure/home/.local/bin/lingtai-de
 # empty and the original lazy command remains byte-for-byte retryable.
 checksum_failure="$TEST_ROOT/bootstrap-checksum-failure"
 invoke_case "$checksum_failure" darwin bootstrap-checksum > "$checksum_failure.out" 2>&1
-check_tui_portal_receipt "$checksum_failure"
+check_tui_receipt "$checksum_failure"
 assert_absent "$checksum_failure/curl.log" "main-install checksum-failure transport"
 checksum_bootstrap="$checksum_failure/home/.local/bin/lingtai-desktop"
 checksum_bootstrap_sha="$(file_sha256 "$checksum_bootstrap")"
@@ -784,7 +784,7 @@ grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$checksum_bootstrap" \
 # also restores the bootstrap when it shared Desktop's future launcher path.
 release_failure="$TEST_ROOT/release-failure"
 invoke_case "$release_failure" darwin release > "$release_failure.out" 2>&1
-check_tui_portal_receipt "$release_failure"
+check_tui_receipt "$release_failure"
 assert_absent "$release_failure/curl.log" "main-install release-failure transport"
 set +e
 run_desktop_command "$release_failure" release doctor > "$release_failure.first.out" 2>&1
@@ -798,20 +798,20 @@ grep -q 'lingtai-desktop-lazy-bootstrap-v1' "$release_failure/home/.local/bin/li
   || fail "release failure did not stop after four support plus one release API fixture read"
 
 # Linux: byte-for-byte control flow beyond our fixture overrides stays on the
-# pre-existing TUI/Portal/runtime path and never consults Desktop transport.
+# pre-existing TUI/runtime path and never consults Desktop transport.
 linux="$TEST_ROOT/linux-unchanged"
 invoke_case "$linux" linux 1 > "$linux.out" 2>&1
-check_tui_portal_receipt "$linux"
+check_tui_receipt "$linux"
 assert_absent "$linux/home/.local/share/lingtai-desktop" "Linux Desktop state"
 assert_absent "$linux/home/.local/bin/lingtai-desktop" "Linux Desktop command"
 assert_absent "$linux/curl.log" "Linux Desktop transport"
 
 # Stable update remains a Desktop no-op on Linux in an isolated old-install
-# root while the pre-existing TUI/Portal/runtime update journey succeeds.
+# root while the pre-existing TUI/runtime update journey succeeds.
 update_linux="$TEST_ROOT/update-linux-unchanged"
 prepare_v106_install "$update_linux"
 invoke_update_case "$update_linux" linux 1 > "$update_linux.out" 2>&1
-check_tui_portal_receipt "$update_linux"
+check_tui_receipt "$update_linux" 1
 assert_absent "$update_linux/home/.local/share/lingtai-desktop" "stable-update Linux Desktop state"
 assert_absent "$update_linux/home/.local/bin/lingtai-desktop" "stable-update Linux Desktop command"
 assert_absent "$update_linux/curl.log" "stable-update Linux Desktop transport"
