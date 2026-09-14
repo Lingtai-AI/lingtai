@@ -374,7 +374,7 @@ Concretely:
 | `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
 | `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
-| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: no-version defaults to verified `lingtai.ai/dl/.../latest.json` + selected assets; explicit versions/source/current-main and explicit GitHub use GitHub, with no automatic fallback |
+| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: no-version auto/mirror resolves the exact stable source tag through verified `lingtai.ai` metadata and always builds TUI/Portal locally; if that source resolution is unavailable, both installers resolve the latest GitHub source release and build it; explicit versions/source/current-main and explicit GitHub retain existing GitHub behavior |
 | `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
 | `--update` (in-place) | `-Update` | synced |
 | `--non-interactive` | `-NonInteractive` | synced |

@@ -2,11 +2,12 @@
 # One-shot installer for lingtai-tui and lingtai-portal, plus the Python
 # `lingtai` runtime venv at ~/.lingtai-tui/runtime/venv.
 #
-# Homebrew is NOT required. The no-argument path installs the current TUI,
-# Portal, and kernel release from lingtai.ai latest metadata and verified /dl
-# assets. It makes no GitHub request and never silently falls back to GitHub;
-# pass --source github explicitly for GitHub release behavior. An explicit
-# --version and source/current-main modes retain their existing GitHub paths.
+# Homebrew is NOT required. The no-argument path resolves the current release
+# from lingtai.ai, then always builds the TUI and Portal locally from that exact
+# source tag. It never selects a prebuilt TUI/Portal archive. If lingtai.ai
+# cannot provide the source-release metadata, the installer resolves the latest
+# GitHub source release and builds it instead. Explicit version, update,
+# source-provider, and current-main modes retain their existing behavior.
 #
 # Public entry point (once served from the website):
 #   curl -fsSL https://lingtai.ai/install.sh | bash
@@ -28,15 +29,13 @@
 # selects or downloads it — native Windows installs use install.ps1 instead.
 #
 # Source policy (--source auto|github|mirror, or LINGTAI_SOURCE): the ordinary
-# no-version `auto`/`mirror` route reads
-#   https://lingtai.ai/dl/<owner>/<repo>/latest.json
-# and downloads every selected TUI/kernel asset from
-#   https://lingtai.ai/dl/<owner>/<repo>/<tag>/<asset>.
-# The `lingtai.release_mirror.latest/v1` records bind each asset's name, size,
-# and SHA256, all of which are verified before use. No geography detection or
-# cross-provider fallback is performed. Explicit --version, --source github,
-# --ref/--from-source/--update, and --latest retain existing GitHub behavior.
-# --source gitee is retired.
+# no-version `auto`/`mirror` route reads lingtai.ai latest metadata to select one
+# exact stable source tag, then always builds TUI/Portal locally. If that source
+# resolution is unavailable, it resolves the latest GitHub release and builds
+# that source tag. It never selects a prebuilt TUI/Portal archive on this default
+# path. Verified mirror assets may still provision the pinned Python runtime.
+# Explicit --version, --source github, --ref/--from-source/--update, and --latest
+# retain their existing GitHub behavior. --source gitee is retired.
 #
 # LingTai is NEVER installed by requesting the package name "lingtai" from
 # any index — there is no PyPI fallback. On the default one-command path a
@@ -115,6 +114,7 @@ INSTALL_PREFIX=""    # --prefix: install root (bin_dir = <prefix>/bin)
 BIN_DIR_OVERRIDE=""  # --bin-dir: explicit bin directory
 NON_INTERACTIVE=0    # --non-interactive: never prompt / never sudo-install packages
 FROM_SOURCE=0        # --from-source: skip release-asset download, always build
+SOURCE_ONLY_DEFAULT=0 # ordinary lingtai.ai route: always build; GitHub source fallback
 SKIP_PORTAL=0        # --skip-portal: TUI only
 SKIP_VENV=0          # --skip-python (alias: --skip-venv): don't touch the Python runtime venv
 SKIP_DESKTOP=0       # --skip-desktop: don't register the macOS-only lazy Desktop command
@@ -123,7 +123,7 @@ SOURCE_ARG="${LINGTAI_SOURCE:-auto}"  # auto is the default lingtai.ai route; gi
 BUNDLE_PROVIDER=""    # resolved by resolve_source_provider(): "github" | "mirror"
 BUNDLE_TAG=""         # resolved release tag shared by the TUI archive + bundle manifest
 BUNDLE_MANIFEST_JSON="" # raw bundle manifest body, once fetched
-BUNDLE_REQUIRED=0     # 1 on the default release-asset one-command path (no --ref, no --update):
+BUNDLE_REQUIRED=0     # 1 on the default stable one-command path (no --ref, no --update):
                       # a pinned kernel bundle is mandatory there, so a missing/incoherent/failed
                       # bundle or kernel install must fail loud rather than silently falling back
                       # to `pip install lingtai`. 0 for --ref/source-ref builds, where no bundle is
@@ -162,8 +162,9 @@ usage() {
 One-shot installer for lingtai-tui, lingtai-portal, the Python runtime, and
 LingTai Desktop on macOS.
 
-Homebrew is not required. By default the latest release bundle is installed from the selected source:
-a prebuilt per-platform tarball when available, otherwise a source build.
+Homebrew is not required. By default lingtai.ai resolves the latest stable
+source release and the TUI/Portal are always built locally. If that resolution
+is unavailable, the latest GitHub source release is built instead.
 
 Usage:
   curl -fsSL https://lingtai.ai/install.sh | bash
@@ -197,11 +198,12 @@ Options:
                          v0.1.10 and its audited four-file installer-support
                          checksums as one trust set.
   --source <mode>       auto|github|mirror (default: auto, or $LINGTAI_SOURCE).
-                         auto/mirror use lingtai.ai for the ordinary no-version
-                         current release, with no geography detection or GitHub
-                         fallback. Explicit versions and source/current-main
-                         modes use GitHub; --source github forces GitHub.
-                         --source gitee is retired; use --source mirror.
+                         auto/mirror use lingtai.ai to resolve the ordinary
+                         no-version source release, always build it locally,
+                         and fall back to the latest GitHub source release when
+                         that resolution is unavailable. Explicit versions and
+                         source/current-main modes retain existing GitHub behavior;
+                         --source github forces GitHub. --source gitee is retired.
   --update             Update an existing source/user-local install in place;
                          on macOS, register or refresh the lazy Desktop command
   --non-interactive    Never prompt; never install OS packages; fail instead
@@ -594,10 +596,11 @@ json_string_field() {
 }
 
 # resolve_source_provider makes the public no-version route deterministic.
-# auto/mirror select lingtai.ai only for that current-release route. Explicit
-# versions and all source/current-main/update modes retain the existing GitHub
-# behavior. No geography or reachability probe participates in selection.
+# auto/mirror select lingtai.ai only for that current-release route and mark it
+# source-only. Explicit versions and all source/current-main/update modes retain
+# the existing GitHub behavior. No geography probe participates in selection.
 resolve_source_provider() {
+  SOURCE_ONLY_DEFAULT=0
   case "$SOURCE_ARG" in
     github) BUNDLE_PROVIDER="github" ;;
     auto|mirror)
@@ -605,6 +608,7 @@ resolve_source_provider() {
         BUNDLE_PROVIDER="github"
       else
         BUNDLE_PROVIDER="mirror"
+        SOURCE_ONLY_DEFAULT=1
       fi
       ;;
     *) return 1 ;;
@@ -679,7 +683,6 @@ fetch_mirror_latest() {
   body="$(curl -fsSL --max-time "$MIRROR_TIMEOUT" "$url" 2>/dev/null || true)"
   if [[ -z "$body" ]] || ! tag="$(parse_mirror_latest "$body" "$repo_slug" 2>/dev/null)"; then
     echo "error: lingtai.ai could not provide valid latest metadata at $url." >&2
-    echo "       Re-run with --source github (or LINGTAI_SOURCE=github) to choose GitHub explicitly." >&2
     return 1
   fi
   case "$repo_slug" in
@@ -1653,7 +1656,7 @@ PY
 # creation/kernel-install attempt), not an already-occupied runtime from a
 # prior run.
 #
-# On the default release-asset one-command path (BUNDLE_REQUIRED=1), a
+# On the default stable one-command path (BUNDLE_REQUIRED=1), a
 # resolved bundle + a successful kernel-artifact install are MANDATORY: any
 # failure (no bundle manifest, incoherent manifest, no compatible wheel/sdist,
 # checksum mismatch, install failure) is a fail-loud error, not a fallback.
@@ -2582,7 +2585,7 @@ build_from_source() {
     ensure_build_deps 0
     command -v curl &>/dev/null || { echo "error: curl is required to download the release source tarball" >&2; exit 1; }
     command -v tar &>/dev/null || { echo "error: tar is required to extract the release source tarball" >&2; exit 1; }
-    say "Downloading lingtai release source ($requested_tag) ..."
+    say "Downloading lingtai release source ($requested_tag) from GitHub ..."
     source_tarball="$TMPDIR/lingtai-$requested_tag-src-$$.tar.gz"
     curl -fsSL --max-time 120 \
       -o "$source_tarball" \
@@ -3002,8 +3005,9 @@ else
     validate_install_target || exit 1
   fi
   resolve_source_provider
-if [[ "$BUNDLE_PROVIDER" == "mirror" ]]; then
-  say "Source: lingtai.ai latest-release mirror ($LINGTAI_WEB_BASE) — override with --source github or LINGTAI_SOURCE=github."
+if [[ "$SOURCE_ONLY_DEFAULT" == "1" ]]; then
+  say "Source: lingtai.ai latest stable source release ($LINGTAI_WEB_BASE); building TUI/Portal locally."
+  note "If lingtai.ai source resolution is unavailable, the latest GitHub source release will be built."
 fi
 
 # Resolve one bundle (TUI tag + bundle manifest, which pins an exact kernel
@@ -3012,22 +3016,34 @@ fi
 # the kernel artifact install in ensure_runtime_venv — reuses this same
 # BUNDLE_TAG/BUNDLE_MANIFEST_JSON.
 #
-# This is the default release-asset one-command path (no --ref, not
-# --update): a pinned kernel bundle is REQUIRED here. LingTai must never be
+# This is the default stable one-command path (no --ref, not --update): a
+# pinned kernel bundle is REQUIRED even though TUI/Portal build from source. LingTai must never be
 # installed from a package index by name, so if no bundle manifest can be
 # resolved, ensure_runtime_venv below fails loud instead of silently
 # installing from PyPI — see BUNDLE_REQUIRED.
 if [[ -z "$REF" ]]; then
   BUNDLE_REQUIRED=1
+  bundle_resolved=0
   if fetch_bundle_manifest; then
+    bundle_resolved=1
+  elif [[ "$SOURCE_ONLY_DEFAULT" == "1" && "$BUNDLE_PROVIDER" == "mirror" ]]; then
+    warn "lingtai.ai source release is unavailable; falling back to the latest GitHub source release."
+    BUNDLE_PROVIDER="github"
+    BUNDLE_TAG=""
+    BUNDLE_MANIFEST_JSON=""
+    BUNDLE_TUI_ARCHIVE_SHA=""
+    BUNDLE_MANIFEST_KERNEL_TAG=""
+    BUNDLE_MANIFEST_KERNEL_VERSION=""
+    BUNDLE_MANIFEST_KERNEL_FILENAME=""
+    BUNDLE_MANIFEST_BUNDLE_ID=""
+    if fetch_bundle_manifest; then
+      bundle_resolved=1
+    fi
+  fi
+  if [[ "$bundle_resolved" == "1" ]]; then
     note "Resolved bundle $BUNDLE_TAG via $BUNDLE_PROVIDER (kernel $(bundle_manifest_field kernel_tag))."
   else
     warn "No bundle manifest available for $([[ -n "$VERSION" ]] && echo "$VERSION" || echo "the latest release") from $BUNDLE_PROVIDER."
-    if [[ "$BUNDLE_PROVIDER" == "mirror" ]]; then
-      echo "error: the selected lingtai.ai latest release could not be installed; no GitHub fallback was attempted." >&2
-      echo "       Re-run with --source github (or LINGTAI_SOURCE=github) to choose GitHub explicitly." >&2
-      exit 1
-    fi
     # Source-only TUI releases (no dual bundle manifest) instead commit an
     # exact kernel-release.json pin at the same tag — try that before failing
     # loud. Never re-resolves "latest" a second time; consumes BUNDLE_TAG,
@@ -3091,7 +3107,9 @@ else
   if [[ -z "$(release_tag_name "$TARGET_TAG")" ]]; then
     warn "'$TARGET_TAG' is not a vX.Y.Z release tag; treating it as a source ref."
     build_from_source "$TARGET_TAG"
-  elif [[ "$FROM_SOURCE" != "1" ]]; then
+  elif [[ "$SOURCE_ONLY_DEFAULT" == "1" || "$FROM_SOURCE" == "1" ]]; then
+    build_from_source "$TARGET_TAG"
+  else
     if try_release_asset "$TARGET_TAG"; then
       :
     else
@@ -3099,8 +3117,6 @@ else
       [[ "$asset_rc" != "2" ]] || exit 1
       build_from_source "$TARGET_TAG"
     fi
-  else
-    build_from_source "$TARGET_TAG"
   fi
 fi
 
