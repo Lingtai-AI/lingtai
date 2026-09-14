@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -101,8 +102,10 @@ func (m AddonModel) View() string {
 			continue
 		}
 
-		// Pretty-print the JSON
-		pretty := prettyJSON(content)
+		// Render through the render-boundary redactor. The panel is
+		// scrollback-prone, so a credential must never reach the screen —
+		// not on first paint and not after ctrl+r reload.
+		pretty := redactAddonJSON(content)
 		for _, line := range strings.Split(strings.TrimRight(pretty, "\n"), "\n") {
 			b.WriteString("    " + line + "\n")
 		}
@@ -158,15 +161,195 @@ func readAddonConfigs(lingtaiDir string) (map[string]string, map[string]string) 
 	return configs, errs
 }
 
-// prettyJSON returns a formatted (indented) JSON string, or the original on error.
-func prettyJSON(data string) string {
+// addonRedactedValue replaces every value whose key is classified as a
+// credential. It is a whole-value mask on purpose: this panel is read in a
+// terminal scrollback that cannot be retracted, so no first/last characters
+// survive (unlike maskKey/maskAPIKey, which are for one-shot entry fields).
+// The spelling matches doctorreport's existing redactionMarker.
+const addonRedactedValue = "[REDACTED]"
+
+// addonUndecodableJSON is rendered instead of the config body when the JSON
+// cannot be decoded or re-encoded. It is constant by design: this boundary is
+// fail-closed and must never fall back to the original bytes.
+const addonUndecodableJSON = "[REDACTED: config could not be decoded]"
+
+// redactAddonJSON renders an addon config for the /mcp panel: parse, mask every
+// credential value, re-encode. It never returns its input — a decode or encode
+// failure yields addonUndecodableJSON. readAddonConfigs already rejects
+// undecodable files before they reach the model, so the decode branch is the
+// second line of defence, not the first.
+func redactAddonJSON(data string) string {
 	var v any
 	if err := json.Unmarshal([]byte(data), &v); err != nil {
-		return data
+		return addonUndecodableJSON
 	}
-	out, err := json.MarshalIndent(v, "", "  ")
+	return marshalRedactedJSON(v)
+}
+
+// marshalRedactedJSON masks v and re-encodes it. Split out so the fail-closed
+// encode branch is directly testable: a tree decoded from JSON always encodes,
+// so in production this is defence in depth.
+func marshalRedactedJSON(v any) string {
+	out, err := json.MarshalIndent(redactAddonValue(v), "", "  ")
 	if err != nil {
-		return data
+		return addonUndecodableJSON
 	}
 	return string(out)
+}
+
+// redactAddonValue walks a decoded JSON value and returns an equivalent tree in
+// which every value under a credential-classified key is addonRedactedValue.
+//
+// The whole value is replaced regardless of its type — object and array values
+// are never descended into, because a key named "credentials" says nothing
+// about the field names nested below it. Non-sensitive containers are walked,
+// so a credential at any depth is still masked.
+func redactAddonValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			if addonKeyIsCredential(k) {
+				out[k] = addonRedactedValue
+				continue
+			}
+			out[k] = redactAddonValue(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = redactAddonValue(val)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// addonCredentialTerminals holds the single words that make a key a credential
+// when they are its last word. Last-word matching (rather than substring
+// matching) is what keeps token_limit and tokens_used visible.
+//
+// The concatenated lowercase spellings are listed explicitly because they have
+// no separator or case boundary to split on.
+var addonCredentialTerminals = map[string]bool{
+	"token": true, "tokens": true,
+	"secret": true, "secrets": true,
+	"password": true, "passwords": true, "passwd": true,
+	"credential": true, "credentials": true,
+	"cookie": true, "cookies": true,
+	"session":       true,
+	"authorization": true, "bearer": true,
+	// Unseparated spellings that tokenisation cannot split.
+	"apikey": true, "privatekey": true, "secretkey": true,
+	"clientsecret": true, "appsecret": true, "emailpassword": true,
+	"bottoken": true, "authtoken": true, "sessiontoken": true, "sessionid": true,
+	"accesstoken": true, "refreshtoken": true,
+}
+
+// addonKeyQualifiers are the words that make a following "key" a credential.
+// Bare "key" is deliberately not a credential — it is far too common a name for
+// non-secret material — so "key" only matches when qualified. "public" is
+// absent on purpose: a public key is publishable.
+var addonKeyQualifiers = map[string]bool{
+	"api": true, "private": true, "secret": true, "session": true,
+	"access": true, "refresh": true, "signing": true, "encryption": true,
+	"master": true, "auth": true,
+}
+
+// addonCredentialPhrases are ordered word sequences that are credentials even
+// though their last word is not a credential terminal: a session identifier is
+// a bearer credential, "id" is not.
+var addonCredentialPhrases = [][]string{
+	{"session", "id"},
+	{"session", "ids"},
+}
+
+// addonEnvReferenceWord is the last word that marks a field as an
+// environment-variable reference rather than a secret. The bundled templates
+// use email_password_env / bot_token_env / app_secret_env, and m028 resolves
+// exactly those into a sibling base key. A reference names a variable; the
+// value it resolves to is the secret, and the base key stays masked.
+const addonEnvReferenceWord = "env"
+
+// addonKeyIsCredential reports whether a JSON key names credential material.
+// It classifies keys only — never values — so a note that merely mentions
+// "token" is left alone.
+func addonKeyIsCredential(key string) bool {
+	words := splitAddonKey(key)
+	if len(words) == 0 {
+		return false
+	}
+	last := words[len(words)-1]
+	if last == addonEnvReferenceWord {
+		return false
+	}
+	if addonCredentialTerminals[last] {
+		return true
+	}
+	if (last == "key" || last == "keys") && addonAnyQualifier(words[:len(words)-1]) {
+		return true
+	}
+	return addonMatchesPhrase(words)
+}
+
+func addonAnyQualifier(words []string) bool {
+	for _, w := range words {
+		if addonKeyQualifiers[w] {
+			return true
+		}
+	}
+	return false
+}
+
+func addonMatchesPhrase(words []string) bool {
+	for _, phrase := range addonCredentialPhrases {
+		if len(words) < len(phrase) {
+			continue
+		}
+		tail := words[len(words)-len(phrase):]
+		matched := true
+		for i := range phrase {
+			if tail[i] != phrase[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// splitAddonKey splits a JSON key into lowercase words at the boundaries the
+// bundled configs actually use: snake_case, kebab-case, dots, spaces, digits,
+// and lower-to-upper camelCase transitions. An upper-case run stays one word,
+// so APIKey reads as "apikey" (matched as a terminal) instead of "a","p","i".
+func splitAddonKey(key string) []string {
+	var words []string
+	var cur []rune
+	runes := []rune(key)
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, strings.ToLower(string(cur)))
+			cur = cur[:0]
+		}
+	}
+	for i, r := range runes {
+		switch {
+		case r == '_' || r == '-' || r == '.' || r == ' ' || unicode.IsDigit(r):
+			flush()
+		case unicode.IsUpper(r):
+			if i > 0 && !unicode.IsUpper(runes[i-1]) {
+				flush()
+			}
+			cur = append(cur, r)
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return words
 }
