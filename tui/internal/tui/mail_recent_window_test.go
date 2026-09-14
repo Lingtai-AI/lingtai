@@ -149,17 +149,12 @@ func TestMailRecentMessageWindowContract(t *testing.T) {
 	// runs last.
 	t.Run("new message still arrives under the window", func(t *testing.T) {
 		m := sizeMail(t, newModel())
-		m, _ = m.Update(m.initialRebuild())
+		var catchupCmd tea.Cmd
+		m, catchupCmd = m.Update(m.initialRebuild())
 
 		arrival := time.Date(2027, 3, 4, 5, 6, 7, 0, time.UTC)
 		seedRecentWindowNewArrival(t, humanDir, orchDir, arrival)
-
-		var cmd tea.Cmd
-		m, cmd = m.issueRefreshRequest()
-		if cmd == nil {
-			t.Fatal("refresh request produced no command")
-		}
-		m, _ = m.Update(cmd())
+		m, _ = m.Update(mailPollRefreshFromCmd(t, catchupCmd))
 
 		if len(m.messages) != fs.RecentMessageLimit() {
 			t.Fatalf("after refresh the page holds %d entries, want the cap %d", len(m.messages), fs.RecentMessageLimit())
