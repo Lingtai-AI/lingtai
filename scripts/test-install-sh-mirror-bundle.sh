@@ -28,7 +28,7 @@ install_text="$(<"$ROOT_DIR/install.sh")"
 for required in 'resolve_tui_latest' 'download_tui_source_archive' 'build_from_source' 'install_kernel_from_release' 'KERNEL_REPO_SLUG'; do
   [[ "$install_text" == *"$required"* ]] || fail "install.sh lost required decoupled path '$required'"
 done
-for retired in 'fetch_bundle_manifest' 'install_kernel_from_bundle' 'kernel_tag_for_install' 'kernel-release.json' 'lingtai.tui.bundle' 'SKIP_PORTAL' 'lingtai-portal'; do
+for retired in 'fetch_bundle_manifest' 'install_kernel_from_bundle' 'kernel_tag_for_install' 'kernel-release.json' 'lingtai.tui.bundle' 'SKIP_PORTAL' 'lingtai-portal' 'python_platform_tags' 'select_kernel_wheel'; do
   [[ "$install_text" != *"$retired"* ]] || fail "install.sh retains retired path '$retired'"
 done
 
@@ -175,7 +175,7 @@ SH
   assert_eq mirror "$TUI_PROVIDER" "TUI-local source failure does not mutate provider state"
 )
 
-# --- Kernel: independent latest metadata/artifact and independent fallback ----
+# --- Kernel: independent latest source artifact and independent fallback -----
 (
   case_dir="$tmp/kernel-release"
   fakebin="$case_dir/bin"
@@ -190,29 +190,24 @@ SH
   wheel_name='lingtai-2.3.4-cp312-cp312-macosx_11_0_arm64.whl'
   printf 'verified wheel bytes\n' > "$case_dir/$wheel_name"
   wheel_sha="$(shasum -a 256 "$case_dir/$wheel_name" | cut -d' ' -f1)"
-  sdist_sha='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  sdist_name='lingtai-2.3.4.tar.gz'
+  printf 'verified source archive bytes\n' > "$case_dir/$sdist_name"
+  sdist_sha="$(shasum -a 256 "$case_dir/$sdist_name" | cut -d' ' -f1)"
   manifest="$case_dir/kernel-manifest.json"
   cat > "$manifest" <<EOF
 {"schema":"lingtai.kernel.release/v1","kernel_version":"2.3.4","kernel_tag":"$kernel_tag","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","generated_at":"2026-09-14T00:00:00Z","sdist_fallback":"lingtai-2.3.4.tar.gz","artifacts":[{"filename":"$wheel_name","sha256":"$wheel_sha","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},{"filename":"lingtai-2.3.4.tar.gz","sha256":"$sdist_sha","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}]}
 EOF
   kernel_latest="$(printf '{"schema":"lingtai.release_mirror.latest/v1","source_repo":"Lingtai-AI/lingtai-kernel","release_id":2,"tag":"%s","assets":[%s,%s]}' \
     "$kernel_tag" "$(asset_record lingtai-kernel-release-manifest.json "$manifest")" \
-    "$(asset_record "$wheel_name" "$case_dir/$wheel_name")")"
+    "$(asset_record "$sdist_name" "$case_dir/$sdist_name")")"
   register_text 'https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/latest.json' "$kernel_latest"
   register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/lingtai-kernel-release-manifest.json" "$manifest"
   register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$wheel_name" "$case_dir/$wheel_name"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$sdist_name" "$case_dir/$sdist_name"
 
   real_python="$(command -v python3)"
   cat > "$fakebin/python" <<EOF
 #!/usr/bin/env bash
-if [[ "\$1" == '-' && "\$#" == 1 ]]; then
-  echo 'cp312-cp312-macosx_11_0_arm64'
-  exit 0
-fi
-if [[ "\$1" == '-' && "\$#" -ge 3 ]]; then
-  echo '$wheel_name $wheel_sha'
-  exit 0
-fi
 if [[ "\$1" == '-c' ]]; then
   echo 'lingtai 2.3.4'
   exit 0
@@ -228,6 +223,7 @@ SH
   chmod +x "$fakebin/uv"
   KERNEL_INSTALL_LOG="$case_dir/kernel-install.log"; export KERNEL_INSTALL_LOG
   BUILD_DIR="$case_dir/build"; mkdir -p "$BUILD_DIR"
+  python_platform_tags() { fail "default kernel provisioning traversed wheel selection"; }
   TUI_PROVIDER=mirror; KERNEL_PROVIDER=''; KERNEL_SOURCE=''; KERNEL_RELEASE_TAG=''; KERNEL_VERSION_INSTALLED=''
   MIRROR_KERNEL_LATEST_JSON=''; MIRROR_KERNEL_LATEST_TAG=''; KERNEL_MANIFEST_JSON=''; KERNEL_MANIFEST_PROVIDER=''
   install_kernel_from_release "$fakebin/python" "$fakebin/uv" || fail "kernel mirror release should install"
@@ -236,23 +232,26 @@ SH
   assert_eq 2.3.4 "$KERNEL_VERSION_INSTALLED" "kernel manifest version"
   assert_eq mirror "$KERNEL_PROVIDER" "kernel mirror provider"
   [[ -s "$KERNEL_INSTALL_LOG" ]] || fail "kernel install did not receive a local artifact"
+  grep -qF "$sdist_name" "$KERNEL_INSTALL_LOG" || fail "kernel install did not receive the declared source artifact"
+  ! grep -qF "$wheel_name" "$KERNEL_INSTALL_LOG" || fail "kernel install selected a compatible wheel"
+  [[ -f "$BUILD_DIR/kernel-artifact/$sdist_name" ]] || fail "declared source artifact was not staged locally"
   ! grep -q 'github.com' "$FAKE_CURL_LOG" || fail "healthy kernel mirror route made a GitHub request"
   grep -qF "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/latest.json" "$FAKE_CURL_LOG" || fail "kernel latest metadata route missing"
 
-  # Make only the kernel mirror artifact fail. The fallback uses the kernel
+  # Make only the kernel mirror source artifact fail. The fallback uses the kernel
   # GitHub release and leaves the TUI provider untouched.
-  printf 'tampered kernel\n' > "$case_dir/bad-wheel"
-  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$wheel_name" "$case_dir/bad-wheel"
+  printf 'tampered kernel source\n' > "$case_dir/bad-source"
+  register_response "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$sdist_name" "$case_dir/bad-source"
   register_text "$KERNEL_GH_API_BASE/releases/latest" '{"tag_name":"v2.3.4","assets":[{"name":"lingtai-kernel-release-manifest.json"}]}'
   register_response "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/$kernel_tag/lingtai-kernel-release-manifest.json" "$manifest"
-  register_response "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/$kernel_tag/$wheel_name" "$case_dir/$wheel_name"
+  register_response "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/$kernel_tag/$sdist_name" "$case_dir/$sdist_name"
   : > "$FAKE_CURL_LOG"
   KERNEL_PROVIDER=''; KERNEL_SOURCE=''; KERNEL_RELEASE_TAG=''; KERNEL_VERSION_INSTALLED=''
   MIRROR_KERNEL_LATEST_JSON="$kernel_latest"; MIRROR_KERNEL_LATEST_TAG="$kernel_tag"
   install_kernel_from_release "$fakebin/python" "$fakebin/uv" || fail "kernel GitHub fallback should install"
   assert_eq github "$KERNEL_PROVIDER" "kernel fallback provider"
   assert_eq mirror "$TUI_PROVIDER" "kernel fallback does not change TUI provider"
-  grep -qF "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$wheel_name" "$FAKE_CURL_LOG" || fail "kernel mirror attempt missing before fallback"
+  grep -qF "https://lingtai.ai/dl/Lingtai-AI/lingtai-kernel/$kernel_tag/$sdist_name" "$FAKE_CURL_LOG" || fail "kernel mirror source attempt missing before fallback"
   grep -qF "$KERNEL_GH_API_BASE/releases/latest" "$FAKE_CURL_LOG" || fail "kernel GitHub latest fallback missing"
   grep -q 'https://github.com/Lingtai-AI/lingtai-kernel/releases/download' "$FAKE_CURL_LOG" || fail "kernel GitHub artifact fallback missing"
   ! grep -q 'https://lingtai.ai/dl/Lingtai-AI/lingtai/latest.json' "$FAKE_CURL_LOG" || fail "kernel fallback re-resolved TUI latest"

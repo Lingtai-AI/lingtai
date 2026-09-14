@@ -7,10 +7,10 @@
     The release installer is TUI-only: it builds the producer-owned TUI source
     archive locally and resolves the kernel independently. This suite keeps the
     existing tiny assertion harness, exercises the offline local-artifact
-    DryRun seam and the production receipt writer in an isolated temporary
-    directory, and checks source ordering for provider, phase, receipt, and
-    -FromSource behavior. It does not contact a provider or install binaries or
-    a runtime.
+    DryRun seam, production source-install/provider-loop functions, and the
+    production receipt writer in isolated temporary directories. Its source
+    install regression uses a fake Windows command and mocks all network/package
+    seams; it never contacts a provider or changes shared configuration/auth.
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -128,6 +128,215 @@ try {
     Assert-Contains $shText 'lingtai-tui' 'shell installer retains the TUI binary path'
     Assert-NotContains $shText 'lingtai-portal' 'shell installer has no Portal binary path'
 
+    Write-Section 'contract: stable kernel installs use the declared source artifact'
+    foreach ($retired in @('Get-VenvWheelTag', 'Select-KernelWheel', 'Install-KernelWheel', 'python_platform_tags', 'select_kernel_wheel')) {
+        Assert-NotContains $psText $retired "PowerShell stable kernel path has no wheel selector '$retired'"
+    }
+    Assert-Contains $psText 'function Get-KernelSourceArtifact' 'PowerShell selects the manifest-declared kernel source artifact'
+    Assert-Contains $psText '$sourceArtifact = Get-KernelSourceArtifact -KernelManifest $manifest' 'PowerShell stable provisioning selects the source artifact'
+    Assert-Contains $psText 'Install-KernelSource -VenvPython $venvPython -SourceArtifact $sourceArtifact' 'PowerShell stable provisioning installs the selected source artifact'
+    Assert-Contains $psText 'Write-Info "Building and installing lingtai from the verified local source archive' 'PowerShell labels the local source install honestly'
+    Assert-Contains $psText "'pip' 'install' `$dest" 'PowerShell passes the downloaded source archive to pip by local path'
+
+    $sourceTokens = $null
+    $sourceParseErrors = $null
+    $sourceAst = [System.Management.Automation.Language.Parser]::ParseFile($InstallScript, [ref]$sourceTokens, [ref]$sourceParseErrors)
+    Assert-Equal 0 @($sourceParseErrors).Count 'install.ps1 parses before source-artifact execution'
+    $sourceSelectorFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-KernelSourceArtifact'
+    }, $true)
+    Assert-True ($null -ne $sourceSelectorFunction) 'source-artifact selector is discoverable through the PowerShell AST'
+    if ($null -ne $sourceSelectorFunction) {
+        Invoke-Expression $sourceSelectorFunction.Extent.Text
+        $sourceManifestFixture = [pscustomobject]@{
+            sdist_fallback = 'lingtai-2.3.4.tar.gz'
+            artifacts = @(
+                [pscustomobject]@{ kind = 'wheel'; filename = 'lingtai-2.3.4-cp312-cp312-win_amd64.whl' }
+                [pscustomobject]@{ kind = 'sdist'; filename = 'lingtai-2.3.4.tar.gz' }
+            )
+        }
+        $selectedSource = Get-KernelSourceArtifact -KernelManifest $sourceManifestFixture
+        Assert-Equal 'sdist' $selectedSource.kind 'source-artifact selector ignores a compatible wheel'
+        Assert-Equal 'lingtai-2.3.4.tar.gz' $selectedSource.filename 'source-artifact selector returns sdist_fallback'
+    }
+
+    $venvFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-Venv'
+    }, $true)
+    Assert-True ($null -ne $venvFunction) 'stable venv provisioning is discoverable through the PowerShell AST'
+    if ($null -ne $venvFunction) {
+        $venvText = $venvFunction.Extent.Text
+        Assert-Contains $venvText "foreach (`$provider in @('mirror', 'github'))" 'kernel provisioning owns its independent provider loop'
+        Assert-Contains $venvText 'Resolve-KernelLatestTag -Provider $provider' 'kernel latest resolution receives only its own provider'
+        Assert-Contains $venvText 'Get-KernelManifest -KernelTag $kernelTag -ManifestFilename $manifestName -Provider $provider' 'kernel manifest resolution receives only its own provider'
+        Assert-Contains $venvText 'Install-KernelSource -VenvPython $venvPython -SourceArtifact $sourceArtifact -KernelTag $kernelTag -StageDir $stage -Provider $provider' 'kernel source download receives only its own provider'
+        Assert-NotContains $venvText '$script:TuiProvider' 'kernel provider loop does not mutate TUI provider state'
+    }
+
+    $sourceInstallerFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-KernelSource'
+    }, $true)
+    $hashFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-Sha256Hex'
+    }, $true)
+    Assert-True ($null -ne $sourceInstallerFunction) 'kernel source installer is discoverable through the PowerShell AST'
+    Assert-True ($null -ne $hashFunction) 'production SHA-256 helper is discoverable through the PowerShell AST'
+
+    Write-Section 'execution: verified kernel sdist is the local pip input'
+    $kernelSourceTestRoot = Join-Path ([IO.Path]::GetTempPath()) ("lingtai ps kernel source contract {0}" -f ([Guid]::NewGuid().ToString('N')))
+    try {
+        $sourceFixtureDir = Join-Path $kernelSourceTestRoot 'fixture'
+        $sourceStageDir = Join-Path $kernelSourceTestRoot 'stage'
+        New-Item -ItemType Directory -Force -Path $sourceFixtureDir, $sourceStageDir | Out-Null
+        $kernelSdistFixture = Join-Path $sourceFixtureDir 'lingtai-2.3.4.tar.gz'
+        Set-Content -LiteralPath $kernelSdistFixture -Value 'controlled kernel sdist bytes' -Encoding ASCII
+        $kernelWheelFixture = Join-Path $sourceFixtureDir 'lingtai-2.3.4-cp312-cp312-win_amd64.whl'
+        Set-Content -LiteralPath $kernelWheelFixture -Value 'controlled compatible wheel bytes' -Encoding ASCII
+        $fakePython = Join-Path $sourceFixtureDir 'python.cmd'
+        Set-Content -LiteralPath $fakePython -Value @('@echo off', '> "%~dp0pip-args.log" echo %*', 'exit /b 0') -Encoding ASCII
+        $pipArgsLog = Join-Path $sourceFixtureDir 'pip-args.log'
+        $kernelSdistSha = (Get-FileHash -LiteralPath $kernelSdistFixture -Algorithm SHA256).Hash.ToLowerInvariant()
+        $kernelWheelSha = (Get-FileHash -LiteralPath $kernelWheelFixture -Algorithm SHA256).Hash.ToLowerInvariant()
+        $kernelWheelRecord = [pscustomobject]@{
+            kind = 'wheel'
+            filename = 'lingtai-2.3.4-cp312-cp312-win_amd64.whl'
+            sha256 = $kernelWheelSha
+            python_tag = 'cp312'
+            abi_tag = 'cp312'
+            platform_tag = 'win_amd64'
+        }
+        $kernelSdistRecord = [pscustomobject]@{
+            kind = 'sdist'
+            filename = 'lingtai-2.3.4.tar.gz'
+            sha256 = $kernelSdistSha
+            python_tag = $null
+            abi_tag = $null
+            platform_tag = $null
+        }
+        $sourceManifestFixture = [pscustomobject]@{
+            kernel_tag = 'v2.3.4'
+            kernel_version = '2.3.4'
+            sdist_fallback = $kernelSdistRecord.filename
+            artifacts = @($kernelWheelRecord, $kernelSdistRecord)
+        }
+        $selectedSource = Get-KernelSourceArtifact -KernelManifest $sourceManifestFixture
+        Assert-Equal 'sdist' $selectedSource.kind 'execution fixture exposes a declared sdist beside a compatible wheel'
+        Assert-Equal $kernelSdistRecord.filename $selectedSource.filename 'execution fixture selects the manifest-declared sdist'
+
+        $script:KernelAssetRequests = New-Object System.Collections.Generic.List[object]
+        $script:KernelSdistFixture = $kernelSdistFixture
+        function Write-Info { param([string]$Message) }
+        function Write-Ok { param([string]$Message) }
+        function Fail { param([string]$Message) throw $Message }
+        function Get-KernelAssetUrl {
+            param([string]$KernelTag, [string]$Name, [string]$Provider)
+            $script:KernelAssetRequests.Add([pscustomobject]@{ KernelTag = $KernelTag; Name = $Name; Provider = $Provider }) | Out-Null
+            return 'fixture://kernel-source'
+        }
+        function Invoke-WebRequest {
+            param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+            [System.IO.File]::Copy($script:KernelSdistFixture, $OutFile, $true)
+        }
+        if ($null -ne $hashFunction) { Invoke-Expression $hashFunction.Extent.Text }
+        if ($null -ne $sourceInstallerFunction) { Invoke-Expression $sourceInstallerFunction.Extent.Text }
+        if ($null -ne $sourceInstallerFunction -and $null -ne $hashFunction) {
+            Install-KernelSource -VenvPython $fakePython -SourceArtifact $selectedSource -KernelTag $sourceManifestFixture.kernel_tag -StageDir $sourceStageDir -Provider 'github'
+            $downloadedSource = Join-Path $sourceStageDir $kernelSdistRecord.filename
+            Assert-True (Test-Path -LiteralPath $downloadedSource) 'kernel source download writes the declared archive into staging'
+            Assert-Equal $kernelSdistSha (Get-Sha256Hex -Path $downloadedSource) 'kernel source download is checksum-valid'
+            Assert-Equal 'github' $script:KernelAssetRequests[0].Provider 'kernel source download uses the requested provider'
+            Assert-Equal $kernelSdistRecord.filename $script:KernelAssetRequests[0].Name 'kernel source download requests the declared sdist filename'
+            $pipArgs = Get-Content -LiteralPath $pipArgsLog -Raw
+            Assert-Contains $pipArgs '-m pip install' 'fake Windows Python records the pip install invocation'
+            Assert-Contains $pipArgs $downloadedSource 'pip receives the downloaded source archive by local path'
+            Assert-NotContains $pipArgs $kernelWheelRecord.filename 'pip never receives the compatible wheel record'
+
+            $mismatchedSource = [pscustomobject]@{
+                kind = 'sdist'
+                filename = $kernelSdistRecord.filename
+                sha256 = ('f' * 64)
+            }
+            $mismatchStageDir = Join-Path $kernelSourceTestRoot 'mismatch-stage'
+            New-Item -ItemType Directory -Force -Path $mismatchStageDir | Out-Null
+            Remove-Item -LiteralPath $pipArgsLog -Force -ErrorAction SilentlyContinue
+            $mismatchFailed = $false
+            try {
+                Install-KernelSource -VenvPython $fakePython -SourceArtifact $mismatchedSource -KernelTag $sourceManifestFixture.kernel_tag -StageDir $mismatchStageDir -Provider 'github'
+            } catch {
+                $mismatchFailed = $true
+            }
+            Assert-True $mismatchFailed 'kernel source checksum mismatch fails before pip'
+            Assert-True (-not (Test-Path -LiteralPath $pipArgsLog)) 'checksum failure makes no package-install command'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $kernelSourceTestRoot) { Remove-Item -LiteralPath $kernelSourceTestRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    Write-Section 'execution: stable kernel loop falls back without changing TUI provider'
+    $kernelLoopTestRoot = Join-Path ([IO.Path]::GetTempPath()) ("lingtai ps kernel loop contract {0}" -f ([Guid]::NewGuid().ToString('N')))
+    try {
+        $loopVenvDir = Join-Path $kernelLoopTestRoot 'runtime\venv'
+        $loopVenvPython = Join-Path $loopVenvDir 'Scripts\python.exe'
+        New-Item -ItemType Directory -Force -Path (Split-Path $loopVenvPython -Parent) | Out-Null
+        Set-Content -LiteralPath $loopVenvPython -Value 'controlled venv marker' -Encoding ASCII
+        $script:KernelLoopProviders = New-Object System.Collections.Generic.List[string]
+        $script:KernelLoopInstallCalls = New-Object System.Collections.Generic.List[object]
+        $script:KernelLoopManifest = $sourceManifestFixture
+        $script:KernelLoopTuiProvider = 'fixture-tui'
+        function Find-VenvPython { return @{ Launcher = 'fixture-python'; Args = @() } }
+        function Remove-OrphanedKernelDistInfo { param([string]$VenvDir) }
+        function New-StagingDir {
+            $stage = Join-Path $kernelLoopTestRoot ("stage-{0}" -f $script:KernelLoopProviders.Count)
+            New-Item -ItemType Directory -Force -Path $stage | Out-Null
+            return $stage
+        }
+        function Resolve-KernelLatestTag {
+            param([string]$Provider)
+            $script:KernelLoopProviders.Add($Provider) | Out-Null
+            return 'v2.3.4'
+        }
+        function Get-KernelManifest {
+            param([string]$KernelTag, [string]$ManifestFilename, [string]$Provider)
+            return $script:KernelLoopManifest
+        }
+        function Install-KernelSource {
+            param([string]$VenvPython, $SourceArtifact, [string]$KernelTag, [string]$StageDir, [string]$Provider)
+            $script:KernelLoopInstallCalls.Add([pscustomobject]@{
+                Provider = $Provider
+                SourceFilename = $SourceArtifact.filename
+                StageDir = $StageDir
+            }) | Out-Null
+            if ($Provider -eq 'mirror') { throw 'controlled mirror source failure' }
+        }
+        function Confirm-KernelImport {
+            param([string]$VenvPython, [string]$ExpectedVersion)
+            return $ExpectedVersion
+        }
+        function Write-KernelProvenance {
+            param([string]$VenvDir, [string]$KernelTag, [string]$KernelVersion, [string]$SourceFilename, [string]$SourceSha256, [string]$Provider)
+        }
+        function Write-Warn { param([string]$Message) }
+        if ($null -ne $venvFunction) { Invoke-Expression $venvFunction.Extent.Text }
+        $script:KernelProvider = 'mirror'
+        $script:TuiProvider = $script:KernelLoopTuiProvider
+        if ($null -ne $venvFunction) {
+            $loopResult = Install-Venv -GlobalDir $kernelLoopTestRoot
+            Assert-Equal 'mirror,github' ($script:KernelLoopProviders -join ',') 'stable kernel loop tries mirror before GitHub'
+            Assert-Equal 2 $script:KernelLoopInstallCalls.Count 'stable kernel loop executes source install for both providers'
+            Assert-Equal $kernelSdistRecord.filename $script:KernelLoopInstallCalls[0].SourceFilename 'mirror attempt receives the declared sdist'
+            Assert-Equal $kernelSdistRecord.filename $script:KernelLoopInstallCalls[1].SourceFilename 'GitHub fallback receives the declared sdist'
+            Assert-Equal 'github' $loopResult.KernelProvider 'successful kernel fallback records GitHub as provider'
+            Assert-Equal 'github' $script:KernelProvider 'kernel provider state ends at the successful GitHub provider'
+            Assert-Equal $script:KernelLoopTuiProvider $script:TuiProvider 'kernel fallback leaves TUI provider state unchanged'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $kernelLoopTestRoot) { Remove-Item -LiteralPath $kernelLoopTestRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     Write-Section 'contract: validation precedes provider selection'
     $sourceValidation = $psText.IndexOf('$sourceArg = if ([string]::IsNullOrWhiteSpace($Source))')
     $sourceProvider = $psText.LastIndexOf('Resolve-SourceProvider')
@@ -240,7 +449,7 @@ try {
     Assert-Contains $psText 'Build-ReleaseSourceArchive -Tag $resolvedTag -Provider ''github''' '-FromSource uses the live GitHub source-archive build path'
     Assert-Contains $psText 'Install-FromLocalArtifact -Archive $ArchivePath' 'explicit local-artifact mode remains available behind the incompatibility guard'
     Assert-Contains $psText 'only the TUI falls back to the latest GitHub source release' 'TUI provider fallback wording is component-scoped'
-    Assert-True ([regex]::IsMatch($psText, 'The kernel is installed from\s+a verified local release artifact\.')) 'kernel wording stays independent of TUI source choice'
+    Assert-True ([regex]::IsMatch($psText, 'The kernel is installed from\s+a verified local source archive selected from its release manifest')) 'kernel wording stays independent of TUI source choice'
     Assert-NotContains $psText 'Choose GitHub explicitly with -Source github' 'mirror helper errors do not prescribe a provider'
     Assert-Contains $psText 'lingtai.ai TUI source is unavailable; falling back to the latest GitHub TUI source release.' 'TUI caller retains its automatic fallback warning'
     Assert-Contains $psText 'lingtai.ai kernel release is unavailable; falling back to the latest GitHub kernel release.' 'kernel caller retains its automatic fallback warning'

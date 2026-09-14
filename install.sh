@@ -24,14 +24,14 @@
 # exact stable source tag and source archive, then always builds the TUI locally.
 # If that source resolution is unavailable, it independently resolves the latest
 # GitHub TUI source release and builds it. The kernel resolves its own latest
-# artifact and fallback provider.
+# source archive and fallback provider.
 # Explicit --version, --source github, --ref/--from-source/--update, and --latest
 # retain their existing source-build behavior. --source gitee is retired.
 #
 # LingTai is NEVER installed by requesting the package name "lingtai" from
-# any index. The default kernel artifact is independently selected and verified
-# from lingtai.ai, with a GitHub fallback for that component only. --ref/source-
-# ref builds have no release kernel to install and therefore require
+# any index. The default kernel source archive is independently selected and
+# verified from lingtai.ai, with a GitHub source fallback for that component
+# only. --ref/source-ref builds have no release kernel to install and therefore require
 # --skip-python. That flag is the explicit binary-only opt-out.
 set -euo pipefail
 
@@ -1340,9 +1340,10 @@ PY
 # creation/kernel-install attempt), not an already-occupied runtime from a
 # prior run.
 #
-# A release install must resolve and install a compatible kernel artifact; all
-# runtime setup and artifact failures are fail-loud. An arbitrary --ref has no
-# independently versioned kernel release and therefore requires --skip-python.
+# A release install must resolve and install the manifest-declared kernel source
+# artifact; all runtime setup and artifact failures are fail-loud. An arbitrary
+# --ref has no independently versioned kernel release and therefore requires
+# --skip-python.
 # --skip-python (alias --skip-venv) is the only way to skip the runtime.
 ensure_runtime_venv() {
   local bin_dir="$1"
@@ -1461,8 +1462,8 @@ ensure_runtime_venv() {
     fi
 
     local install_ok=0
-    # The verified kernel release artifact is the ONLY LingTai install source.
-    # Any failure here (incoherent manifest, no compatible wheel/sdist,
+    # The verified kernel source archive is the ONLY LingTai install source.
+    # Any failure here (incoherent manifest, missing source artifact,
     # checksum mismatch, install command failure) is retried
     # once after a venv recreate (a legitimate transient-environment repair,
     # the same pattern every other step in this loop uses), then FAILS LOUD —
@@ -1476,7 +1477,7 @@ ensure_runtime_venv() {
     fi
     if [[ "$install_ok" != "1" ]]; then
       if [[ "$repair_attempt" == "0" ]]; then
-        warn "failed to install the verified kernel release artifact; retaining the venv and provisioning a new runtime venv path."
+        warn "failed to install the verified kernel source archive; retaining the venv and provisioning a new runtime venv path."
         venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
         repair_attempt=1
         continue
@@ -1484,7 +1485,7 @@ ensure_runtime_venv() {
       if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
         echo "error: failed to install kernel main commit $KERNEL_MAIN_SHA into the runtime venv after recreate." >&2
       else
-        echo "error: failed to install a verified kernel release artifact after recreate (tag ${KERNEL_RELEASE_TAG:-unknown}, provider ${KERNEL_PROVIDER:-unknown})." >&2
+        echo "error: failed to install a verified kernel source archive after recreate (tag ${KERNEL_RELEASE_TAG:-unknown}, provider ${KERNEL_PROVIDER:-unknown})." >&2
       fi
       echo "       LingTai's Python runtime is never installed from an index by package name." >&2
       echo "       Fix the reported provider/artifact error and re-run, or pass --skip-python." >&2
@@ -1526,7 +1527,7 @@ ensure_runtime_venv() {
 }
 
 
-# --- independent kernel artifact install (schema lingtai.kernel.release/v1) ---
+# --- independent kernel source install (schema lingtai.kernel.release/v1) ---
 
 # update_validate_manifest strictly validates a kernel release manifest
 # (schema lingtai.kernel.release/v1): every required top-level key present
@@ -1577,6 +1578,7 @@ if not isinstance(data["artifacts"], list) or not data["artifacts"]:
 
 seen = set()
 has_sdist = False
+has_declared_sdist = False
 for index, artifact in enumerate(data["artifacts"]):
     if not isinstance(artifact, dict) or set(artifact) != {"filename", "sha256", "kind", "python_tag", "abi_tag", "platform_tag"}:
         fail(f"artifacts[{index}] has the wrong shape")
@@ -1598,13 +1600,15 @@ for index, artifact in enumerate(data["artifacts"]):
             fail(f"artifacts[{index}] filename tags disagree with metadata")
     elif kind == "sdist":
         has_sdist = True
+        if filename == data["sdist_fallback"]:
+            has_declared_sdist = True
         if filename != f"lingtai-{expected_version}.tar.gz":
             fail(f"artifacts[{index}] sdist filename is not the selected version")
         if any(artifact[key] is not None for key in ("python_tag", "abi_tag", "platform_tag")):
             fail(f"artifacts[{index}] sdist has wheel tags")
     else:
         fail(f"artifacts[{index}] has unsupported kind {kind!r}")
-if not has_sdist or data["sdist_fallback"] not in seen:
+if not has_sdist or not has_declared_sdist:
     fail("sdist fallback is not a listed sdist")
 
 print(json.dumps(data, sort_keys=True, separators=(",", ":")))
@@ -1656,125 +1660,20 @@ kernel_manifest_url_for_provider() {
   esac
 }
 
-# python_platform_tags asks the venv's own Python for compatible wheel tags,
-# one per line, most-specific first. Fresh `uv venv` environments intentionally
-# contain neither packaging nor pip, so use their implementations when present
-# and otherwise emit a conservative dependency-free CPython/OS/arch set for the
-# platform wheels this release pipeline publishes. The installer still lets uv
-# enforce final wheel compatibility during installation.
-python_platform_tags() {
-  local py="$1"
-  "$py" - <<'PY' 2>/dev/null
-import platform
-import sys
-
-sys_tags = None
-try:
-    from packaging.tags import sys_tags
-except ModuleNotFoundError:
-    try:
-        from pip._vendor.packaging.tags import sys_tags  # type: ignore
-    except ModuleNotFoundError:
-        pass
-
-if sys_tags is not None:
-    for tag in sys_tags():
-        print(f"{tag.interpreter}-{tag.abi}-{tag.platform}")
-    raise SystemExit(0)
-
-interpreter = f"cp{sys.version_info.major}{sys.version_info.minor}"
-abi = interpreter
-machine = platform.machine().lower()
-
-def emit(platform_tag):
-    print(f"{interpreter}-{abi}-{platform_tag}")
-
-if sys.platform == "darwin":
-    arch = "arm64" if machine in {"arm64", "aarch64"} else "x86_64"
-    version = platform.mac_ver()[0]
-    try:
-        major, minor = (int(part) for part in version.split(".")[:2])
-    except (TypeError, ValueError):
-        major, minor = (11, 0) if arch == "arm64" else (10, 13)
-    if major >= 11:
-        for compatible_major in range(major, 10, -1):
-            emit(f"macosx_{compatible_major}_0_{arch}")
-        minor = 16
-    if arch == "x86_64" and major >= 10:
-        for compatible_minor in range(min(minor, 16), 8, -1):
-            emit(f"macosx_10_{compatible_minor}_x86_64")
-elif sys.platform.startswith("linux"):
-    arch = "aarch64" if machine in {"arm64", "aarch64"} else "x86_64"
-    libc_name, libc_version = platform.libc_ver()
-    try:
-        libc_major, libc_minor = (int(part) for part in libc_version.split(".")[:2])
-    except (TypeError, ValueError):
-        libc_major, libc_minor = 0, 0
-    if libc_name == "glibc" and libc_major == 2 and libc_minor >= 17:
-        for compatible_minor in range(libc_minor, 16, -1):
-            tag = f"manylinux_2_{compatible_minor}_{arch}"
-            if compatible_minor == 17:
-                tag += f".manylinux2014_{arch}"
-            emit(tag)
-elif sys.platform == "win32":
-    emit("win_amd64" if machine in {"amd64", "x86_64"} else "win_arm64")
-PY
-}
-
-# select_kernel_wheel picks the first artifact from a kernel manifest JSON
-# body whose "<python_tag>-<abi_tag>-<platform_tag>" combination appears in
-# the venv's compatible-tag list (most-specific tags are tried first, so an
-# exact match wins over a compatible-but-looser one). Echoes
-# "<filename> <sha256>" on a match; returns nonzero (and prints nothing) if no
-# wheel matches — the caller falls back to the sdist.
-select_kernel_wheel() {
-  local manifest_json="$1" py="$2" tags combo manifest_file
-  tags="$(python_platform_tags "$py")"
-  [[ -n "$tags" ]] || return 1
-
-  manifest_file="$(mktemp "${TMPDIR:-/tmp}/lingtai-kernel-manifest.XXXXXX")"
-  printf '%s' "$manifest_json" > "$manifest_file"
-
-  while IFS= read -r combo; do
-    [[ -n "$combo" ]] || continue
-    # Each artifact object is small and single-line-safe to grep for its tag
-    # triple; scope the match to one object at a time via a python one-liner
-    # for correctness instead of hand-rolled brace matching across wheels.
-    # Manifest is passed by FILE PATH (not stdin) so this command can't
-    # collide with a heredoc's stdin takeover.
-    local hit
-    hit="$("$py" - "$manifest_file" "$combo" <<'PY'
-import json, sys
-data = json.loads(open(sys.argv[1]).read())
-combo = sys.argv[2]
-for art in data.get("artifacts", []):
-    if art.get("kind") != "wheel":
-        continue
-    if f"{art['python_tag']}-{art['abi_tag']}-{art['platform_tag']}" == combo:
-        print(f"{art['filename']} {art['sha256']}")
-        break
-PY
-)"
-    if [[ -n "$hit" ]]; then
-      printf '%s' "$hit"
-      return 0
-    fi
-  done <<<"$tags"
-  return 1
-}
-
-# kernel_sdist_fallback echoes "<filename> <sha256>" for the manifest's
-# declared sdist_fallback artifact.
-kernel_sdist_fallback() {
+# kernel_source_artifact echoes "<filename> <sha256>" for the manifest's
+# declared sdist_fallback source artifact. This is the sole stable/default
+# kernel artifact selection path; wheel metadata is retained only for manifest
+# validation and is never selected or installed here.
+kernel_source_artifact() {
   local manifest_json="$1" py="${2:-python3}" manifest_file
   manifest_file="$(mktemp "${TMPDIR:-/tmp}/lingtai-kernel-manifest.XXXXXX")"
   printf '%s' "$manifest_json" > "$manifest_file"
-  "$py" "$manifest_file" <<'PY'
+  "$py" - "$manifest_file" <<'PY'
 import json, sys
 data = json.loads(open(sys.argv[1]).read())
 name = data.get("sdist_fallback", "")
 for art in data.get("artifacts", []):
-    if art.get("filename") == name:
+    if art.get("kind") == "sdist" and art.get("filename") == name:
         print(f"{art['filename']} {art['sha256']}")
         break
 PY
@@ -1833,12 +1732,8 @@ install_kernel_from_release() {
       continue
     fi
     kernel_manifest="$KERNEL_MANIFEST_JSON"
-    artifact_line="$(select_kernel_wheel "$kernel_manifest" "$py" || true)"
-    if [[ -z "$artifact_line" ]]; then
-      note "No compatible wheel in kernel release $kernel_tag; using its declared sdist fallback."
-      artifact_line="$(kernel_sdist_fallback "$kernel_manifest" "$py" || true)"
-    fi
-    [[ -n "$artifact_line" ]] || { warn "kernel release $kernel_tag has no compatible artifact"; continue; }
+    artifact_line="$(kernel_source_artifact "$kernel_manifest" "$py" || true)"
+    [[ -n "$artifact_line" ]] || { warn "kernel release $kernel_tag has no declared source artifact"; continue; }
     fname="${artifact_line%% *}"
     sha="${artifact_line##* }"
     download_url="$(kernel_artifact_download_url "$provider" "$kernel_tag" "$fname" || true)"
@@ -1846,7 +1741,7 @@ install_kernel_from_release() {
 
     mkdir -p "$BUILD_DIR/kernel-artifact"
     dest="$BUILD_DIR/kernel-artifact/$fname"
-    say "Downloading kernel artifact: $fname (from $provider, release $kernel_tag) ..."
+    say "Downloading kernel source artifact: $fname (from $provider, release $kernel_tag) ..."
     if [[ "$provider" == "mirror" ]]; then
       download_mirror_asset "$KERNEL_REPO_SLUG" "$kernel_tag" "$fname" "$dest" || continue
     elif ! curl -fsSL --max-time 300 -o "$dest" "$download_url"; then
@@ -1858,18 +1753,18 @@ install_kernel_from_release() {
       continue
     fi
     index_url="$(python_dependency_index_url)"
-    say "Installing lingtai from verified local artifact (dependencies via $index_url) ..."
+    say "Building and installing lingtai from verified local source archive (dependencies via $index_url) ..."
     if [[ -n "$uv" ]]; then
       if ! "$uv" pip install --index-url "$index_url" -p "$(dirname "$(dirname "$py")")" "$dest"; then
-        warn "kernel artifact installation failed through $provider"
+        warn "kernel source installation failed through $provider"
         continue
       fi
     elif ! "$py" -m pip install --index-url "$index_url" "$dest"; then
-      warn "kernel artifact installation failed through $provider"
+      warn "kernel source installation failed through $provider"
       continue
     fi
     if ! "$py" -c 'import lingtai; print("lingtai", getattr(lingtai, "__version__", "?"))'; then
-      warn "lingtai import failed after kernel artifact install"
+      warn "lingtai import failed after kernel source install"
       continue
     fi
 

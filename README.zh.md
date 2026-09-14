@@ -100,7 +100,7 @@ curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
 irm https://lingtai.ai/install.ps1 | iex
 ```
 
-它会通过 `lingtai.ai` 独立解析并验证最新 TUI 源码和内核发布，分别使用各自的 GitHub 回退；在本地构建 `lingtai-tui.exe`，并把内核资产安装到 Python 运行时虚拟环境。加上 `-SkipVenv` 可只安装 TUI。详细契约见 [`RELEASING.md`](RELEASING.md)。
+它会通过 `lingtai.ai` 独立解析并验证最新 TUI 源码和内核发布，分别使用各自的 GitHub 回退；在本地构建 `lingtai-tui.exe`，并从内核发布清单声明且已验证的源代码归档本地构建、安装内核到 Python 运行时虚拟环境。加上 `-SkipVenv` 可只安装 TUI。详细契约见 [`RELEASING.md`](RELEASING.md)。
 
 <details>
 <summary><b>原生 Windows 主线调试安装</b>——<code>install.ps1 -Latest</code></summary>

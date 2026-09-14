@@ -60,7 +60,7 @@ irm https://lingtai.ai/install.ps1 | iex
 `install.ps1`'s public (default) mode resolves and verifies the latest TUI source
 and latest kernel release independently through `lingtai.ai`, with each
 component's own GitHub fallback. It always builds `lingtai-tui.exe` locally and
-installs the verified kernel artifact into
+builds/installs the manifest-declared, verified kernel source archive into
 `%USERPROFILE%\.lingtai-tui\runtime\venv` unless `-SkipVenv` is passed. It
 never installs LingTai by package name from an index. `-ArchivePath` plus
 `-ChecksumPath` is the explicit local TUI-artifact mode; `-DryRun` is a
@@ -245,9 +245,9 @@ exact peeled-tag source checkout; `--from-source` remains a backwards-
 compatible selector for that GitHub source path.
 
 The kernel has its own latest-release resolution through `lingtai.ai`, its own
-GitHub fallback, and its own manifest/artifact checksum verification. The
-verified wheel or source distribution is installed by explicit local path;
-package indexes are used only for third-party dependencies. No provider switch
+GitHub fallback, and its own manifest/source-archive checksum verification. The
+manifest-declared source distribution is built and installed by explicit local
+path; package indexes are used only for third-party dependencies. No provider switch
 or release bundle couples the TUI to a kernel version, and no repository-owned
 kernel pin is an installer or release input. The PowerShell
 installer follows the same independent TUI/kernel contract; `-SkipVenv` is the
