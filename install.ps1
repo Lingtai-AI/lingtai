@@ -11,14 +11,12 @@
     Three install modes are supported:
 
       * PUBLIC MODE (no -ArchivePath, the default): without -Version, resolve
-        current TUI and kernel metadata plus all selected release assets from
-        lingtai.ai /dl routes. An explicit -Version or -Source github uses the
-        existing GitHub release behavior. Download and strictly validate the
-        lingtai-bundle-manifest.json (schema lingtai.tui.bundle/v1), download the
-        lingtai-<tag>-windows-amd64.zip archive plus its .sha256 sidecar, verify
-        the archive's SHA-256 against the manifest before extraction, and confirm
-        the staged lingtai-tui.exe and lingtai-portal.exe are present, with the
-        TUI reporting exactly that tag, before touching BinDir.
+        the current stable source release through lingtai.ai and always build
+        lingtai-tui.exe and lingtai-portal.exe locally from that exact tag. The
+        default path never selects a prebuilt archive. If lingtai.ai source
+        resolution is unavailable, resolve the latest GitHub source release and
+        build it instead. Explicit -Version or -Source github retains the existing
+        GitHub release behavior.
 
       * LOCAL ARTIFACT MODE (-ArchivePath + -ChecksumPath): install the TUI/portal
         binaries FROM an already-downloaded release archive plus its sha256
@@ -120,10 +118,11 @@
 
 .PARAMETER Source
     Release source provider: auto|mirror|github (default: mirror when unset).
-    auto is a compatibility alias for the ordinary no-version lingtai.ai route.
-    No geography detection or automatic GitHub fallback occurs. Explicit
-    versions and source/current-main modes use GitHub; github forces it. gitee
-    is retired.
+    auto/mirror make the ordinary no-version lingtai.ai path source-only: it
+    always builds locally and falls back to the latest GitHub source release when
+    lingtai.ai source resolution is unavailable. Explicit versions and
+    source/current-main modes retain existing GitHub behavior; github forces it.
+    gitee is retired.
 
 .PARAMETER DryRun
     Plan only: make no filesystem, PATH, or config writes. In local-artifact mode
@@ -190,7 +189,7 @@ $RepoUrl = "https://github.com/$Repo"
 $ApiBase = if ($env:LINGTAI_GITHUB_API_BASE) { $env:LINGTAI_GITHUB_API_BASE } else { "https://api.github.com/repos/$Repo" }
 $KernelApiBase = if ($env:LINGTAI_KERNEL_GITHUB_API_BASE) { $env:LINGTAI_KERNEL_GITHUB_API_BASE } else { "https://api.github.com/repos/Lingtai-AI/lingtai-kernel" }
 
-# --- Source provider (default mirror; explicit modes use GitHub) --------------
+# --- Source provider (default mirror-resolved source; explicit modes use GitHub) ---
 $KernelRepo = 'Lingtai-AI/lingtai-kernel'
 $MirrorBase = if ($env:LINGTAI_WEB_BASE) { $env:LINGTAI_WEB_BASE.TrimEnd('/') } else { 'https://lingtai.ai' }
 $script:BundleProvider = 'mirror'
@@ -2359,9 +2358,16 @@ function Invoke-Main {
     if ($DryRun) { Write-Warn "DRY RUN: no filesystem, PATH, or config writes will be made." }
 
     # Resolve one provider up front. The ordinary no-version route uses
-    # lingtai.ai; explicit release/source/current-main modes use GitHub.
+    # lingtai.ai only to resolve a stable source release and always builds it;
+    # explicit release/source/current-main modes retain their GitHub behavior.
     Resolve-SourceProvider
-    Write-Info "Release provider: $($script:BundleProvider)"
+    $sourceOnlyDefault = ($script:BundleProvider -eq 'mirror')
+    if ($sourceOnlyDefault) {
+        Write-Info "Release source: lingtai.ai latest stable source; TUI/Portal will be built locally"
+        Write-Step "If lingtai.ai source resolution is unavailable, the latest GitHub source release will be built"
+    } else {
+        Write-Info "Release provider: $($script:BundleProvider)"
+    }
 
     # Resolve per-user, non-admin defaults. -Update resolves BinDir from the
     # existing install receipt below (or an explicit -BinDir), so the default
@@ -2529,6 +2535,25 @@ function Invoke-Main {
         if ($haveArchive) {
             $resolvedTag = $Version
             if (-not $DryRun) { $bundle = Get-BundleManifest -Tag $resolvedTag }
+        } elseif ($sourceOnlyDefault) {
+            $savedErrorActionPreference = $ErrorActionPreference
+            try {
+                # Mirror resolution failures are expected to take the one
+                # authorized fallback, so suppress Fail's first error record and
+                # surface one concise warning before the GitHub source attempt.
+                $ErrorActionPreference = 'SilentlyContinue'
+                $resolvedTag = Resolve-PublicTag -Requested ''
+                $bundle = Get-BundleManifest -Tag $resolvedTag
+            } catch {
+                $ErrorActionPreference = $savedErrorActionPreference
+                Write-Warn 'lingtai.ai source release is unavailable; falling back to the latest GitHub source release.'
+                $script:BundleProvider = 'github'
+                $resolvedTag = Resolve-PublicTag -Requested ''
+                $bundle = Get-BundleManifest -Tag $resolvedTag
+            } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+            Write-Ok "Validated bundle manifest (kernel $($bundle.KernelTag))"
         } else {
             $resolvedTag = Resolve-PublicTag -Requested $Version
             $bundle = Get-BundleManifest -Tag $resolvedTag
@@ -2571,19 +2596,34 @@ function Invoke-Main {
         }
     }
 
-    # 3. Install binaries. When step 1 already resolved a tag/bundle (public
-    # mode, venv not skipped), pass that SAME resolution through instead of
-    # letting Install-FromPublicRelease re-resolve "latest" a second time.
-    # -FromSource forces a source build of the resolved tag (mirrors
-    # install.sh --from-source): the kernel runtime still comes from the
-    # release bundle, only the TUI/portal binaries are built from source.
-    Write-Phase "Install binaries"
+    # 3. Build/install binaries. When step 1 already resolved a tag/bundle
+    # (public mode, venv not skipped), pass that SAME resolution through. The
+    # ordinary lingtai.ai route and -FromSource both build the exact tag locally;
+    # the kernel runtime still uses the existing verified release mechanics.
+    Write-Phase "Build and install binaries"
     if ($haveArchive) {
         $managed = Install-FromLocalArtifact -Archive $ArchivePath -Sidecar $ChecksumPath -BinDir $BinDir -Requested $Version
-    } elseif ($FromSource) {
+    } elseif ($FromSource -or $sourceOnlyDefault) {
         # Step 1 skips tag resolution under -SkipVenv, so resolve the tag here
         # when needed -- a source build still needs an exact ref to clone.
-        if ([string]::IsNullOrWhiteSpace($resolvedTag)) { $resolvedTag = Resolve-PublicTag -Requested $Version }
+        if ([string]::IsNullOrWhiteSpace($resolvedTag)) {
+            if ($sourceOnlyDefault -and $script:BundleProvider -eq 'mirror') {
+                $savedErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = 'SilentlyContinue'
+                    $resolvedTag = Resolve-PublicTag -Requested ''
+                } catch {
+                    $ErrorActionPreference = $savedErrorActionPreference
+                    Write-Warn 'lingtai.ai source release is unavailable; falling back to the latest GitHub source release.'
+                    $script:BundleProvider = 'github'
+                    $resolvedTag = Resolve-PublicTag -Requested ''
+                } finally {
+                    $ErrorActionPreference = $savedErrorActionPreference
+                }
+            } else {
+                $resolvedTag = Resolve-PublicTag -Requested $Version
+            }
+        }
         if ($DryRun) {
             Write-Step "[dry-run] would build TUI/portal from source at tag $resolvedTag and install into $BinDir"
             $managed = @()
@@ -2627,7 +2667,7 @@ function Invoke-Main {
             RequestedRef    = $Version
             ResolvedRef     = $resolvedTag
             ResolvedCommit  = $(if ($bundle) { $bundle.TuiCommit } else { '' })
-            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } elseif ($FromSource) { 'powershell-source-build' } else { 'powershell-release-asset' })
+            InstallKind     = $(if ($haveArchive) { 'powershell-local-artifact' } elseif ($FromSource -or $sourceOnlyDefault) { 'powershell-source-build' } else { 'powershell-release-asset' })
             ManagedBinaries = $managed
         }
         if ($kernelMeta) {
