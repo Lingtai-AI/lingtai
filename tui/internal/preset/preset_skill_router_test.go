@@ -64,6 +64,8 @@ var wantOperations = map[string]bool{
 // nested operation children live under reference/operations/ and are
 // validated separately by TestPresetSkillRouter_OperationBijection so a
 // provider directory can never silently absorb an operation, or vice versa.
+// (Comment kept generic — the exact count lives in wantProviders below and
+// tracks BuiltinPresets() automatically via assertSameNames.)
 func TestPresetSkillRouter_BuiltinBijection(t *testing.T) {
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
@@ -332,6 +334,7 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"openrouter",
 		"codex",
 		"codex-pool",
+		"codex-pool-standalone",
 		"claude",
 		"custom",
 	}

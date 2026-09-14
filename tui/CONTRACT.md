@@ -30,8 +30,11 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool-standalone/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
+  - tui/internal/tui/login.go
+  - tui/internal/tui/login_standalone_test.go
   - tui/main.go
   - tui/main_preset_revision_test.go
   - tui/internal/config/global_test.go
@@ -135,8 +138,8 @@ appears as the degraded state below.
 ## Preset editor service tier
 
 The preset editor exposes the same service-tier row for every provider in the
-13-name `BuiltinPresets()` catalog, including Codex Pool, API-key providers,
-CLI-backed Claude, and Custom. Its vocabulary is exactly `normal | fast` and
+14-name `BuiltinPresets()` catalog, including Codex Pool, Codex Pool Standalone,
+API-key providers, CLI-backed Claude, and Custom. Its vocabulary is exactly `normal | fast` and
 the row is always visible, cyclable, and cursor-reachable; the TUI does not
 probe provider support or reject either choice. Lower layers may ignore an
 unsupported tier.
@@ -146,6 +149,40 @@ omitted from the committed manifest. Selecting `fast` commits the string
 `"fast"` for every provider. Unknown legacy values display as `normal`; they
 retain the existing non-Codex preservation behavior unless the user cycles the
 row, while Codex continues to normalize unknown values to omission.
+
+## codex-pool-standalone preset and launcher
+
+`codex-pool-standalone` is additive: the old builtin `codex-pool` OAuth
+multi-account pool provider and preset are unchanged and remain fully
+supported, as does native single-account `codex`. `codex-pool-standalone`
+binds `manifest.llm.provider: "custom"` with `api_compat: "openai"` and
+`wire_api: "responses"` — the kernel's existing generic OpenAI-compatible
+Responses route — never the `codex-pool` provider string, so selecting it
+never engages the old builtin account-pool/OAuth machinery. Its default
+`base_url` is a local loopback address (`http://127.0.0.1:8765/v1`) and its
+`compact_threshold: null` suppresses generic server-side `context_management`,
+which the Codex service does not implement. The existing custom Responses
+adapter supplies stateless full-history replay without `previous_response_id`.
+`api_key_env` names an environment variable the user supplies; LingTai embeds
+no key and stores no credential for the external service behind it.
+
+The Codex/Setup credentials screen (`tui/internal/tui/login.go`) offers an
+explicit action that launches the independent `codex-pool` CLI's own `tui`
+subcommand as an interactive external process (the existing
+`tea.ExecProcess` pattern, same as the mail composer's `$EDITOR` launch),
+returning control to LingTai when that process exits. LingTai does not
+implement account storage, OAuth, quota display, or pool selection for that
+external tool — it only locates and shells out to the `codex-pool` binary on
+`PATH`. When the binary is not found, the TUI shows install/setup guidance
+and takes no automatic download, install, or profile action; selecting
+`codex-pool-standalone` never triggers the TUI's own builtin profile/OAuth
+flow.
+
+The old builtin `codex-pool` pool-weight UI in `tui/internal/tui/login.go`
+carries a future-deprecation notice pointing at `codex-pool-standalone`,
+shown only when the active consumer is that old multi-account Pool (not on
+native single-account Codex or every OpenAI-compatible preset/request).
+Native single-account Codex is not deprecated and carries no such notice.
 
 ## Model list curation
 
@@ -235,7 +272,7 @@ retirement cannot remove a referenced model.
 Named built-in preset revision guidance is one direct child per
 `BuiltinPresets()` name under
 `tui/internal/preset/skills/lingtai-preset-skill/reference/<name>/SKILL.md`.
-Those 13 children own provider-specific authoritative model lookup, gateway
+Those 14 children own provider-specific authoritative model lookup, gateway
 versus CLI/OAuth/catalog distinctions, exact TUI surfaces, and the reviewed
 revision procedure. The operation axis remains the five shared children:
 saved-presets, endpoint-capabilities, availability-save-gate,

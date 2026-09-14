@@ -1428,7 +1428,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		// so it is dropped like any other and stampAutoEnvVar mints
 		// DEEPSEEK_1_API_KEY.
 		if llm, ok := committed.Manifest["llm"].(map[string]interface{}); ok {
-			if !usesRegionDeclaredEnv(llm) {
+			if !m.preservesBuiltinAPIKeyEnv() && !usesRegionDeclaredEnv(llm) {
 				delete(llm, "api_key_env")
 			}
 		}
@@ -2351,6 +2351,29 @@ func maskAPIKey(key string) string {
 		return strings.Repeat("•", len(key))
 	}
 	return "••••••••" + key[len(key)-4:]
+}
+
+// preservesBuiltinAPIKeyEnv reports the one builtin whose env-var name is part
+// of an external local service contract rather than a provider-wide template
+// slot. The standalone codex-pool service documents CODEX_POOL_API_KEY, so a
+// model-only edit must keep that name while ordinary custom/provider builtins
+// continue through the fresh-slot allocator below.
+func (m PresetEditorModel) preservesBuiltinAPIKeyEnv() bool {
+	if !m.isBuiltin || m.original.Name != "codex-pool-standalone" {
+		return false
+	}
+	llm, ok := m.original.Manifest["llm"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	provider, _ := llm["provider"].(string)
+	apiCompat, _ := llm["api_compat"].(string)
+	wireAPI, _ := llm["wire_api"].(string)
+	baseURL, _ := llm["base_url"].(string)
+	envName, _ := llm["api_key_env"].(string)
+	return provider == "custom" && apiCompat == "openai" &&
+		wireAPI == "responses" && baseURL == "http://127.0.0.1:8765/v1" &&
+		envName == "CODEX_POOL_API_KEY"
 }
 
 // usesRegionDeclaredEnv reports whether llm's current api_key_env is a

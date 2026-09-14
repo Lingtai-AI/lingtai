@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -514,6 +515,19 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			}
 		}
 
+	case codexPoolStandaloneDoneMsg:
+		// Control returned from the external `codex-pool tui` process; report
+		// only whether it launched, never any account/quota detail (LingTai
+		// never inspects that tool's own state).
+		if msg.Err != nil {
+			m.message = fmt.Sprintf(i18n.T("login.codex_pool_standalone_error"), msg.Err.Error())
+			m.messageOK = false
+		} else {
+			m.message = i18n.T("login.codex_pool_standalone_returned")
+			m.messageOK = true
+		}
+		return m, nil
+
 	case tea.PasteMsg:
 		if m.editingLabel {
 			var cmd tea.Cmd
@@ -639,6 +653,42 @@ func (m LoginModel) setActiveCodexAccount(entry loginEntry) LoginModel {
 		m.activeCodexPath = ""
 	}
 	return m
+}
+
+// codexPoolStandaloneBinary is the external CLI/TUI frontend for the
+// independent codex-pool package (see the codex-pool-standalone preset).
+// LingTai never implements account storage, auth, or quota logic for it —
+// it only locates this binary on PATH and shells out to its own `tui`
+// subcommand, exactly like launchEditor's $EDITOR pattern in mail.go.
+const codexPoolStandaloneBinary = "codex-pool"
+
+// These narrow seams keep the entry point mockable without introducing a
+// second process abstraction or touching the external CLI's state.
+var (
+	codexPoolStandaloneLookPath = exec.LookPath
+	codexPoolStandaloneCommand  = exec.Command
+)
+
+// codexPoolStandaloneDoneMsg reports that an external `codex-pool tui`
+// process launched via launchCodexPoolStandaloneTUI has exited and control
+// has returned to LingTai.
+type codexPoolStandaloneDoneMsg struct {
+	Err error
+}
+
+// launchCodexPoolStandaloneTUI starts `codex-pool tui` as an interactive
+// external process (the existing tea.ExecProcess pattern) when the binary is
+// present on PATH. Returns nil when the binary is missing — callers show
+// install guidance instead; this never attempts an automatic download or
+// install.
+func launchCodexPoolStandaloneTUI() tea.Cmd {
+	if _, err := codexPoolStandaloneLookPath(codexPoolStandaloneBinary); err != nil {
+		return nil
+	}
+	cmd := codexPoolStandaloneCommand(codexPoolStandaloneBinary, "tui")
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return codexPoolStandaloneDoneMsg{Err: err}
+	})
 }
 
 // codexEntryPoolPath returns the absolute token-file path a Codex entry's pool
@@ -937,6 +987,20 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 		// Disable the selected Codex account in the pool (explicit weight 0)
 		// without removing its credential.
 		return m.adjustCodexPoolWeight(poolDisable), nil
+	case "p":
+		// Launch the independent codex-pool CLI's own `tui` as an external
+		// interactive process. Not tied to a selected row or to LingTai's own
+		// Codex OAuth accounts — codex-pool owns its own accounts entirely.
+		if m.codexChoosingMethod || m.codexLogging {
+			return m, nil
+		}
+		if cmd := launchCodexPoolStandaloneTUI(); cmd != nil {
+			m.message = ""
+			return m, cmd
+		}
+		m.message = i18n.T("login.codex_pool_standalone_missing")
+		m.messageOK = false
+		return m, nil
 	case "d", "delete", "backspace":
 		// Remove credential. For an in-flight OAuth, Del cancels the
 		// flow (matching the firstrun behavior). For a stored entry,
@@ -1235,6 +1299,12 @@ func (m LoginModel) View() string {
 			explain = fmt.Sprintf(i18n.T("login.codex_pool_model_classified_note"), m.poolModelCount)
 		}
 		b.WriteString("\n  " + StyleFaint.Render(explain) + "\n")
+		// Deprecation notice is scoped to the old builtin multi-account Pool
+		// consumer. Native single-account Codex and generic OpenAI-compatible
+		// presets must not inherit a provider-wide warning.
+		if preset.ClassifyCredentialFamily(m.activePreset) == preset.CredentialFamilyCodexPool {
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(i18n.T("login.codex_pool_deprecated_warning")) + "\n")
+		}
 	}
 
 	// Virtual Codex OAuth row — always shown so a Codex login is always
@@ -1330,6 +1400,7 @@ func (m LoginModel) View() string {
 		footerHint = "[Enter] " + i18n.T("login.reauth") + "  [Del] " + i18n.T("login.remove_hint") + "  [Esc] back"
 	}
 	b.WriteString(StyleFaint.Render("  "+footerHint) + "\n")
+	b.WriteString(StyleFaint.Render("  [p] "+i18n.T("login.codex_pool_standalone_hint")) + "\n")
 
 	return b.String()
 }
