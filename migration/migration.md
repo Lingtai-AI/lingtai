@@ -8,14 +8,17 @@ refresh_required: true
 related_files:
   - RELEASING.md
   - install.sh
-  - kernel-release.json
 maintenance: |
-  Keep the v1.0.8 release section aligned with the TUI/Portal release behavior,
-  kernel pin, and public installer update contract. Preserve the durable
-  migration-history and runtime-retirement record below; release tags preserve
+  Keep the v1.0.8 section as durable historical documentation. Its TUI/Portal
+  release behavior and kernel tag describe that release only; they are not a
+  current installer input or a repo-owned kernel pin. Release tags preserve
   this file's exact historical versions.
 ---
 # LingTai TUI and Portal 1.0.8 migration
+
+> Historical record for TUI/Portal 1.0.8. The release bundle, platform archive,
+> kernel pin, and coupled TUI/kernel behavior described below are not current
+> `install.sh`, `install.ps1`, release-workflow, or Homebrew inputs.
 
 ## Applies when
 

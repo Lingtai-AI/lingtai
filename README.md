@@ -93,7 +93,7 @@ It prints and records the exact full commit SHA for each repository. This mode i
 
 </details>
 
-The installer supports macOS, Linux, and WSL and installs `lingtai-tui` and `lingtai-portal`; on macOS it also provides `lingtai-desktop`.
+The installer supports macOS, Linux, and WSL and installs `lingtai-tui`; on macOS it also provides `lingtai-desktop`. The retained `lingtai-portal` codebase is deprecated and is not built or installed by the installer, release workflow, or Homebrew.
 
 Native Windows/PowerShell is also available:
 
@@ -101,7 +101,7 @@ Native Windows/PowerShell is also available:
 irm https://lingtai.ai/install.ps1 | iex
 ```
 
-This resolves the latest tagged release, verifies the Windows binary archive and the pinned kernel release against their published checksums, and installs both `lingtai-tui`/`lingtai-portal` and the Python runtime venv. Pass `-SkipVenv` to install the TUI/portal binaries only. See [`RELEASING.md`](RELEASING.md) for the exact contract.
+This resolves and verifies the latest TUI source and kernel release independently through `lingtai.ai`, builds `lingtai-tui.exe` locally, and installs the kernel artifact into the Python runtime venv. Each component has its own GitHub fallback. Pass `-SkipVenv` to install only the TUI binary. See [`RELEASING.md`](RELEASING.md) for the exact contract.
 
 <details>
 <summary><b>Native Windows current-main debugging install</b> — <code>install.ps1 -Latest</code></summary>
@@ -110,7 +110,7 @@ This resolves the latest tagged release, verifies the Windows binary archive and
 
 For a native Windows current-main debugging install, use `.\install.ps1 -Latest`. It is amd64-only; on ARM64, use WSL2 with `install.sh --latest`.
 
-It checks Git, Go, Node.js/npm (Node 20.19+, 22.12+, or a newer major; Node 21 and Node 22.<12 are unsupported), and supported 64-bit CPython 3.11–3.13 in one pass, then uses `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent` for only the missing or unsupported prerequisite packages (`Git.Git`, `GoLang.Go`, `OpenJS.NodeJS.LTS`, and/or `Python.Python.3.13`). Successful prerequisite installs are external winget changes and are not rolled back if a later package or checkout fails; LingTai destination writes still wait until validation/build succeeds. The installer refreshes this process PATH and revalidates before pinning full `main` SHAs, building both binaries, and installing the checked-out kernel source as a non-editable local build into `%USERPROFILE%\.lingtai-tui\runtime\venv`. If winget or package policy/elevation blocks the repair, it fails with exact remediation commands.
+It checks Git, Go, and supported 64-bit CPython 3.11–3.13 in one pass, then uses `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent` for only the missing or unsupported prerequisite packages (`Git.Git`, `GoLang.Go`, and/or `Python.Python.3.13`). Successful prerequisite installs are external winget changes and are not rolled back if a later package or checkout fails; LingTai destination writes still wait until validation/build succeeds. The installer refreshes this process PATH and revalidates before pinning full `main` SHAs, building the TUI, and installing the checked-out kernel source as a non-editable local build into `%USERPROFILE%\.lingtai-tui\runtime\venv`. Portal is not built in this mode. If winget or package policy/elevation blocks the repair, it fails with exact remediation commands.
 
 `-Latest -DryRun` reports the exact repair plan without invoking winget or writing destinations, PATH, or config. `-Latest` cannot be combined with `-Version`, `-ArchivePath`, or `-SkipVenv`. The separate website repository still needs a matching install-flow note.
 
@@ -130,7 +130,7 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 **TUI — `lingtai-tui`** brings LingTai to the terminal: set up projects and models, chat and read mail, check scientist status, and open `/knowledge`, `/skills`, `/system`, `/daemons`, or `/goal` when you need a deeper view. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
 
-**Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one agent or when you want to see how the work evolved.
+**Portal — `lingtai-portal`** is the retained, deprecated visualization codebase. It can be built separately for repository development and reads project state to show the live agent network, mail edges, and history; it is not built or installed by the installer, release workflow, or Homebrew.
 
 **External channels** bridge the *same* scientist to the platforms you already use — memory, tools, and history are shared across them, and they are doors into one assistant, not separate bots. Setup follows the current MCP/curated-addon documentation and requires explicit authorization; the TUI's `/mcp` panel is read-only and only inspects configured bridges and their status. Credentials live in local `.secrets/` files (never in Git); external side effects are treated as real actions, and channel addons support sender allowlists — the shipped example configs enable them by default, so open access must be opted into explicitly.
 

@@ -4,9 +4,13 @@ contract_version: 1
 related_files:
   - ANATOMY.md
   - README.md
+  - README.zh.md
+  - README.wen.md
+  - RELEASING.md
   - dev-guide-skill/SKILL.md
   - install.sh
   - install.ps1
+  - .github/workflows/release.yml
   - scripts/update.sh
   - scripts/fix.sh
   - scripts/verify.sh
@@ -15,6 +19,9 @@ related_files:
   - scripts/remove.ps1
   - scripts/test-install-sh.sh
   - scripts/test-install-sh-desktop.sh
+  - scripts/test-install-sh-mirror-bundle.sh
+  - scripts/test-install-ps1.ps1
+  - scripts/test-release-workflow-publish-gating.py
   - tui/architecture_documents_test.go
   - tui/CONTRACT.md
 maintenance: |
@@ -373,8 +380,7 @@ Concretely:
 | `--latest` (main dev mode) | `-Latest` | synced |
 | `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
-| `--skip-portal` (TUI-only) | `-SkipPortal` | synced (this PR) |
-| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: no-version auto/mirror resolves the exact stable source tag through verified `lingtai.ai` metadata and always builds TUI/Portal locally; if that source resolution is unavailable, both installers resolve the latest GitHub source release and build it; explicit versions/source/current-main and explicit GitHub retain existing GitHub behavior |
+| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: ordinary default installs resolve and verify TUI source through `lingtai.ai`, build only the TUI locally, and let the kernel independently resolve and verify its latest artifact; a TUI source failure falls back only to the latest GitHub TUI source, while the kernel keeps its own GitHub fallback |
 | `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
 | `--update` (in-place) | `-Update` | synced |
 | `--non-interactive` | `-NonInteractive` | synced |
@@ -388,6 +394,38 @@ Concretely:
 | `verify.sh` | `verify.ps1` | synced (this PR) |
 | `dev.sh` | `dev.ps1` | synced (this PR) |
 | `remove.sh` | `remove.ps1` | synced |
+
+### Installer and release provenance contract
+
+The ordinary default install resolves two independent inputs: the latest
+verified TUI source and the latest verified kernel release artifact. The TUI's
+normal transport is the producer-owned source projection served through
+`lingtai.ai`; the installer always builds `lingtai-tui` locally. If that TUI
+source route fails, only the TUI route falls back to the latest GitHub source
+release. The kernel resolves its own latest manifest and compatible artifact
+through `lingtai.ai`, with its own GitHub fallback. There is no shared provider
+switch, release bundle, or TUI-coupled kernel pin.
+
+`lingtai-portal` remains a separate deprecated codebase and may still be built
+directly for repository development. It is not built, installed, flagged, or
+recorded by `install.sh`, `install.ps1`, the root release workflow, or
+Homebrew. `lingtai-web` is a generic relay for verified producer assets; it
+does not build, select, reinterpret, or republish source contents.
+
+The root release workflow owns the deterministic source archive and checksum,
+derived from the tag's peeled commit SHA. It dispatches source-only asset
+metadata to the mirror and writes a TUI-only Homebrew formula. Existing
+historical release assets may remain on GitHub, but they are not current
+installer inputs. Annotated tags are peeled to commit SHAs for archives,
+checkouts, and provenance.
+
+Explicit modes retain their distinct contracts: version/ref/source/update
+paths remain explicit rather than silently becoming latest; `--from-source`
+and `-FromSource` select source builds; `--ref`/`-Ref` are TUI source refs and
+require the Python runtime opt-out; and `--latest`/`-Latest` independently
+pins both repositories' current-main commits, builds the TUI, and uses the
+checked-out kernel source. `-ArchivePath`/`-ChecksumPath` remains an explicit
+Windows local-TUI-artifact mode, and `-SkipVenv` remains the runtime opt-out.
 
 This contract was established by Jason 2026-08-15 (`install.sh` canonical;
 every update must also update Windows). It does not expand implementation,

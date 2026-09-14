@@ -177,9 +177,9 @@ normalized away on a tag target. (`update` already blocks moving a tag, so losin
 > like `git push origin :refs/tags/v1.2.3` proves the rule works only when it is
 > *rejected* — and the case where it is accepted is exactly the case above, a ruleset
 > that looks applied but matches no ref. This repository has 117 `v*` tags, and
-> `release.yml` builds the Homebrew formula from
-> `archive/refs/tags/${TAG}.tar.gz` with a pinned sha256; deleting a published tag
-> 404s that URL and breaks the already-shipped formula for every user of that version.
+> `release.yml` publishes a deterministic source archive and checksum, and the
+> Homebrew formula pins that producer-owned archive; deleting a published tag
+> breaks the already-shipped release assets and formula for every user of that version.
 
 Probe with a throwaway tag instead, never a release tag:
 
@@ -195,10 +195,10 @@ below.
 
 The probe push also fires `release.yml`: its trigger is `on: push: tags: ['v*']`, the
 same glob the ruleset targets, so any tag that exercises the rule necessarily starts
-the release pipeline. Expect `source-release` to succeed and **publish a public GitHub
-release named `v0.0.0-ruleset-probe`** — it has no tag-shape gate — while
-`update-homebrew` and `windows-release` fail their exact-`vX.Y.Z` gate, which is the
-correct outcome and not a fault to chase. Delete the release afterwards:
+the release pipeline. `source-release` fails closed at its exact-`vX.Y.Z` gate for
+`v0.0.0-ruleset-probe`, and `update-homebrew` is skipped because it needs that job;
+no release or Homebrew asset should be published. This is the correct outcome and
+not a fault to chase.
 
 ```bash
 gh release delete v0.0.0-ruleset-probe --yes
@@ -247,9 +247,9 @@ gh api repos/Lingtai-AI/lingtai/rulesets/<id> \
 ```
 
 Re-pushing `vX.Y.Z` in step 3 re-triggers `release.yml`, which is what you want here:
-`source-release` detects the existing release and preserves it, and `update-homebrew`
-recomputes the sha256 against the new tarball and pushes the formula — the exact repair
-the stale-pin concern above calls for.
+`source-release` regenerates the deterministic archive/checksum from the peeled
+commit and preserves the existing release, and `update-homebrew` consumes that
+producer checksum and pushes the formula.
 
 Step 4's read-back must show `enforcement: "active"` *and* a non-empty
 `conditions.ref_name.include`. Checking only `enforcement` reproduces the original bug:

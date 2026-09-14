@@ -42,6 +42,39 @@ git -C "$repo" commit -qm "initial"
 tagged_commit="$(git -C "$repo" rev-parse HEAD)"
 git -C "$repo" tag v1.2.3
 
+# The installer pair has one managed product: the TUI. Keep retired Portal,
+# Node/npm, bundle-manifest, and kernel-pin surfaces from returning as hidden
+# requirements or receipt fields.
+for installer in "$ROOT_DIR/install.sh" "$ROOT_DIR/install.ps1"; do
+  installer_text="$(<"$installer")"
+  for forbidden in 'lingtai-portal' 'SKIP_PORTAL' '--skip-portal' 'node' 'npm' 'lingtai.tui.bundle' 'kernel-release.json'; do
+    if printf '%s' "$installer_text" | grep -Fqi -- "$forbidden"; then
+      fail "$installer must not retain retired installer surface '$forbidden'"
+    fi
+  done
+done
+
+# Annotated tags expose a tag-object SHA and a distinct peeled commit SHA. The
+# checkout helper must build/provenance against the latter.
+git -C "$repo" tag -a -m 'annotated release' v1.2.4
+tag_object_sha="$(git -C "$repo" rev-parse refs/tags/v1.2.4)"
+annotated_commit_sha="$(git -C "$repo" rev-parse refs/tags/v1.2.4^{commit})"
+[[ "$tag_object_sha" != "$annotated_commit_sha" ]] || fail "annotated fixture must have distinct tag-object and commit SHAs"
+annotated_remote="$tmp/annotated-remote.git"
+git clone -q --bare "$repo" "$annotated_remote"
+assert_eq "$annotated_commit_sha" "$(peeled_tag_commit "$annotated_remote" v1.2.4)" \
+  "peeled_tag_commit returns the annotated tag's commit SHA"
+(
+  REPO="$annotated_remote"
+  BUILD_DIR="$tmp/peeled-checkout"
+  ensure_build_deps() { :; }
+  clone_tui_tag v1.2.4 || fail "clone_tui_tag should accept an annotated release tag"
+  assert_eq "$annotated_commit_sha" "$RESOLVED_COMMIT" \
+    "clone_tui_tag records the peeled commit, not the annotated tag-object SHA"
+  assert_eq "$annotated_commit_sha" "$(git -C "$BUILD_DIR" rev-parse HEAD)" \
+    "clone_tui_tag checkout HEAD is the peeled commit"
+)
+
 assert_eq "v1.2.3" "$(release_tag_name "v1.2.3")" "plain release tag"
 assert_eq "v1.2.3" "$(release_tag_name "refs/tags/v1.2.3")" "full release tag ref"
 assert_eq "" "$(release_tag_name "v1.2")" "partial release tag rejected"
@@ -61,21 +94,6 @@ old_go_dl_base="$GO_DL_BASE"
 GO_DL_BASE="https://example.test/go"
 assert_eq "https://example.test/go/go1.26.1.linux-amd64.tar.gz" "$(go_toolchain_download_url 1.26.1 linux amd64)" "Go toolchain download URL"
 GO_DL_BASE="$old_go_dl_base"
-assert_eq "20.18.0" "$(normalize_node_version v20.18.0)" "node version normalization"
-if portal_node_supported 20.18.0; then
-  fail "Node 20.18 should not satisfy portal requirement"
-fi
-portal_node_supported 20.19.0 || fail "Node 20.19 should satisfy portal requirement"
-if portal_node_supported 22.11.0; then
-  fail "Node 22.11 should not satisfy portal requirement"
-fi
-portal_node_supported 22.12.0 || fail "Node 22.12 should satisfy portal requirement"
-portal_node_supported 23.0.0 || fail "Node 23 should satisfy portal requirement"
-assert_eq "node-v22.12.0-linux-x64.tar.gz" "$(node_toolchain_archive_name 22.12.0 linux x64)" "Node toolchain archive name"
-old_node_dl_base="$NODE_DL_BASE"
-NODE_DL_BASE="https://example.test/node"
-assert_eq "https://example.test/node/v22.12.0/node-v22.12.0-linux-x64.tar.gz" "$(node_toolchain_download_url 22.12.0 linux x64)" "Node toolchain download URL"
-NODE_DL_BASE="$old_node_dl_base"
 assert_eq "v1.2.3" "$(version_for_checkout "$repo" "v1.2.3")" "exact tag version"
 assert_eq "v1.2.3" "$(version_for_checkout "$repo" "refs/tags/v1.2.3")" "exact full tag ref version"
 assert_eq 'quote\"slash\\' "$(json_escape 'quote"slash\')" "json quote/backslash escaping"
@@ -359,14 +377,12 @@ SH
   export HOME="$fakehome"
   export UV_INSTALL_DIR="$fake_uv_dir"
   export SKIP_VENV=0
-  # Exercise the venv-creation failure path rather than the new fail-loud
-  # missing-bundle guard; the manifest body is not parsed until after venv setup.
-  export BUNDLE_MANIFEST_JSON='{}'
-  export BUNDLE_REQUIRED=1
 
-  out="$(ensure_runtime_venv "$fakehome/bin" 2>&1)"
+  if out="$(ensure_runtime_venv "$fakehome/bin" 2>&1)"; then
+    fail "ensure_runtime_venv should fail when uv and the supported Python fallback both fail"
+  fi
   case "$out" in
-    *"no Python 3.11+ with venv/ensurepip is available"*) ;;
+    *"uv could not create the runtime venv and no supported Python fallback is available"*) ;;
     *) fail "runtime venv should warn when uv fails and system Python lacks ensurepip; output: $out" ;;
   esac
   [[ ! -e "$fakehome/fallback-invoked" ]] || fail "ensure_runtime_venv fell back to rejected system python"
@@ -411,17 +427,79 @@ UPDATE_MODE=0
 INSTALL_PREFIX=""
 BIN_DIR_OVERRIDE=""
 FROM_SOURCE=0
-SKIP_PORTAL=0
 SKIP_VENV=0
 SKIP_DESKTOP=0
 NON_INTERACTIVE=0
-parse_args --version v9.9.9 --bin-dir "$tmp/mybin" --from-source --skip-portal --skip-venv --skip-desktop
+parse_args --version v9.9.9 --bin-dir "$tmp/mybin" --from-source --skip-venv --skip-desktop
 assert_eq "v9.9.9" "$VERSION" "version flag (install mode)"
 assert_eq "$tmp/mybin" "$BIN_DIR_OVERRIDE" "bin-dir flag"
 assert_eq "1" "$FROM_SOURCE" "from-source flag"
-assert_eq "1" "$SKIP_PORTAL" "skip-portal flag"
 assert_eq "1" "$SKIP_VENV" "skip-venv flag"
 assert_eq "1" "$SKIP_DESKTOP" "skip-desktop flag"
+
+# Stable version, explicit GitHub-source, and update routes all use the source
+# builder. A test-only prebuilt hook fails loudly so a future release-asset
+# branch cannot be hidden by a source-build fallback.
+run_explicit_source_route() (
+  local label="$1"
+  shift
+  local route_root="$tmp/source-route-$label"
+  local route_bin="$route_root/bin"
+  local route_calls=()
+  mkdir -p "$route_root/home"
+  export HOME="$route_root/home"
+  export GOPROXY="offline-fixture"
+  BUILD_DIR="$route_root/build"
+  REF=""
+  VERSION=""
+  LATEST_MAIN_MODE=0
+  UPDATE_MODE=0
+  REINSTALL_OK=0
+  INSTALL_PREFIX=""
+  BIN_DIR_OVERRIDE=""
+  FROM_SOURCE=0
+  SKIP_VENV=0
+  SKIP_DESKTOP=0
+  NON_INTERACTIVE=0
+  SOURCE_ARG="auto"
+  TUI_PROVIDER=""
+  INSTALL_KIND=""
+
+  resolve_bin_dir() {
+    BIN_DIR="$route_bin"
+    mkdir -p "$BIN_DIR"
+  }
+  validate_fresh_install_state() { :; }
+  validate_install_target() { :; }
+  ensure_runtime_venv() { :; }
+  write_install_metadata() { :; }
+  print_path_hint() { :; }
+  should_install_desktop() { return 1; }
+  latest_release_tag() { printf 'v1.2.3'; }
+  try_release_asset() { fail "$label invoked the removed prebuilt TUI path"; }
+  build_from_source() {
+    local ref="$1"
+    route_calls+=("$ref")
+    mkdir -p "$BIN_DIR"
+    printf '#!/usr/bin/env bash\necho "lingtai-tui %s"\n' "$ref" > "$BIN_DIR/lingtai-tui"
+    chmod 755 "$BIN_DIR/lingtai-tui"
+    ln -sfn "$BIN_DIR/lingtai-tui" "$BIN_DIR/lingtai"
+    VERSION="$ref"
+    RESOLVED_REF="$ref"
+    RESOLVED_COMMIT=""
+    INSTALL_KIND="source-build"
+  }
+
+  main "$@"
+  assert_eq "1" "${#route_calls[@]}" "$label invokes source build once"
+  assert_eq "v1.2.3" "${route_calls[0]}" "$label source build receives the release tag"
+  assert_eq "source-build" "$INSTALL_KIND" "$label records source-build provenance"
+  assert_eq "github" "$TUI_PROVIDER" "$label uses the GitHub source route"
+)
+
+run_explicit_source_route version --version v1.2.3 --non-interactive
+run_explicit_source_route source-github --source github --non-interactive
+run_explicit_source_route update --update --prefix "$tmp/source-route-update-prefix" --version v1.2.3 --non-interactive
 
 SKIP_DESKTOP=0
 UPDATE_MODE=0
@@ -466,7 +544,6 @@ UPDATE_MODE=0
 INSTALL_PREFIX=""
 BIN_DIR_OVERRIDE=""
 FROM_SOURCE=0
-SKIP_PORTAL=0
 SKIP_VENV=0
 SKIP_DESKTOP=0
 NON_INTERACTIVE=0
@@ -475,7 +552,7 @@ printf 'second\n' >> "$repo/file.txt"
 git -C "$repo" commit -qam "second"
 branch_version="$(version_for_checkout "$repo" "main")"
 case "$branch_version" in
-  v1.2.3-1-g*) ;;
+  v1.2.4-1-g*) ;;
   *) fail "branch/hash installs should keep git describe fallback, got '$branch_version'" ;;
 esac
 
@@ -484,8 +561,7 @@ bin_dir="$prefix/bin"
 global_dir="$tmp/home/.lingtai-tui"
 mkdir -p "$bin_dir"
 tui_path="$bin_dir/lingtai-tui"
-portal_path="$bin_dir/lingtai-portal"
-touch "$tui_path" "$portal_path"
+touch "$tui_path"
 
 replacement_src="$tmp/replacement-src"
 printf 'new-binary\n' > "$replacement_src"
@@ -516,15 +592,14 @@ write_install_metadata \
   "v1.2.3" \
   "$tagged_commit" \
   "v1.2.3" \
-  "$tui_path" \
-  "$portal_path"
+  "$tui_path"
 
-python3 - "$global_dir/install.json" "$prefix" "$bin_dir" "$tagged_commit" "$tui_path" "$portal_path" <<'PY'
+python3 - "$global_dir/install.json" "$prefix" "$bin_dir" "$tagged_commit" "$tui_path" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, prefix, bin_dir, commit, tui_path, portal_path = sys.argv[1:]
+path, prefix, bin_dir, commit, tui_path = sys.argv[1:]
 data = json.loads(Path(path).read_text())
 
 assert data["schema"] == "lingtai.tui.install/v1"
@@ -537,7 +612,7 @@ assert data["requested_ref"] == "v1.2.3"
 assert data["resolved_ref"] == "v1.2.3"
 assert data["resolved_commit"] == commit
 assert data["stamped_version"] == "v1.2.3"
-assert data["managed_binaries"] == [tui_path, portal_path]
+assert data["managed_binaries"] == [tui_path]
 assert "/lingtai-install-" not in json.dumps(data)
 PY
 
@@ -551,8 +626,7 @@ write_install_metadata \
   "main" \
   "$tagged_commit" \
   "v1.2.3-1-gabcdef0" \
-  "$tui_path" \
-  ""
+  "$tui_path"
 
 python3 - "$single_global_dir/install.json" "$tui_path" <<'PY'
 import json
@@ -581,8 +655,7 @@ write_install_metadata \
   "$special_ref" \
   "$tagged_commit" \
   "$special_version" \
-  "$tui_path" \
-  ""
+  "$tui_path"
 
 python3 - "$special_global_dir/install.json" "$special_prefix" "$special_bin_dir" "$special_ref" "$special_version" "$tui_path" <<'PY'
 import json
@@ -606,7 +679,6 @@ non_ascii_bin_dir="$non_ascii_prefix/bin"
 non_ascii_ref="$(printf 'feature/jos\303\251-\350\267\257\345\276\204')"
 non_ascii_version="$(printf 'v1.2.3-jos\303\251-\350\267\257\345\276\204')"
 non_ascii_tui_path="$non_ascii_bin_dir/lingtai-tui"
-non_ascii_portal_path="$non_ascii_bin_dir/lingtai-portal"
 write_install_metadata \
   "$non_ascii_global_dir" \
   "$non_ascii_prefix" \
@@ -616,15 +688,14 @@ write_install_metadata \
   "$non_ascii_ref" \
   "$tagged_commit" \
   "$non_ascii_version" \
-  "$non_ascii_tui_path" \
-  "$non_ascii_portal_path"
+  "$non_ascii_tui_path"
 
-python3 - "$non_ascii_global_dir/install.json" "$non_ascii_prefix" "$non_ascii_bin_dir" "$non_ascii_ref" "$non_ascii_version" "$non_ascii_tui_path" "$non_ascii_portal_path" <<'PY'
+python3 - "$non_ascii_global_dir/install.json" "$non_ascii_prefix" "$non_ascii_bin_dir" "$non_ascii_ref" "$non_ascii_version" "$non_ascii_tui_path" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, prefix, bin_dir, ref, version, tui_path, portal_path = sys.argv[1:]
+path, prefix, bin_dir, ref, version, tui_path = sys.argv[1:]
 data = json.loads(Path(path).read_text(encoding="utf-8"))
 
 assert data["prefix"] == prefix
@@ -632,7 +703,7 @@ assert data["bin_dir"] == bin_dir
 assert data["requested_ref"] == ref
 assert data["resolved_ref"] == ref
 assert data["stamped_version"] == version
-assert data["managed_binaries"] == [tui_path, portal_path]
+assert data["managed_binaries"] == [tui_path]
 PY
 
 echo "install.sh helper tests passed"
