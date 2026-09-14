@@ -101,7 +101,7 @@ Native Windows/PowerShell is also available:
 irm https://lingtai.ai/install.ps1 | iex
 ```
 
-This resolves and verifies the latest TUI source and kernel release independently through `lingtai.ai`, builds `lingtai-tui.exe` locally, and installs the kernel artifact into the Python runtime venv. Each component has its own GitHub fallback. Pass `-SkipVenv` to install only the TUI binary. See [`RELEASING.md`](RELEASING.md) for the exact contract.
+This resolves and verifies the latest TUI source and kernel release independently through `lingtai.ai`, builds `lingtai-tui.exe` locally, and builds/installs the kernel from its verified manifest-declared source archive into the Python runtime venv. Each component has its own GitHub fallback. Pass `-SkipVenv` to install only the TUI binary. See [`RELEASING.md`](RELEASING.md) for the exact contract.
 
 <details>
 <summary><b>Native Windows current-main debugging install</b> — <code>install.ps1 -Latest</code></summary>

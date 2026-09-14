@@ -380,7 +380,7 @@ Concretely:
 | `--latest` (main dev mode) | `-Latest` | synced |
 | `--bin-dir <dir>` / `--prefix <dir>` | `-BinDir` | synced |
 | `--skip-python` / `--skip-venv` | `-SkipVenv` | synced |
-| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: ordinary default installs resolve and verify TUI source through `lingtai.ai`, build only the TUI locally, and let the kernel independently resolve and verify its latest artifact; a TUI source failure falls back only to the latest GitHub TUI source, while the kernel keeps its own GitHub fallback |
+| `--source auto\|github\|mirror` (`gitee` retired) | `-Source` | synced: ordinary default installs independently resolve and verify the TUI source and manifest-declared kernel source through `lingtai.ai`, then build and install both locally while keeping version and provider resolution independent; a TUI source failure falls back only to the latest GitHub TUI source, while the kernel keeps its own GitHub fallback |
 | `--ref <ref>` / `--from-source` | `-Ref` / `-FromSource` | synced |
 | `--update` (in-place) | `-Update` | synced |
 | `--non-interactive` | `-NonInteractive` | synced |
@@ -398,12 +398,13 @@ Concretely:
 ### Installer and release provenance contract
 
 The ordinary default install resolves two independent inputs: the latest
-verified TUI source and the latest verified kernel release artifact. The TUI's
+verified TUI source and the latest verified kernel release source archive. The TUI's
 normal transport is the producer-owned source projection served through
 `lingtai.ai`; the installer always builds `lingtai-tui` locally. If that TUI
 source route fails, only the TUI route falls back to the latest GitHub source
-release. The kernel resolves its own latest manifest and compatible artifact
-through `lingtai.ai`, with its own GitHub fallback. There is no shared provider
+release. The kernel resolves its own latest manifest and its declared source
+archive through `lingtai.ai`, with its own GitHub fallback, then builds and
+installs that archive from an explicit local path. There is no shared provider
 switch, release bundle, or TUI-coupled kernel pin.
 
 `lingtai-portal` remains a separate deprecated codebase and may still be built

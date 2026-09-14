@@ -7,7 +7,8 @@
     With no explicit version/ref/provider, the TUI and kernel independently
     resolve their latest releases through lingtai.ai. The TUI source archive is
     verified, extracted, and always built locally. The kernel is installed from
-    a verified local release artifact. A component whose mirror path is
+    a verified local source archive selected from its release manifest, even
+    when compatible wheels are published. A component whose mirror path is
     unavailable falls back to its own latest GitHub release without changing
     the other component's provider.
 
@@ -717,6 +718,7 @@ function Confirm-KernelManifest {
 
     $seen = @{}
     $hasSdist = $false
+    $hasDeclaredSdist = $false
     foreach ($art in @($data.artifacts)) {
         if ($null -eq $art) {
             Fail 'invalid kernel release manifest: artifact must be an object'
@@ -746,6 +748,7 @@ function Confirm-KernelManifest {
             }
         } elseif ($art.kind -eq 'sdist') {
             $hasSdist = $true
+            if ($filename -eq $data.sdist_fallback) { $hasDeclaredSdist = $true }
             if ($filename -ne "lingtai-$expectedVersion.tar.gz") {
                 Fail "invalid kernel release manifest: sdist artifact '$filename' is not the selected version"
             }
@@ -756,7 +759,7 @@ function Confirm-KernelManifest {
             Fail "invalid kernel release manifest: artifact '$filename' has unsupported kind '$($art.kind)'"
         }
     }
-    if (-not $hasSdist -or -not $seen.ContainsKey($data.sdist_fallback) -or $data.sdist_fallback -notmatch '\.tar\.gz$') {
+    if (-not $hasSdist -or -not $hasDeclaredSdist -or $data.sdist_fallback -notmatch '\.tar\.gz$') {
         Fail 'invalid kernel release manifest: sdist_fallback is not a listed sdist'
     }
     return $data
@@ -911,51 +914,31 @@ the TUI binary only.
 "@
 }
 
-# Get-VenvWheelTag returns the venv interpreter's "cpXY-cpXY-win_amd64" tag by
-# querying the venv's own Python -- never assumed from the bootstrap
-# interpreter, since venv creation could in principle target a different
-# minor version than the one that created it.
-function Get-VenvWheelTag {
-    param([string]$VenvPython)
-    # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
-    # 5.1's native argument-array-to-command-line reconstruction mishandles
-    # embedded double quotes, corrupting the string the interpreter receives.
-    $probe = & $VenvPython '-c' 'import struct, sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
-    if ($LASTEXITCODE -ne 0 -or $probe -notmatch '^cp3(11|12|13):64$') {
-        Fail "The managed venv must use 64-bit CPython 3.11, 3.12, or 3.13 before a win_amd64 wheel can be selected (got '$probe')."
-    }
-    $tag = ($probe -split ':')[0]
-    return "$tag-$tag-win_amd64"
-}
-
-# Select-KernelWheel picks the manifest artifact whose
-# "<python_tag>-<abi_tag>-<platform_tag>" combination equals $WheelTag exactly
-# -- mirrors install.sh's select_kernel_wheel matching rule, restricted to the
-# cp311/cp312/cp313 win_amd64 wheels this Windows slice supports. Fails loud
-# if no match exists; there is no sdist fallback on native Windows (a build
-# toolchain is not assumed present).
-function Select-KernelWheel {
-    param($KernelManifest, [string]$WheelTag)
+# Get-KernelSourceArtifact returns the exact sdist named by the existing
+# release-manifest `sdist_fallback` field. Wheel records remain valid manifest
+# data, but are deliberately not candidates for the stable/default installer.
+function Get-KernelSourceArtifact {
+    param($KernelManifest)
     foreach ($art in @($KernelManifest.artifacts)) {
-        if ($art.kind -ne 'wheel') { continue }
-        $combo = "$($art.python_tag)-$($art.abi_tag)-$($art.platform_tag)"
-        if ($combo -eq $WheelTag) { return $art }
+        if ($art.kind -eq 'sdist' -and $art.filename -eq $KernelManifest.sdist_fallback) {
+            return $art
+        }
     }
-    Fail "Pinned kernel release $($KernelManifest.kernel_version) publishes no wheel matching '$WheelTag'. This Windows install requires an exact cp311/cp312/cp313 win_amd64 wheel; there is no sdist fallback natively."
+    Fail "Kernel release $($KernelManifest.kernel_tag) has no declared sdist source artifact."
 }
 
-# Install-KernelWheel downloads the selected wheel, verifies its manifest
-# digest, and installs it into the venv by explicit local file path.
+# Install-KernelSource downloads the declared source archive, verifies its
+# manifest digest, and gives its local path to pip so pip builds/installs it.
 # LingTai's own bytes are NEVER requested from a package index by name.
-function Install-KernelWheel {
-    param([string]$VenvPython, $Wheel, [string]$KernelTag, [string]$StageDir, [string]$Provider)
+function Install-KernelSource {
+    param([string]$VenvPython, $SourceArtifact, [string]$KernelTag, [string]$StageDir, [string]$Provider)
 
-    $downloadUrl = Get-KernelAssetUrl -KernelTag $KernelTag -Name $Wheel.filename -Provider $Provider
-    if (-not $downloadUrl) { Fail "Kernel release $KernelTag has no $($Wheel.filename) asset even though its manifest references it." }
-    $dest = Join-Path $StageDir $Wheel.filename
-    Write-Info "Downloading kernel wheel: $($Wheel.filename) (kernel $KernelTag) ..."
+    $downloadUrl = Get-KernelAssetUrl -KernelTag $KernelTag -Name $SourceArtifact.filename -Provider $Provider
+    if (-not $downloadUrl) { Fail "Kernel release $KernelTag has no $($SourceArtifact.filename) asset even though its manifest references it." }
+    $dest = Join-Path $StageDir $SourceArtifact.filename
+    Write-Info "Downloading kernel source archive: $($SourceArtifact.filename) (kernel $KernelTag) ..."
     if ($Provider -eq 'mirror') {
-        Save-MirrorAsset -RequestedRepo $KernelRepo -Tag $KernelTag -Name $Wheel.filename -Destination $dest
+        Save-MirrorAsset -RequestedRepo $KernelRepo -Tag $KernelTag -Name $SourceArtifact.filename -Destination $dest
     } else {
         try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $dest -UseBasicParsing
@@ -964,26 +947,24 @@ function Install-KernelWheel {
         }
     }
     $actual = Get-Sha256Hex -Path $dest
-    if ($actual -ne $Wheel.sha256) {
-        Fail "Checksum mismatch for $($Wheel.filename). Expected $($Wheel.sha256) but got $actual. Refusing to install an unverified kernel artifact. Retained at $dest for diagnosis."
+    if ($actual -ne $SourceArtifact.sha256) {
+        Fail "Checksum mismatch for $($SourceArtifact.filename). Expected $($SourceArtifact.sha256) but got $actual. Refusing to install an unverified kernel source archive. Retained at $dest for diagnosis."
     }
-    Write-Ok "Verified SHA-256 for $($Wheel.filename)"
+    Write-Ok "Verified SHA-256 for $($SourceArtifact.filename)"
 
     # Explicit local path: pip never requests the package name "lingtai" from
-    # any index here -- only third-party dependency resolution goes through
-    # the configured dependency index.
-    Write-Info "Installing lingtai from the verified local wheel (dependencies resolve via the configured package index) ..."
+    # any index here -- only third-party dependency resolution uses an index.
+    Write-Info "Building and installing lingtai from the verified local source archive (dependencies resolve via the configured package index) ..."
     # pip's stdout is voided (Out-Null), not just left to print: PowerShell
     # has no per-statement return-value isolation, so an unsuppressed native
     # command's stdout becomes part of this function's own output and, from
-    # there, leaks into any caller that bare-calls it -- this previously
-    # corrupted Install-Venv's return value ($kernelMeta) at its call site.
-    # $LASTEXITCODE is unaffected by Out-Null.
+    # there, leaks into any caller that bare-calls it. $LASTEXITCODE remains
+    # available after Out-Null.
     & $VenvPython '-m' 'pip' 'install' $dest | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "pip install of the local wheel failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { Fail "pip install of the local source archive failed (exit $LASTEXITCODE)." }
 }
 
-# Confirm-KernelImport preserves the release-wheel import/version/non-editable
+# Confirm-KernelImport preserves the release-source import/version/non-editable
 # verification contract. When VenvDir + KernelSource are supplied by -Latest,
 # it additionally requires the import to stay inside that managed venv and PEP
 # 610 provenance to identify the exact non-editable pinned source checkout.
@@ -998,7 +979,7 @@ function Confirm-KernelImport {
     if ($strictSource -and ([string]::IsNullOrWhiteSpace($VenvDir) -or [string]::IsNullOrWhiteSpace($KernelSource))) {
         Fail "Strict kernel source verification requires both VenvDir and KernelSource."
     }
-    $mode = if ($strictSource) { 'source' } else { 'wheel' }
+    $mode = if ($strictSource) { 'source' } else { 'release' }
     $expectedArg = if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) { '-' } else { $ExpectedVersion }
     $venvArg = if ($strictSource) { $VenvDir } else { '-' }
     $sourceArg = if ($strictSource) { $KernelSource } else { '-' }
@@ -1090,7 +1071,7 @@ except ImportError as exc:
 
 mode = sys.argv[1]
 expected_version = '' if sys.argv[2] == '-' else sys.argv[2]
-if mode not in ('wheel', 'source'):
+if mode not in ('release', 'source'):
     fail('INVALID_VERIFICATION_MODE', mode)
 
 module_value = getattr(lingtai, '__file__', None)
@@ -1100,7 +1081,7 @@ version = dist.version
 if expected_version and version != expected_version:
     fail('VERSION_MISMATCH', str(version))
 
-direct_source = '<wheel>'
+direct_source = '<release-source>'
 if mode == 'source':
     venv_dir = Path(sys.argv[3]).resolve()
     kernel_source = Path(sys.argv[4]).resolve()
@@ -1150,7 +1131,7 @@ else:
     except Exception:
         pass
     if editable:
-        fail('DIRECT_URL_EDITABLE', 'release wheel install is editable')
+        fail('DIRECT_URL_EDITABLE', 'release source install is editable')
 
 print('OK')
 print(str(version))
@@ -1159,7 +1140,7 @@ print(str(direct_source))
 '@
     $probe = @(& $VenvPython '-c' $probeScript $mode $expectedArg $venvArg $sourceArg 2>$null)
     if ($LASTEXITCODE -ne 0 -or $probe.Count -lt 4 -or $probe[0].Trim() -ne 'OK') {
-        $kind = if ($strictSource) { 'pinned main kernel source' } else { 'release kernel wheel' }
+        $kind = if ($strictSource) { 'pinned main kernel source' } else { 'release kernel source archive' }
         Fail "Post-install verification failed for the $kind ($($probe -join '; '))"
     }
     $installedVersion = $probe[1].Trim()
@@ -1169,7 +1150,7 @@ print(str(direct_source))
     if ($strictSource) {
         Write-Ok "Verified lingtai $installedVersion imports from the managed venv and matches the non-editable pinned kernel source."
     } else {
-        Write-Ok "Verified lingtai $installedVersion imports and is a non-editable wheel install."
+        Write-Ok "Verified lingtai $installedVersion imports and is a non-editable release source install."
     }
     return $installedVersion
 }
@@ -1181,16 +1162,16 @@ function Write-KernelProvenance {
         [string]$VenvDir,
         [string]$KernelTag,
         [string]$KernelVersion,
-        [string]$WheelFilename,
-        [string]$WheelSha256,
+        [string]$SourceFilename,
+        [string]$SourceSha256,
         [string]$Provider
     )
     $provenance = [ordered]@{
         schema          = 'lingtai.tui.kernel-provenance/v1'
         kernel_tag      = $KernelTag
         kernel_version  = $KernelVersion
-        wheel_filename  = $WheelFilename
-        wheel_sha256    = $WheelSha256
+        source_filename = $SourceFilename
+        source_sha256   = $SourceSha256
         provider        = $Provider
         installed_at    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     }
@@ -1312,7 +1293,7 @@ function Install-Venv {
 
     $venvDir = Join-Path $GlobalDir 'runtime\venv'
     # Every native-command/void-intent call below is piped to Out-Null (see
-    # Install-KernelWheel for why: leaked stdout here previously corrupted
+    # Install-KernelSource for why: leaked stdout here previously corrupted
     # this function's `return @{...}` into a mixed array, which failed with
     # "The property 'KernelSource' cannot be found on this object" at the
     # Invoke-Main call site -- confirmed from a live CI failure). Out-Null
@@ -1331,7 +1312,6 @@ function Install-Venv {
 
     Remove-OrphanedKernelDistInfo -VenvDir $venvDir
 
-    $wheelTag = Get-VenvWheelTag -VenvPython $venvPython
     $failures = New-Object System.Collections.Generic.List[string]
     foreach ($provider in @('mirror', 'github')) {
         try {
@@ -1339,12 +1319,12 @@ function Install-Venv {
             $kernelTag = Resolve-KernelLatestTag -Provider $provider
             $manifestName = 'lingtai-kernel-release-manifest.json'
             $manifest = Get-KernelManifest -KernelTag $kernelTag -ManifestFilename $manifestName -Provider $provider
-            $wheel = Select-KernelWheel -KernelManifest $manifest -WheelTag $wheelTag
+            $sourceArtifact = Get-KernelSourceArtifact -KernelManifest $manifest
             $stage = New-StagingDir
-            Install-KernelWheel -VenvPython $venvPython -Wheel $wheel -KernelTag $kernelTag -StageDir $stage -Provider $provider | Out-Null
+            Install-KernelSource -VenvPython $venvPython -SourceArtifact $sourceArtifact -KernelTag $kernelTag -StageDir $stage -Provider $provider | Out-Null
             $installedVersion = Confirm-KernelImport -VenvPython $venvPython -ExpectedVersion $manifest.kernel_version
             Write-KernelProvenance -VenvDir $venvDir -KernelTag $kernelTag -KernelVersion $installedVersion `
-                -WheelFilename $wheel.filename -WheelSha256 $wheel.sha256 -Provider $provider | Out-Null
+                -SourceFilename $sourceArtifact.filename -SourceSha256 $sourceArtifact.sha256 -Provider $provider | Out-Null
             return @{
                 KernelSource     = 'release'
                 KernelReleaseTag = $kernelTag
@@ -1427,7 +1407,7 @@ function Initialize-BuildMirrors {
     # Same mirror install.sh's PYPI_INDEX_URL_GITEE_DEFAULT uses, so a CN host
     # resolves Python dependencies from a reachable index too. LingTai's own
     # bytes are still never fetched from an index by name -- only the local
-    # wheel/checkout path is installed, and this affects its dependencies only.
+    # source-archive/checkout path is installed, and this affects its dependencies only.
     $index = 'https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple'
     Write-Step "Python dependency index: $index"
     return $index
@@ -1872,7 +1852,6 @@ function Install-MainVenv {
     }
     $python = Join-Path $venvDir 'Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { Fail "-Latest runtime venv has no Scripts\python.exe at $venvDir." }
-    Get-VenvWheelTag -VenvPython $python | Out-Null
     Remove-OrphanedKernelDistInfo -VenvDir $venvDir
     $head = (& git -C $KernelSource rev-parse HEAD).Trim().ToLowerInvariant()
     if ($head -ne $KernelSha) { Fail "Kernel source changed before install: expected $KernelSha, got $head." }
