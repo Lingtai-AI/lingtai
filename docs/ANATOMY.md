@@ -23,6 +23,7 @@ related_files:
   - docs/discussion-log.md
   - docs/example-role.md
   - docs/headless-runtime-contract.md
+  - docs/headless-creator-spec.md
   - docs/tui-agent-alignment.md
   - docs/repository-rulesets.md
 
@@ -84,7 +85,8 @@ Human- and developer-facing documentation for the Go-side LingTai repo.
 | `stars/` | GitHub stars trend data and rendering helper. |
 | `known-limitations.md`, `status.md`, `design*.md`, `graphify.md`, `i18n-vocab.md`, `tool-descriptions.md` | Topic documents that complement README and the binary anatomies. |
 | `cyclic-manifold-architecture.md`, `design-molt-and-network-intelligence.md`, `三魂七魄.md` | Conceptual/architectural essays behind the agent model. Background reading, not normative — the binaries' anatomies and `CONTRACT.md` are. |
-| `headless-runtime-contract.md` | The public controller contract for `lingtai-tui spawn` / `lingtai-tui list` (spawn readiness, output shape). The implementation map is `tui/internal/headless/ANATOMY.md`. |
+| `headless-runtime-contract.md` | The currently implemented public controller contract for `lingtai-tui spawn` / `lingtai-tui list` (spawn readiness, output shape). The implementation map is `tui/internal/headless/ANATOMY.md`. |
+| `headless-creator-spec.md` | The target contract for moving bot creation into a standalone `lingtai-create` transaction while kernel retains reusable primitives and the TUI becomes a consumer/compatibility wrapper. |
 | `discussion-log.md`, `example-role.md` | The 2026-03-15 design-discussion log, and a worked example agent role prompt. |
 | `repository-rulesets.md` | Runbook for the branch/tag rulesets checked in under `.github/rulesets/` (root `ANATOMY.md`): why they exist, the `gh api` apply commands, and the read-back checks. Rulesets are repo settings, so this doc plus that JSON is the only in-repo record of the intended state. |
 | `22610.svg`, `三魂七魄-横版.jpeg` | Diagram/glyph assets referenced by the docs above. The braille renderings of the same 𢘐 glyph live in `assets/braille/` (root `ANATOMY.md`). |

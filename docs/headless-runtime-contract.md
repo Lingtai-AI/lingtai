@@ -1,7 +1,11 @@
 # Headless Runtime Contract
 
-This document describes the public controller contract for `lingtai-tui spawn`
-and `lingtai-tui list`.
+This document describes the currently implemented public controller contract for
+`lingtai-tui spawn` and `lingtai-tui list`.
+
+The target replacement ownership and migration contract are defined separately
+in the [Standalone Headless Creator Specification](headless-creator-spec.md).
+Until that migration is accepted, this document remains current behavior.
 
 ## Spawn Readiness
 
