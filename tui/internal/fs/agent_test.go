@@ -118,16 +118,20 @@ func TestCapabilitiesForDisplay_AugmentsIntrinsics(t *testing.T) {
 
 	got := CapabilitiesForDisplay(manifest)
 
-	// The four intrinsic agent capabilities must be present.
-	for _, want := range []string{"system", "soul", "email", "psyche"} {
+	// The three intrinsic agent capabilities must be present.
+	for _, want := range []string{"system", "email", "psyche"} {
 		if !contains(got, want) {
 			t.Errorf("CapabilitiesForDisplay() missing intrinsic %q; got %v", want, got)
 		}
 	}
+	// The retired soul intrinsic must not be advertised.
+	if contains(got, "soul") {
+		t.Errorf("CapabilitiesForDisplay() advertised retired intrinsic soul; got %v", got)
+	}
 
 	// Intrinsics lead, manifest capabilities follow in their original order.
 	want := []string{
-		"system", "soul", "email", "psyche",
+		"system", "email", "psyche",
 		"knowledge", "skills", "bash", "avatar", "daemon", "mcp",
 		"read", "write", "edit", "glob", "grep", "vision", "web_search",
 	}
@@ -138,7 +142,7 @@ func TestCapabilitiesForDisplay_AugmentsIntrinsics(t *testing.T) {
 
 func TestCapabilitiesForDisplay_NoDuplicates(t *testing.T) {
 	// A manifest that already lists some intrinsics must not get them twice.
-	manifest := []string{"email", "bash", "soul", "read"}
+	manifest := []string{"email", "bash", "psyche", "read"}
 
 	got := CapabilitiesForDisplay(manifest)
 
@@ -154,7 +158,7 @@ func TestCapabilitiesForDisplay_NoDuplicates(t *testing.T) {
 
 	// Intrinsics still lead (deduped against the manifest), then the
 	// remaining manifest entries keep their original order.
-	want := []string{"system", "soul", "email", "psyche", "bash", "read"}
+	want := []string{"system", "email", "psyche", "bash", "read"}
 	if !equalSlices(got, want) {
 		t.Errorf("CapabilitiesForDisplay() = %v, want %v", got, want)
 	}
@@ -162,7 +166,7 @@ func TestCapabilitiesForDisplay_NoDuplicates(t *testing.T) {
 
 func TestCapabilitiesForDisplay_EmptyManifest(t *testing.T) {
 	got := CapabilitiesForDisplay(nil)
-	want := []string{"system", "soul", "email", "psyche"}
+	want := []string{"system", "email", "psyche"}
 	if !equalSlices(got, want) {
 		t.Errorf("CapabilitiesForDisplay(nil) = %v, want %v", got, want)
 	}
@@ -233,8 +237,10 @@ func TestReadInitManifest_PrefersResolvedArtifact(t *testing.T) {
 	if got := m["base_url"]; got != "https://api.example" {
 		t.Errorf("base_url = %v, want https://api.example", got)
 	}
-	if got, ok := m["soul_delay"].(float64); !ok || got != 7 {
-		t.Errorf("soul_delay = %v, want 7", m["soul_delay"])
+	// A legacy soul block in an old manifest still parses but is no longer
+	// flattened into a display field.
+	if _, ok := m["soul_delay"]; ok {
+		t.Errorf("legacy soul.delay was flattened to soul_delay = %v; want no such field", m["soul_delay"])
 	}
 }
 
@@ -253,8 +259,8 @@ func TestReadInitManifest_FallsBackToInitWhenArtifactAbsent(t *testing.T) {
 	if got := m["model"]; got != "init-model" {
 		t.Errorf("model = %v, want init-model", got)
 	}
-	if got, ok := m["soul_delay"].(float64); !ok || got != 3 {
-		t.Errorf("soul_delay = %v, want 3", m["soul_delay"])
+	if _, ok := m["soul_delay"]; ok {
+		t.Errorf("legacy soul.delay was flattened to soul_delay = %v; want no such field", m["soul_delay"])
 	}
 }
 

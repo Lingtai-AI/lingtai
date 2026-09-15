@@ -35,7 +35,6 @@ Never mix wen vocabulary (他我, 本我, 化出, 蜕凡, 归寂, 转世) into z
 | shutdown | shutdown | 关闭 | 归寂 |
 | restart | restart | 重启 | 转世 |
 | sleep | sleep | 休眠 | 入定 |
-| soul (inner voice) | soul | 内心独白 | 内省 |
 
 ## Communication
 

@@ -46,7 +46,6 @@ func newPollEpochTestApp(t *testing.T) App {
 		200,
 		globalDir,
 		"en",
-		false,
 		0,
 	))
 	return app
@@ -106,7 +105,7 @@ func TestMailPollLoopEpochRejectsOldTickAfterSameGenerationReturn(t *testing.T) 
 }
 
 func TestMailRefreshSingleFlightCoalescesOverlappingRequests(t *testing.T) {
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", 0)
 	m.generation = 7
 
 	m, first := m.issueRefreshRequest()
@@ -138,7 +137,7 @@ func TestMailRefreshSingleFlightCoalescesOverlappingRequests(t *testing.T) {
 }
 
 func TestMailInitialCompletionCannotReleaseNewerPeriodicLane(t *testing.T) {
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", 0)
 	m.generation = 8
 
 	// Capture the one-shot initial command at serial 1, then let the first tick
@@ -161,7 +160,7 @@ func TestMailInitialCompletionCannotReleaseNewerPeriodicLane(t *testing.T) {
 }
 
 func TestNetworkActivityLaneUsesInFlightGateAndTTL(t *testing.T) {
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "", 20, t.TempDir(), "en", 0)
 	m.generation = 9
 	now := time.Now()
 	first := m.maybeScheduleNetworkActivity(now)

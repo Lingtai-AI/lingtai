@@ -96,7 +96,6 @@ func newDirectPerformanceFixture(t *testing.T, pageSize, width, height int, acce
 		pageSize,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 1

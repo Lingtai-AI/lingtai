@@ -29,8 +29,8 @@ type SessionEntry struct {
 	Body        string            `json:"body"`
 	Question    string            `json:"question,omitempty"`
 	Attachments []string          `json:"attachments,omitempty"`
-	Source      string            `json:"source,omitempty"`      // "human", "insight" — for inquiry entries
-	FireID      string            `json:"fire_id,omitempty"`     // soul_flow fires — used to look up voices in soul_flow.jsonl
+	Source      string            `json:"source,omitempty"`      // "human", "insight" — legacy inquiry history entries (read-only)
+	FireID      string            `json:"fire_id,omitempty"`     // legacy soul_flow history fires — used to look up voices in soul_flow.jsonl (read-only)
 	Sources     []string          `json:"sources,omitempty"`     // notification entries — list of source keys (email, soul, system, ...)
 	Meta        *NotificationMeta `json:"meta,omitempty"`        // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
 	ApiCallID   string            `json:"api_call_id,omitempty"` // llm/tool entries — one LLM API round-trip grouping id
@@ -118,7 +118,7 @@ type AprioriSummary struct {
 // history. Mail and inquiry entries are loaded separately and are not included.
 type SessionHistoryStats struct {
 	Detailed int // renderable non-insight event entries (verboseThinking/Extended)
-	Insights int // renderable event insight entries (when insights are enabled)
+	Insights int // renderable historical insight entries
 }
 
 type sessionHistoryCountPlan struct {
@@ -154,8 +154,8 @@ type SessionCache struct {
 	historyCountPlan   sessionHistoryCountPlan // canonical source/horizon captured by the bounded content rebuild
 	lastMailTs         string                  // highest mail ReceivedAt ingested (watermark for live-session dedup)
 	eventsOff          int64                   // byte offset in events.jsonl
-	inquiryOff         int64                   // byte offset in soul_inquiry.jsonl
-	soulFlowOff        int64                   // byte offset in soul_flow.jsonl (voice index source)
+	inquiryOff         int64                   // byte offset in legacy soul_inquiry.jsonl (history read-only)
+	soulFlowOff        int64                   // byte offset in legacy soul_flow.jsonl (history read-only voice index source)
 	projectPath        string                  // absolute path of the project directory (parent of .lingtai/)
 	lastHour           time.Time               // hour (truncated) of the most recent entry
 	rebuilding         bool                    // true during RebuildFromSources — suppress file writes
@@ -1343,8 +1343,10 @@ func needsGroupBackExtension(e SessionEntry) bool {
 	return false
 }
 
-// ingestSoulFlowVoices tails soul_flow.jsonl from the last-read offset
-// and updates sc.soulVoices, the fire_id→[]voice map. Idempotent.
+// ingestSoulFlowVoices tails the legacy soul_flow.jsonl history from the
+// last-read offset and updates sc.soulVoices, the fire_id→[]voice map.
+// Idempotent and read-only: the Soul subsystem is retired, but old history
+// must still render. A missing file is a no-op.
 func (sc *SessionCache) ingestSoulFlowVoices(orchDir string) {
 	path := filepath.Join(orchDir, "logs", "soul_flow.jsonl")
 	f, err := os.Open(path)
@@ -2273,7 +2275,11 @@ func stringifyToolResultList(value interface{}) []string {
 }
 
 // ---------------------------------------------------------------------------
-// Inquiry ingestion
+// Inquiry ingestion (legacy history, read-only)
+//
+// The TUI no longer writes `.inquiry` signals; the Soul/inquiry subsystem is
+// retired. These readers remain so old `logs/soul_inquiry.jsonl` history
+// still renders in the chat replay. They never write.
 // ---------------------------------------------------------------------------
 
 // IngestInquiries tails the orchestrator's soul_inquiry.jsonl from the last-read

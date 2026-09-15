@@ -80,7 +80,6 @@ type TUIConfig struct {
 	Language     string `json:"language"`
 	MailPageSize int    `json:"mail_page_size"`
 	Theme        string `json:"theme,omitempty"` // theme name: "ink-dark" (default), etc.
-	Insights     bool   `json:"insights"`
 	// ToolCallTruncate is the max number of characters shown per tool_call /
 	// tool_result line in the transcript. 0 (the default) means no truncation —
 	// full content is shown. A positive value caps each tool line and the
@@ -200,7 +199,6 @@ func DefaultTUIConfig() TUIConfig {
 	return TUIConfig{
 		Language:     "en",
 		MailPageSize: DefaultMailPageSize,
-		Insights:     false,
 	}
 }
 
@@ -219,8 +217,6 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	}
 	tc.MailPageSize = NormalizeMailPageSize(tc.MailPageSize)
 	tc.HomeTelemetryDisplay = NormalizeHomeTelemetryDisplay(tc.HomeTelemetryDisplay)
-	// Insights defaults to false when absent from JSON.
-	// No override needed — zero value of bool is false.
 	return tc
 }
 
@@ -386,15 +382,6 @@ func EnvFilePath(globalDir string) string {
 	return filepath.Join(globalDir, ".env")
 }
 
-// SoulFlowEnabledEnvVar is the env var the kernel reads to decide
-// whether soul flow (proactive autonomous action on idle) is enabled.
-// It is opt-in: unset/empty/other = disabled. The kernel treats
-// {1,true,yes,on} (case-insensitive) as enabled. See kernel
-// flow.py:SOUL_FLOW_ENABLED_ENV. The TUI surfaces this as a wizard
-// toggle and persists it into ~/.lingtai-tui/.env via SetEnvVar so the
-// agent inherits it at boot through env_file.
-const SoulFlowEnabledEnvVar = "LINGTAI_SOUL_FLOW_ENABLED"
-
 // parseEnvKey reports whether a raw .env line is a `KEY=VALUE`
 // assignment and, if so, returns its key. Comment lines (leading `#`)
 // and blank lines are reported as non-assignments so callers preserve
@@ -543,9 +530,8 @@ func writeEnvLines(path string, lines []string) error {
 
 // WriteEnvFile writes API keys from config to ~/.lingtai-tui/.env while
 // preserving any unmanaged lines already present in the file (comments,
-// blank lines, and env vars not owned by Config.Keys — most notably
-// LINGTAI_SOUL_FLOW_ENABLED, which the wizard writes separately via
-// SetEnvVar).
+// blank lines, and env vars not owned by Config.Keys — including lines
+// left behind by retired features, which are never rewritten or removed).
 //
 // Each Config.Keys entry maps directly to a `<env-var-name>=<value>`
 // line — the env var name comes from each preset's manifest.llm.
@@ -607,98 +593,6 @@ func WriteEnvFile(globalDir string, cfg Config) error {
 	}
 
 	return writeEnvLines(path, out)
-}
-
-// SetEnvVar performs a merge-preserving upsert of a single env var in
-// ~/.lingtai-tui/.env. It reads the file, sets (or, when value is "",
-// removes) exactly the named key, and rewrites — leaving comments,
-// blank lines, unrelated keys, and file permissions untouched. Used for
-// vars the TUI owns outside Config.Keys, such as LINGTAI_SOUL_FLOW_ENABLED.
-//
-// A missing file is treated as empty; removing a key that isn't present
-// is a no-op that still normalizes the file (harmless).
-func SetEnvVar(globalDir, key, value string) error {
-	if key == "" {
-		return nil
-	}
-	path := EnvFilePath(globalDir)
-	existing, err := readEnvLines(path)
-	if err != nil {
-		return err
-	}
-
-	var out []string
-	replaced := false
-	removedExisting := false
-	for _, line := range existing {
-		k, isAssign := parseEnvKey(line)
-		if !isAssign || k != key {
-			out = append(out, line)
-			continue
-		}
-		// Matched the target key.
-		if value == "" {
-			removedExisting = true
-			continue // remove: drop the line entirely
-		}
-		if !replaced {
-			out = append(out, key+"="+value)
-			replaced = true
-		}
-		// Any further duplicate lines for this key are dropped.
-	}
-	if value != "" && !replaced {
-		out = append(out, key+"="+value)
-	}
-	// Removing a key that was never present (and no file to normalize) is a
-	// pure no-op: don't create an empty .env just to "unset" nothing. This
-	// keeps a default-disabled agent from materializing a spurious empty
-	// .env when none existed.
-	if value == "" && !removedExisting {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return nil
-		}
-	}
-	return writeEnvLines(path, out)
-}
-
-// EnvVarTruthy reports whether the given .env value is one the kernel
-// treats as enabled: 1/true/yes/on, case-insensitive. Empty/absent/other
-// is false. Mirrors kernel flow.py truthy parsing.
-func EnvVarTruthy(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
-
-// SoulFlowEnabled reports whether ~/.lingtai-tui/.env currently opts into
-// soul flow (LINGTAI_SOUL_FLOW_ENABLED set to a truthy value). Used to
-// seed the wizard toggle from the existing on-disk state. A missing file
-// or absent key means disabled — matching the kernel default.
-func SoulFlowEnabled(globalDir string) bool {
-	return SoulFlowEnabledInEnvFile(EnvFilePath(globalDir))
-}
-
-// SoulFlowEnabledInEnvFile is like SoulFlowEnabled but reads an explicit
-// .env path — used by /kanban/props to reflect the specific env_file an
-// agent's init.json points at (usually the global .env, but honoring an
-// override). A missing file or absent/false key means disabled.
-func SoulFlowEnabledInEnvFile(envPath string) bool {
-	lines, err := readEnvLines(envPath)
-	if err != nil {
-		return false
-	}
-	for _, line := range lines {
-		k, isAssign := parseEnvKey(line)
-		if !isAssign || k != SoulFlowEnabledEnvVar {
-			continue
-		}
-		eq := strings.IndexByte(line, '=')
-		return EnvVarTruthy(line[eq+1:])
-	}
-	return false
 }
 
 // EnsureConfigPersisted creates a minimal empty config.json if and

@@ -52,8 +52,8 @@ No domain dependency. Just an agent with tools.
 
 > **Vocabulary note — "intrinsic" in this document is the original prototype vocabulary.**
 > The shipped kernel calls `file`, `vision`, and `web` **capabilities**, and reserves
-> *intrinsic* for the six mandatory families `BaseAgent` always wires — `email`, `system`,
-> `context`, `psyche`, `soul`, `notification`. The authoritative split is
+> *intrinsic* for the five mandatory families `BaseAgent` always wires — `email`, `system`,
+> `context`, `psyche`, `notification`. The authoritative split is
 > `lingtai-kernel/src/lingtai/tools/registry.py` (`INTRINSICS` vs. `BUILTIN_TOOLS`);
 > this document keeps the historical framing on purpose.
 

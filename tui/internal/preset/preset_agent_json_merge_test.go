@@ -12,7 +12,8 @@ import (
 // (agent_id, created_at, molt_count, language, etc.). Regression: prior
 // code unconditionally rebuilt .agent.json with only {agent_name,
 // address, state, admin}, dropping molt_count to 0 — which made psyche
-// overwrite past snapshots and broke soul-flow continuity.
+// overwrite past snapshots. Legacy soul_* keys written by older kernels
+// are ordinary preserved fields here: never rewritten, never dropped.
 func TestSetupPreservesAgentJSONIdentity(t *testing.T) {
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")

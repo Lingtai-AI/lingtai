@@ -103,7 +103,6 @@ func (m PaletteModel) canRender() bool {
 // DefaultCommands returns all slash commands.
 func DefaultCommands() []Command {
 	return []Command{
-		{Name: "btw", Description: "palette.btw", Detail: "cmd.btw"},
 		{Name: "sleep", Description: "palette.sleep", Detail: "cmd.sleep"},
 		{Name: "suspend", Description: "palette.suspend", Detail: "cmd.suspend"},
 		{Name: "cpr", Description: "palette.cpr", Detail: "cmd.cpr"},
@@ -126,7 +125,6 @@ func DefaultCommands() []Command {
 		{Name: "export", Description: "palette.export", Detail: "cmd.export"},
 		{Name: "skills", Description: "palette.skills", Detail: "cmd.skills"},
 		{Name: "knowledge", Description: "palette.knowledge", Detail: "cmd.knowledge"},
-		{Name: "insights", Description: "palette.insights", Detail: "cmd.insights"},
 		{Name: "system", Description: "palette.system", Detail: "cmd.system"},
 		{Name: "mailbox", Description: "palette.mailbox", Detail: "cmd.mailbox"},
 		{Name: "presets", Description: "palette.presets", Detail: "cmd.presets"},

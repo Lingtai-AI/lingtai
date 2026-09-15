@@ -574,7 +574,6 @@ func TestAgentRailF2LatentPreferenceAndEligibility(t *testing.T) {
 			200,
 			"",
 			"en",
-			false,
 			0,
 		)
 		replacement.agentRail.focused = true
@@ -610,7 +609,6 @@ func TestAgentRailF2LatentPreferenceAndEligibility(t *testing.T) {
 				200,
 				"",
 				"en",
-				false,
 				0,
 			),
 		}

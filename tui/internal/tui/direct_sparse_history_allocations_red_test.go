@@ -68,7 +68,6 @@ func newReviewSparseFixture(t *testing.T, unrelated int) reviewSparseFixture {
 		reviewSparsePageSize,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 73

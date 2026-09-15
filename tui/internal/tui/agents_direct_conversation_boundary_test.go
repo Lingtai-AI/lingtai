@@ -167,7 +167,7 @@ func v1BoundaryFixture(t *testing.T, width int) (App, string, string) {
 		v1BoundaryIncoming("agent-b", alphaAddress, "alpha-contradictory", "2026-07-22T10:05:00Z", "X6ID4Q9R", humanAddress, nil),
 	}
 
-	mail := NewMailModel(humanDir, humanAddress, projectDir, orchDir, "Main Orchestrator", 20, "", "en", false, 0)
+	mail := NewMailModel(humanDir, humanAddress, projectDir, orchDir, "Main Orchestrator", 20, "", "en", 0)
 	mail.generation = 1
 	app := App{
 		currentView: appViewMail,

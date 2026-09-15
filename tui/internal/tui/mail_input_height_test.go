@@ -25,7 +25,7 @@ func TestAdaptiveInputMaxHeight(t *testing.T) {
 }
 
 func TestMaybeShowEditorHintAtMaxHeight(t *testing.T) {
-	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 	m.height = 24
 	m.updateInputMaxHeight()
 	m.input.SetWidth(80)
@@ -42,7 +42,7 @@ func TestMaybeShowEditorHintAtMaxHeight(t *testing.T) {
 }
 
 func TestMaybeShowEditorHintNotAtMaxHeight(t *testing.T) {
-	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 	m.height = 24
 	m.updateInputMaxHeight()
 	m.input.SetWidth(80)
@@ -56,7 +56,7 @@ func TestMaybeShowEditorHintNotAtMaxHeight(t *testing.T) {
 }
 
 func TestPasteAtMaxHeightShowsEditorHint(t *testing.T) {
-	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m, _ = m.Update(tea.PasteMsg{Content: strings.Repeat("line\n", 12)})

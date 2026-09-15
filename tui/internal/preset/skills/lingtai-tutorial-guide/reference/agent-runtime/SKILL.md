@@ -19,7 +19,7 @@ Read YOUR init.json and walk through every field you find. **Do not recite a lis
 
 Key patterns to explain:
 - The `_file` convention: live init fields like `covenant`, `pad`, `comment`, `base_prompt` take inline text or a `<field>_file` path to a shared file. (Older fields such as `principle`, `procedures`, `brief`, `soul`, and the legacy `prompt` are migrated by the kernel but no longer seeded here.) Note: there is **no** seed field for the agent's character in init.json — character is durable state the agent authors for itself after creation, managed via `system/lingtai.md` / psyche, not written into init.json.
-- `manifest` contains: llm, agent_name, language, capabilities, soul, admin, etc.
+- `manifest` contains: llm, agent_name, language, capabilities, admin, etc.
 - `addons` connects to external messaging services.
 - `env_file` for secrets.
 

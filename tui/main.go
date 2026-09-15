@@ -782,7 +782,6 @@ func printWelcomeInfo() {
 	fmt.Println("    • Exiting the TUI does NOT stop agents — use /suspend all first")
 	fmt.Println("    • Agent files live in .lingtai/ — deleting it without stopping")
 	fmt.Println("      agents creates phantoms. Use lingtai-tui purge to clean up")
-	fmt.Println("    • Agents act on their own after idle only when soul flow is opted in")
 }
 
 // agentCheckInterval is how often maybeShowAgentCount re-scans for running
@@ -1665,7 +1664,7 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 		// /setup yet) or when the snapshot already matches.
 		//
 		// Greet substitution intentionally uses the startup humanDir/addr/
-		// lang/soulDelay defaults; a proper re-apply via /setup gives the
+		// lang defaults; a proper re-apply via /setup gives the
 		// user full control over those fields. This path is just the "you
 		// edited .recipe/<layer>/<layer>.md by hand, we'll redo the
 		// .prompt" convenience.
@@ -1684,7 +1683,7 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 				lang = "en"
 			}
 			subst := func(tmpl string) string {
-				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, "120")
+				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang)
 			}
 			if _, err := preset.ApplyRecipe(projectRoot, lang, subst); err != nil {
 				if !inProgram {

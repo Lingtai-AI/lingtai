@@ -29,8 +29,6 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 ## Commands at a glance
 
 ### Talking to the agent
-- `/btw` — ask a side question without interrupting the agent's work.
-- `/insights` — request 2–3 concrete observations about the current task now.
 - `/goal` — ask the current agent to guide creation or revision of an active goal.
 
 ### Agent lifecycle
@@ -76,31 +74,6 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 ---
 
 ## Command reference
-
-### `/btw` — ask a mirrored copy of the agent a side question
-**Usage:** `/btw <your question>`
-
-**`/btw` is not a way to steer the agent.** It launches a one-shot inquiry to a
-*separate mirror* of the agent: a copy with the conversation's text and thinking
-but no tools, which cannot act. The mirror answers on its own while the active
-agent keeps doing its current work, untouched. The answer may later reach the
-active agent as clearly-labeled context marked "not a direct new instruction" —
-so the agent may read it, but it is under no obligation to act on it.
-
-Because of that, `/btw` does **not** change the agent's direction, assign work,
-queue a side task, set a reminder, establish memory, or require any follow-up. If
-you want the agent to do something, take on a new requirement, remember or track
-something, or follow up, **send a normal message instead** — that is how you
-directly instruct the active agent. Reach for `/btw` only when you want a quick
-reflective take from the mirror and are content for it to be non-binding.
-
-### `/insights` — request an insight now
-**Usage:** `/insights`
-
-Asks the agent to observe its current task right now and produce 2–3 concrete
-observations. Use it when you want an immediate, structured read on what the
-agent is seeing — without waiting for the auto-insights cadence (toggled in
-`/settings`).
 
 ### `/goal` — guide creation of an active goal
 **Usage:** `/goal` · `/goal <draft goal>`
@@ -300,9 +273,9 @@ model, or capabilities. For TUI-only preferences (theme, language) use
 ### `/settings` — edit TUI preferences
 **Usage:** `/settings`
 
-Opens TUI preferences: theme, mail page size, language, and the auto-insights
-toggle. Use it for look-and-feel and client-side behavior of the TUI itself. To
-change the agent's provider, model, or capabilities, use `/setup`.
+Opens TUI preferences: theme, mail page size, and language. Use it for
+look-and-feel and client-side behavior of the TUI itself. To change the agent's
+provider, model, or capabilities, use `/setup`.
 
 ### `/mcp` — open the MCP control panel
 **Usage:** `/mcp`

@@ -44,7 +44,7 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
+	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	// Drive the deferred initial rebuild (the normal launch path).
 	m, _ = m.Update(m.initialRebuild())
@@ -71,7 +71,7 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(baseOrch, "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	base := NewMailModel(dir, "human@local", "~", baseOrch, "TestOrch", 50, dir, "en", false, 0)
+	base := NewMailModel(dir, "human@local", "~", baseOrch, "TestOrch", 50, dir, "en", 0)
 	base, _ = base.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	base, _ = base.Update(base.initialRebuild())
 	if base.hasHomeTelemetry() {
@@ -133,7 +133,7 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 func TestHomeViewNoTelemetryRowWhenNoData(t *testing.T) {
 	const w, h = 100, 24
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", "~", dir, "TestOrch", 50, dir, "en", false, 0)
+	m := NewMailModel(dir, "human@local", "~", dir, "TestOrch", 50, dir, "en", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	// No messages, no ledger → no telemetry.
 	if m.hasHomeTelemetry() {

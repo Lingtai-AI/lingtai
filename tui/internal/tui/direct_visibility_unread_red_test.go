@@ -106,7 +106,6 @@ func directUnreadRedNewMail(project directUnreadRedProject, pageSize int) MailMo
 		pageSize,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 19

@@ -28,7 +28,7 @@ func emailToLine(view string) string {
 // attention already is, without entering verbose mode.
 func TestFooterShowsActivityIndicatorWhenActive(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", 0)
 	m = sizeMail(t, m)
 
 	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true})
@@ -49,7 +49,7 @@ func TestFooterShowsActivityIndicatorWhenActive(t *testing.T) {
 // footer shows the static glyph + label but no elapsed timer (no digits).
 func TestFooterIndicatorIdleHasNoTimer(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", 0)
 	m = sizeMail(t, m)
 
 	m, _ = m.Update(mailRefreshMsg{state: "idle", alive: true})

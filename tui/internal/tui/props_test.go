@@ -289,7 +289,7 @@ func TestPropsSinglePanePreservesEveryLowerCategory(t *testing.T) {
 		i18n.T("props.detail_recent_token_usage"),
 		i18n.T("props.detail_network_history_topology"),
 		"agent-identity-123", "localhost:/only-in-details", "Esperanto", "alpha+beta",
-		i18n.T("props.soul_flow"), "7", "42", "9",
+		"7", "42", "9",
 		"gpt-5.6-sol", "codex-pool", "default", "xhigh",
 		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY", "true", "500000",
 		"broken-preset", "default-preset", i18n.T("props.preset_refs_not_checked"), "bash", "nirvana: true",
@@ -304,6 +304,10 @@ func TestPropsSinglePanePreservesEveryLowerCategory(t *testing.T) {
 		i18n.T("props.detail_daemons"),
 		i18n.T("props.detail_recent_main"), i18n.T("props.detail_recent_daemons"),
 	}...)
+	// The fixture's init.json still carries a legacy `soul` block; the
+	// retired Soul subsystem must not surface as a row, a capability, or a
+	// cadence anywhere in the pane.
+	requireNotContains(t, body, "soul", "Soul", "7200")
 	orderedSections := []string{
 		i18n.T("props.section_agent_now"),
 		i18n.T("props.section_current_session"),

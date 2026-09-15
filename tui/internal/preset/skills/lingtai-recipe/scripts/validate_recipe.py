@@ -40,7 +40,6 @@ GREET_PLACEHOLDERS = (
     "{{addr}}",
     "{{lang}}",
     "{{location}}",
-    "{{soul_delay}}",
     "{{commands}}",
 )
 # greet.md may contain placeholders; other layers must be static.

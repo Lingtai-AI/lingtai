@@ -160,7 +160,7 @@ func TestAppViewMailComposerCursorWithActivePalette(t *testing.T) {
 
 func TestAppViewMailComposerCursorWithZeroResultPalette(t *testing.T) {
 	app := newVisibleRailV2Fixture(t, []string{"Alpha"}, []int{0}, 80, 28, "").app
-	const text = "/btw 你"
+	const text = "/goal 你"
 	app = appCursorType(app, text)
 	if !app.mail.input.IsPaletteActive() {
 		t.Fatal("typing a valid slash command with an argument did not leave the palette active")

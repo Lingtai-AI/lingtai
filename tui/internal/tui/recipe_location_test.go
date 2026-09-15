@@ -57,7 +57,7 @@ func TestSubstituteGreetPlaceholdersLocationReusesResolvedLocation(t *testing.T)
 		http.DefaultTransport = previousTransport
 	})
 
-	got := SubstituteGreetPlaceholders("location={{location}}", "human", humanDir, "en", "60")
+	got := SubstituteGreetPlaceholders("location={{location}}", "human", humanDir, "en")
 	if got != "location=Austin, Texas, US" {
 		t.Fatalf("substituted greet = %q; want resolved location", got)
 	}
@@ -73,5 +73,17 @@ func TestSubstituteGreetPlaceholdersLocationReusesResolvedLocation(t *testing.T)
 	}
 	if node.Location == nil || node.Location.City != "Austin" || node.Location.ResolvedAt == "" {
 		t.Fatalf("persisted location = %#v; want the resolved Austin value", node.Location)
+	}
+}
+
+// TestSubstituteGreetPlaceholdersLeavesRetiredSoulDelayLiteral pins the
+// explicit unsupported behavior for the retired `{{soul_delay}}` token: an
+// old custom recipe that still carries it gets the literal token back in its
+// generated .prompt. No Soul value is ever substituted, and the recipe
+// application layer has no unknown-placeholder rule to fail on it.
+func TestSubstituteGreetPlaceholdersLeavesRetiredSoulDelayLiteral(t *testing.T) {
+	got := SubstituteGreetPlaceholders("lang={{lang}} delay={{soul_delay}}", "human", "", "en")
+	if got != "lang=en delay={{soul_delay}}" {
+		t.Fatalf("substituted greet = %q; want retired token left verbatim", got)
 	}
 }

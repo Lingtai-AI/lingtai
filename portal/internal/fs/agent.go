@@ -83,8 +83,9 @@ func ParseCapabilities(raw json.RawMessage) []string {
 }
 
 // ReadInitManifest returns the agent's manifest fields with the llm
-// sub-object (model, provider, base_url) and soul.delay flattened to top
-// level. It prefers the kernel-published resolved-manifest artifact
+// sub-object (model, provider, base_url) flattened to top level. A legacy
+// `soul` block in an old init.json is carried through but not surfaced.
+// It prefers the kernel-published resolved-manifest artifact
 // (system/manifest.resolved.json — preset materialized, validated,
 // secret-redacted; kernel issue #259) and falls back to the raw init.json
 // snapshot when the artifact is absent or malformed (stopped / never-booted
@@ -162,7 +163,7 @@ func readRawInitManifest(dir string) (map[string]interface{}, error) {
 	return manifest, nil
 }
 
-// flattenManifest hoists llm sub-fields and soul.delay to top level, in place.
+// flattenManifest hoists llm sub-fields to top level, in place.
 func flattenManifest(manifest map[string]interface{}) {
 	// Flatten llm sub-object into top level
 	if llm, ok := manifest["llm"].(map[string]interface{}); ok {
@@ -170,12 +171,6 @@ func flattenManifest(manifest map[string]interface{}) {
 			if v, ok := llm[key]; ok && v != nil {
 				manifest[key] = v
 			}
-		}
-	}
-	// Flatten soul.delay into soul_delay
-	if soul, ok := manifest["soul"].(map[string]interface{}); ok {
-		if v, ok := soul["delay"]; ok {
-			manifest["soul_delay"] = v
 		}
 	}
 }

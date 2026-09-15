@@ -207,9 +207,9 @@ Retired with the project migration registries — Portal production no longer ru
 
 ### Where to look
 
-- **Agent runtime:** `src/lingtai/kernel/` — turn loop, lifecycle, tool dispatch, mailbox, soul/molt
+- **Agent runtime:** `src/lingtai/kernel/` — turn loop, lifecycle, tool dispatch, mailbox, molt
 - **Wrapper (CLI + services):** `src/lingtai/` — MCP, FileIO, Vision, Search, CLI
-- **Intrinsics:** `src/lingtai/kernel/intrinsics/` — email, soul, system, psyche, codex, etc.
+- **Intrinsics:** `src/lingtai/kernel/intrinsics/` — email, system, psyche, codex, etc.
 - **Skills:** `src/lingtai/intrinsic_skills/` — bundled skill manuals
 
 The kernel-root anatomy at `src/lingtai/kernel/ANATOMY.md` is the entry point for navigating the source; the `lingtai-kernel-anatomy` skill owns the convention.

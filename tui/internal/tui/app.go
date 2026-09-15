@@ -198,7 +198,7 @@ func (a *App) issueMailInitialRebuild() tea.Cmd {
 func (a *App) newMailForCurrentContext() MailModel {
 	humanDir := filepath.Join(a.projectDir, "human")
 	addr := humanAddr(a.projectDir)
-	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate)
 }
 
 func (a App) projectsContext() ProjectsContext {
@@ -310,7 +310,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery, degraded
 		app.currentView = appViewMail
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
-		app.installMailModel(NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights, tuiCfg.ToolCallTruncate))
+		app.installMailModel(NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.ToolCallTruncate))
 
 		// Validate codex-auth.json if any agent uses a codex preset.
 		if warn := validateCodexAuthForAgents(globalDir, projectDir); warn != "" {
@@ -548,7 +548,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FirstRunDoneMsg:
 		// First-run complete: launch agent and switch to mail.
 		// Reload tuiConfig from disk so any settings the wizard saved
-		// (theme, mail page size, insights) are reflected downstream.
+		// (theme, mail page size) are reflected downstream.
 		// a.tuiConfig was captured at NewApp time and is otherwise stale
 		// after the wizard's SaveTUIConfig calls.
 		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
@@ -564,7 +564,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
+			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
@@ -598,7 +598,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				lang = "en"
 			}
 			subst := func(tmpl string) string {
-				return SubstituteGreetPlaceholders(tmpl, haddr, humanDir, lang, "120")
+				return SubstituteGreetPlaceholders(tmpl, haddr, humanDir, lang)
 			}
 			applied, err := preset.ApplyRecipe(projectRoot, lang, subst)
 			if err != nil {
@@ -612,7 +612,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentView = appViewMail
 				humanDir := filepath.Join(a.projectDir, "human")
 				addr := humanAddr(a.projectDir)
-				a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
+				a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 				a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: i18n.TF("mail.recipe_reapply_failed", err), Type: "mail"})
 				return a, tea.Batch(a.mail.Init(), a.sendSize())
 			}
@@ -630,7 +630,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
+		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -671,7 +671,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
+			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 			if a.lingtaiCmd != "" {
 				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
@@ -715,7 +715,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
+		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -1110,7 +1110,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-			addMsg(i18n.T("mail.btw_suspended"))
+			addMsg(i18n.T("mail.agent_not_running"))
 			return a, nil
 		}
 		eventID, err := writeGoalRequestNotification(targetDir, args, time.Now())
@@ -1179,7 +1179,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-			addMsg(i18n.T("mail.btw_suspended"))
+			addMsg(i18n.T("mail.agent_not_running"))
 			return a, nil
 		}
 		fs.WritePrompt(targetDir, i18n.T("export.recipe_prompt"))
@@ -1190,7 +1190,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-			addMsg(i18n.T("mail.btw_suspended"))
+			addMsg(i18n.T("mail.agent_not_running"))
 			return a, nil
 		}
 		// Send in agent's language, not TUI language
@@ -1202,29 +1202,6 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		fs.WritePrompt(targetDir, i18n.TIn(lang, "molt.mandatory_prompt"))
 		addMsg(i18n.T("mail.molt_sent"))
-		return a, nil
-	case "insights":
-		if targetDir != "" {
-			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-				addMsg(i18n.T("mail.btw_suspended"))
-				return a, nil
-			}
-			question := i18n.T("insight.auto_question")
-			fs.WriteInquiry(targetDir, "insight", question)
-			addMsg(i18n.T("mail.insight_sent"))
-		}
-		return a, nil
-	case "btw":
-		if targetDir != "" && args != "" {
-			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-				addMsg(i18n.T("mail.btw_suspended"))
-				return a, nil
-			}
-			fs.WriteInquiry(targetDir, "human", args)
-			addMsg(i18n.TF("mail.btw_sent", args))
-		} else if args == "" {
-			addMsg(i18n.T("mail.btw_usage"))
-		}
 		return a, nil
 	case "help":
 		a.currentView = appViewHelp
@@ -1962,7 +1939,6 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		ps := config.NormalizeMailPageSize(a.tuiConfig.MailPageSize)
 		pageSizeChanged := ps != a.mail.pageSize
 		a.mail.pageSize = ps
-		a.mail.insightsEnabled = a.tuiConfig.Insights
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
 		// Re-validate the Home telemetry expression from the reloaded config, the
 		// same way the other presentation preferences above are re-applied to the

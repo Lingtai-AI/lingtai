@@ -52,8 +52,9 @@ func TestReadInitManifest_PrefersResolvedArtifact(t *testing.T) {
 	if got := m["base_url"]; got != "https://api.example" {
 		t.Errorf("base_url = %v, want https://api.example", got)
 	}
-	if got, ok := m["soul_delay"].(float64); !ok || got != 7 {
-		t.Errorf("soul_delay = %v, want 7", m["soul_delay"])
+	// A legacy soul block still parses but is no longer flattened.
+	if _, ok := m["soul_delay"]; ok {
+		t.Errorf("legacy soul.delay was flattened to soul_delay = %v; want no such field", m["soul_delay"])
 	}
 }
 
@@ -72,8 +73,8 @@ func TestReadInitManifest_FallsBackToInitWhenArtifactAbsent(t *testing.T) {
 	if got := m["model"]; got != "init-model" {
 		t.Errorf("model = %v, want init-model", got)
 	}
-	if got, ok := m["soul_delay"].(float64); !ok || got != 3 {
-		t.Errorf("soul_delay = %v, want 3", m["soul_delay"])
+	if _, ok := m["soul_delay"]; ok {
+		t.Errorf("legacy soul.delay was flattened to soul_delay = %v; want no such field", m["soul_delay"])
 	}
 }
 

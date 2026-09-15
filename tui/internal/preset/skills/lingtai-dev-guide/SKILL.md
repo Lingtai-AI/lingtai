@@ -196,7 +196,7 @@ drill-down files, not standalone top-level skills.
 | Repo / package | Stack | Main role | Where to start |
 |---|---|---|---|
 | `Lingtai-AI/lingtai` | Go + TypeScript | `lingtai-tui`, `lingtai-portal`, bundled utilities | `reference/architecture/SKILL.md`, then `lingtai-tui-anatomy` |
-| `Lingtai-AI/lingtai-kernel` | Python | agent runtime, tools, mailbox, soul/molt, intrinsic capabilities | `lingtai-kernel-anatomy` |
+| `Lingtai-AI/lingtai-kernel` | Python | agent runtime, tools, mailbox, molt, intrinsic capabilities | `lingtai-kernel-anatomy` |
 | `lingtai-imap`, `lingtai-telegram`, `lingtai-feishu`, `lingtai-wechat`, `lingtai-whatsapp` | Python MCPs | channel/addon integrations | `mcp-manual` plus each addon's README |
 
 ## Common routing examples

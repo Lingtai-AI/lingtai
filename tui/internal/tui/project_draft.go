@@ -75,7 +75,7 @@ type ProjectDraft struct {
 	AgentDirName string
 
 	// AgentOpts carries the runtime configuration page's values (context
-	// limit, soul delay, karma, addons, allowed presets, ...) exactly as
+	// limit, karma, addons, allowed presets, ...) exactly as
 	// preset.AgentOpts already models them for GenerateInitJSONWithOpts.
 	AgentOpts preset.AgentOpts
 

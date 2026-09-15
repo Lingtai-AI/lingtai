@@ -64,7 +64,7 @@ func TestMailRecentMessageWindowContract(t *testing.T) {
 	orchDir := t.TempDir()
 	ids := seedRecentWindowMailbox(t, humanDir, orchDir, fs.RecentMessageLimit()+recentWindowExtra)
 	newModel := func() MailModel {
-		return NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+		return NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", 0)
 	}
 
 	// The page loads exactly the newest RecentMessageLimit() entries, and the cap

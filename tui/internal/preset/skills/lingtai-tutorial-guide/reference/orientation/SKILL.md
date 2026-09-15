@@ -37,7 +37,6 @@ except ImportError:
   - Read an excerpt of the covenant
   - Read the principle to show how agents perceive the [user] role
   - Show the procedures file
-  - Show the soul flow file
   - Show available templates and recipes
 - Also show `~/.lingtai-tui/commands.json` — explain this is the auto-generated slash command reference.
 

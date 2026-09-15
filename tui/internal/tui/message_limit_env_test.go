@@ -116,7 +116,7 @@ func TestMainRenderWindowFollowsTheResolvedWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			useMessageLimitEnv(t, tc.set, tc.value)
-			m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", pageSize, "", "en", false, 0)
+			m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", pageSize, "", "en", 0)
 			if m.pageSize != pageSize {
 				t.Fatalf("fixture page size = %d, want the configured %d", m.pageSize, pageSize)
 			}
@@ -149,7 +149,7 @@ func TestMainInitialRebuildLoadsFullHistoryForUnlimitedWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			useMessageLimitEnv(t, tc.set, tc.value)
-			m := NewMailModel(t.TempDir(), "human", t.TempDir(), buildWindowedAgentDir(t, total), "agent", pageSize, "", "en", false, 0)
+			m := NewMailModel(t.TempDir(), "human", t.TempDir(), buildWindowedAgentDir(t, total), "agent", pageSize, "", "en", 0)
 			rm, ok := m.initialRebuild().(mailRefreshMsg)
 			if !ok || rm.sessionCache == nil {
 				t.Fatalf("initialRebuild returned %#v, want a populated mailRefreshMsg", rm)
@@ -221,7 +221,7 @@ func TestDirectRevealStopsAtTheResolvedWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			useMessageLimitEnv(t, tc.set, tc.value)
-			m := NewMailModel(t.TempDir(), directPerformanceHuman, t.TempDir(), "", "agent", pageSize, "", "en", false, 0)
+			m := NewMailModel(t.TempDir(), directPerformanceHuman, t.TempDir(), "", "agent", pageSize, "", "en", 0)
 			m.width = 80
 			m.directPublication = fs.NewDirectMailPublication(
 				directPerformanceHuman,

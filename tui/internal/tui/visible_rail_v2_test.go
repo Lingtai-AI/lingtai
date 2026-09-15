@@ -161,7 +161,7 @@ func newVisibleRailV2Fixture(t *testing.T, labels []string, unreadCounts []int, 
 		}
 	}
 
-	mail := NewMailModel(humanDir, visibleRailV2Human, lingtai, "", "Main", 200, "", "en", false, 0)
+	mail := NewMailModel(humanDir, visibleRailV2Human, lingtai, "", "Main", 200, "", "en", 0)
 	mail.generation = 101
 	mail.initialLoading = false
 	mail.cache = fs.NewMailCache(humanDir)

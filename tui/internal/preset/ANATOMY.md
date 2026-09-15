@@ -67,7 +67,7 @@ related_files:
   - tui/internal/preset/preset_legacy_init_fields_test.go
   - tui/internal/preset/preset_molt_pressure_test.go
   - tui/internal/preset/preset_molt_prompt_test.go
-  - tui/internal/preset/preset_soul_delay_test.go
+  - tui/internal/preset/preset_no_soul_test.go
   - tui/internal/preset/principle/en/principle.md
   - tui/internal/preset/principle/wen/principle.md
   - tui/internal/preset/principle/zh/principle.md
@@ -188,10 +188,6 @@ related_files:
   - tui/internal/preset/skills/swiss-knife/reference/zhipu-coding-plan/SKILL.md
   - tui/internal/preset/skills/textbook-distillation/SKILL.md
   - tui/internal/preset/skills/textbook-distillation/assets/lesson-template.html
-  - tui/internal/preset/soul/en/soul-flow.md
-  - tui/internal/preset/soul/wen/soul-flow.md
-  - tui/internal/preset/soul/zh/soul-flow.md
-  - tui/internal/preset/soul_flow_optin_test.go
   - tui/internal/preset/swiss_knife_populate_test.go
   - tui/internal/preset/templates/bash_policy.json
   - tui/internal/preset/templates/feishu.jsonc
@@ -242,7 +238,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `RefFor(p)` | `tui/internal/preset/preset.go:549` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for canonical provider `claude-code`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
 | `Validate()` | `tui/internal/preset/preset.go:324` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
-| `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
+| `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, recipe_assets, skills |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` / `CopyEmbeddedBundle` | `tui/internal/preset/recipe_apply.go:59,122` | copies disk or compiled `.recipe/` (replace) plus recipe siblings into a project |
 | `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
@@ -258,12 +254,12 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Called by `tui/internal/tui/`** — all Bubble Tea screens (network home, preset editor, first-run wizard, recipe selector).
 - **Calls `tui/internal/config/`** — for `GlobalDirName` constant.
 - **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Also reads/writes per-project `.lingtai/<agent>/init.json` and `.lingtai/.tui-asset/`.
-- **Embeds prompt fragments** — covenant, principle, procedures, soul, templates, recipe_assets, skills — via `//go:embed`. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router.
+- **Embeds prompt fragments** — covenant, principle, procedures, templates, recipe_assets, skills — via `//go:embed`. The former `soul/` fragment is retired and no longer embedded or extracted; an existing `~/.lingtai-tui/soul/` left by an older Bootstrap is simply ignored, never deleted. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router.
 
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 13 direct named-preset revision children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 13 direct named-preset revision children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State

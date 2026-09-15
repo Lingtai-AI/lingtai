@@ -40,9 +40,9 @@ type ChatMessage struct {
 	Timestamp   string
 	IsFromMe    bool                 // human sent this
 	IsFromOrch  bool                 // orchestrator (主我) sent this
-	Type        string               // "mail", "thinking", "diary", "insight"
+	Type        string               // "mail", "thinking", "diary", "insight" (legacy history)
 	Attachments []string             // file paths attached to the message
-	Question    string               // question text (for /btw insight events)
+	Question    string               // question text for legacy inquiry history entries (read-only)
 	Dismissed   bool                 // true after user presses Esc; only show in verbose
 	Delivered   bool                 // for Type=="mail" && IsFromMe: true if recipient picked up
 	Sources     []string             // for Type=="notification": source keys (email, soul, system, ...)
@@ -135,7 +135,7 @@ type verboseLevel int
 
 const (
 	verboseOff      verboseLevel = iota // normal: mail only
-	verboseThinking                     // ctrl+o cycle: mail + soul + tool_call/tool_result first lines
+	verboseThinking                     // ctrl+o cycle: mail + inner state + tool_call/tool_result first lines
 	verboseExtended                     // ctrl+o cycle: full tool_call/tool_result
 )
 
@@ -222,13 +222,9 @@ type MailModel struct {
 	quoteIdx                 int              // which quote to show (advances on each ACTIVE transition)
 	pulseTick                int              // pulse animation counter while ACTIVE
 	activeSince              time.Time        // when the agent last entered ACTIVE (zero when not active)
-	inquiryState             string           // "", "sent", "taken" — tracks /btw lifecycle
-	insightPending           bool             // true when waiting for 5s insight delay
-	insightAt                time.Time        // when to fire the auto-insight
-	dismissedInsights        map[string]bool  // dismissed insight timestamps
+	dismissedInsights        map[string]bool  // dismissed legacy insight-history timestamps
 	showEditorWarn           bool             // one-time vim warning overlay
 	editorWarnText           string           // text to pass to editor after warning
-	insightsEnabled          bool             // from settings — show insight events
 	toolCallTruncate         int              // from settings — max chars per tool line (0 = no truncation)
 	sessionCache             *fs.SessionCache // append-only session log
 	initialLoading           bool             // true until the bounded initial content rebuild has been applied
@@ -295,7 +291,7 @@ type MailModel struct {
 	homeAsyncStatsLastFetch time.Time      // completion time of the last fetch, for the TTL floor
 }
 
-func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
+func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, toolCallTruncate int) MailModel {
 	input := NewInputModel(humanDir)
 	input.textarea.Focus()
 	palette := NewPaletteModel()
@@ -321,7 +317,6 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		pageSize:          pageSize,
 		globalDir:         globalDir,
 		quoteIdx:          -1,
-		insightsEnabled:   insights,
 		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
 		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir), fs.MainAggregateWriter),
@@ -768,7 +763,7 @@ func (m MailModel) orchDisplayName() string {
 }
 
 // buildMessages refreshes the session cache from all sources, then builds
-// the display message list filtered by verbose level and insights settings.
+// the display message list filtered by verbose level.
 // Mail is projected exactly once from Main's accepted mailbox snapshot instead
 // of the live producer or derived session entries, so unaccepted refresh work
 // cannot leak into rendering or older-history reconstruction.
@@ -849,7 +844,7 @@ func (m *MailModel) buildMessages() {
 		chatMsgs = chatMsgs[len(chatMsgs)-kept:]
 	}
 
-	// Restore dismissed state for insights.
+	// Restore dismissed state for legacy insight-history entries.
 	for i := range chatMsgs {
 		if chatMsgs[i].Type == "insight" && m.dismissedInsights[chatMsgs[i].Timestamp] {
 			chatMsgs[i].Dismissed = true
@@ -881,12 +876,14 @@ func chatMessageBefore(a, b ChatMessage) bool {
 }
 
 // shouldShow returns whether a session entry should be displayed given the
-// current verbose level and insights settings.
+// current verbose level.
 func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 	switch e.Type {
 	case "mail":
 		return true
 	case "thinking", "diary", "text_input", "text_output", "soul_flow", "notification", "aed":
+		// "soul_flow" is legacy history only: the Soul subsystem is
+		// retired, but old logs/soul_flow.jsonl fires still render here.
 		return m.verbose >= verboseThinking
 	case "tool_call", "tool_result":
 		// Ctrl+O level 1 uses tool entries as compact progress markers:
@@ -909,12 +906,14 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 		// events that predate explicit api_call_id on tool events.
 		return false
 	case "insight":
-		// Human /btw inquiries (source "human") are always shown.
+		// Legacy inquiry history (read-only; nothing writes .inquiry any
+		// more). Human-sourced questions were part of the conversation and
+		// stay visible; auto/other sources sit at the ctrl+o inner-state
+		// depth like the rest of the historical inner-state entries.
 		if e.Source == "human" {
 			return true
 		}
-		// Auto-insight events and other insight sources are gated by insightsEnabled.
-		return m.insightsEnabled
+		return m.verbose >= verboseThinking
 	}
 	return false
 }
@@ -1198,12 +1197,10 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			}
 			m.orchNickname = msg.orchNickname
 			isActive := strings.EqualFold(m.orchState, "ACTIVE")
-			isIdle := strings.EqualFold(m.orchState, "IDLE")
 			if isActive && !m.wasActive {
 				// Just became active — advance to next quote, reset pulse, start timer
 				m.quoteIdx++
 				m.pulseTick = 0
-				m.insightPending = false
 				m.activeSince = msg.lastApiCallAt
 				if m.activeSince.IsZero() {
 					m.activeSince = time.Now()
@@ -1217,37 +1214,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				// Not active — stop the elapsed timer so the badge drops it
 				m.activeSince = time.Time{}
 			}
-			insightDone := fileExists(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
-			if isIdle && m.wasActive && !m.insightPending && !insightDone && m.insightsEnabled {
-				// Just became idle — schedule auto-insight in 5s
-				m.insightPending = true
-				m.insightAt = time.Now().Add(5 * time.Second)
-			}
-			if m.insightPending && time.Now().After(m.insightAt) {
-				m.insightPending = false
-				if m.orchestrator != "" && isIdle {
-					question := i18n.T("insight.auto_question")
-					fs.WriteInquiry(m.orchestrator, "insight", question)
-					// Write sentinel to prevent re-firing
-					os.WriteFile(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"), []byte(""), 0o644)
-				}
-			}
 			m.wasActive = isActive
 		}
 		m.buildMessages()
-		// Track /btw inquiry lifecycle
-		if !staleRequest && m.orchestrator != "" {
-			inquiryExists := fileExists(filepath.Join(m.orchestrator, ".inquiry"))
-			takenExists := fileExists(filepath.Join(m.orchestrator, ".inquiry.taken"))
-			switch {
-			case inquiryExists:
-				m.inquiryState = "sent"
-			case takenExists:
-				m.inquiryState = "taken"
-			default:
-				m.inquiryState = ""
-			}
-		}
 		if m.ready {
 			if _, direct := m.currentDirectTarget(); direct {
 				// The accepted direct publication above owns any bounded direct
@@ -1416,8 +1385,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.AddSystemMessage(i18n.TF("mail.send_failed", err))
 				return m, nil
 			}
-			// Human sent a real message — allow new insight after next idle
-			os.Remove(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
 			m.input.Reset()
 			m.syncViewportHeight()
 			return m.issueRefreshRequest()
@@ -1651,7 +1618,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			return m, nil
 
 		case "esc":
-			// Dismiss all visible insights
+			// Dismiss all visible legacy insight-history entries
 			changed := false
 			for _, msg := range m.messages {
 				if msg.Type == "insight" && !msg.Dismissed {
@@ -1897,9 +1864,11 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			prevVisibleApiGroup = &msgCopy
 
 		case "soul_flow":
-			// Each voice in msg.Body is its own line ("[insights] ..." or
-			// "[past self] ..."); render with the agent accent color so it
-			// reads as the agent's own reflection rather than tool noise.
+			// Legacy history only: the Soul subsystem is retired and nothing
+			// produces new fires, but old logs/soul_flow.jsonl entries must
+			// still be readable. Each voice in msg.Body is its own line
+			// ("[insights] ..." or "[past self] ..."); render with the agent
+			// accent color so it reads as the agent's own reflection.
 			wrapWidth := m.width - 6
 			if wrapWidth < 20 {
 				wrapWidth = 20
@@ -1918,9 +1887,9 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			}
 
 		case "notification":
-			// Kernel notification-sync rewire. Mirrors the soul_flow style
-			// (same green palette) so it reads as agent inner state rather
-			// than tool noise. Body is the kernel-logged summary string;
+			// Kernel notification-sync rewire. Uses the green inner-state
+			// palette so it reads as agent inner state rather than tool
+			// noise. Body is the kernel-logged summary string;
 			// when Sources has >1 entry we also list them on their own
 			// lines for clarity. Issue #40: when the kernel attached a
 			// `meta` block (build_meta + injection_seq), render a compact
@@ -1950,7 +1919,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 
 		case "aed":
 			// Agent error-recovery (kernel distress). Distinct orange palette
-			// rather than the green soul/notification palette: AED is not
+			// rather than the green inner-state/notification palette: AED is not
 			// agent inner reflection, it's the kernel telling us the LLM
 			// returned empty / errored and recovery was attempted. Subtype
 			// (attempt | exhausted | timeout) is in msg.Source and inlined
@@ -1974,7 +1943,8 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			}
 
 		case "insight":
-			// Dismissed insights only show in verbose mode
+			// Legacy inquiry history (read-only). Dismissed entries only
+			// show in verbose mode.
 			if msg.Dismissed && m.verbose == verboseOff {
 				continue
 			}
@@ -1986,14 +1956,14 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			barStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
 			labelStyle := lipgloss.NewStyle().Foreground(ColorAccent)
 
-			// Label: "/btw › question" or "★ insight", with dismiss hint if undismissed
+			// Label: "inquiry › question" or "★ insight", with dismiss hint if undismissed
 			var label string
 			dismissHint := ""
 			if !msg.Dismissed {
 				dismissHint = " " + barStyle.Render(i18n.T("mail.esc_dismiss"))
 			}
 			if msg.Question != "" {
-				label = labelStyle.Render("/btw › ") + msg.Question + dismissHint
+				label = labelStyle.Render("inquiry › ") + msg.Question + dismissHint
 			} else {
 				label = labelStyle.Render("★ insight") + dismissHint
 			}
@@ -2455,8 +2425,6 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 			badge = ansi.Truncate(badge, m.width-1, "…")
 		}
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAccent).Render(badge)
-	} else if !direct && (m.inquiryState == "sent" || m.inquiryState == "taken") {
-		leftLabel = lipgloss.NewStyle().Foreground(ColorAccent).Render("  ◉ " + i18n.T("mail.btw_thinking"))
 	} else if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("  ◉ " + m.statusFlash)
 	} else {

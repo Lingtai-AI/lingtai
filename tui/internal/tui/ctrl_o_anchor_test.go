@@ -86,7 +86,7 @@ func TestCtrlOAnchorToBottom(t *testing.T) {
 
 	t.Run("not ready returns refresh command", func(t *testing.T) {
 		// No WindowSizeMsg, so the viewport is never sized and ready stays false.
-		m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+		m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 		if m.ready {
 			t.Fatalf("precondition: model should not be ready before WindowSizeMsg")
 		}

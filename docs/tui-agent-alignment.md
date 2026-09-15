@@ -40,7 +40,7 @@ Classified per `tui/CONTRACT.md`:
 | R1 (project-scoped) | addon secrets | `<net>/.lingtai/.secrets/*.json` (agent dirs) | same files agents use |
 | R2 (derived) | API keys | `~/.lingtai-tui/.env` via `ResolveKeys` | `.env` is the single source of truth |
 | R3 (additive) | `config.json` | `~/.lingtai-tui/config.json` | UI mirror: `keys` (regenerable from `.env`) + legacy `language`; missing → defaults + degraded banner |
-| R3 (additive) | `tui_config.json` | `~/.lingtai-tui/tui_config.json` | UI prefs (language/theme/page size/insights/truncate/auto-refresh); missing → defaults loaded silently (fable F9) |
+| R3 (additive) | `tui_config.json` | `~/.lingtai-tui/tui_config.json` | UI prefs (language/theme/page size/truncate/auto-refresh); missing → defaults loaded silently (fable F9) |
 
 ## Misalignment matrix
 

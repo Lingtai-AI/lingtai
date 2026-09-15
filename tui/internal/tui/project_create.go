@@ -475,11 +475,7 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
 			humanAddr = humanNode.Address
 		}
-		soulDelayStr := "kernel default"
-		if agentOpts.SoulDelay != nil {
-			soulDelayStr = formatNumber(*agentOpts.SoulDelay)
-		}
-		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, preset.DefaultRecipe, lang, soulDelayStr); err != nil {
+		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, preset.DefaultRecipe, lang); err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("apply staged recipe: %w", err))
 		}
