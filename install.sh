@@ -1374,7 +1374,7 @@ ensure_runtime_venv() {
     existing_state="$(runtime_venv_state "$venv_dir")"
     if [[ "$existing_state" != "missing" ]]; then
       echo "error: existing runtime at $venv_dir is $existing_state; ordinary install will not adopt or repair it." >&2
-      echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh) to update one." >&2
+      echo "       Rerun install.sh to restore the latest canonical installation." >&2
       return 1
     fi
   fi
@@ -1840,7 +1840,7 @@ validate_install_target() {
   for managed in lingtai-tui lingtai lingtai-agent; do
     if [[ -e "$BIN_DIR/$managed" || -L "$BIN_DIR/$managed" ]]; then
       echo "error: existing managed target $BIN_DIR/$managed was found; ordinary install will not adopt or overwrite it." >&2
-      echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh) to update one." >&2
+      echo "       Rerun install.sh to restore the latest canonical installation." >&2
       return 1
     fi
   done
@@ -1860,7 +1860,7 @@ validate_fresh_install_state() {
   local runtime_root="$state_root/runtime"
   if [[ -e "$metadata" || -L "$metadata" ]]; then
     echo "error: existing install receipt $metadata was found; ordinary install is first-install-only." >&2
-    echo "       Use the standalone update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh), fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh), or verify.sh ($LINGTAI_SCRIPTS_ASSETS/verify.sh) for an existing installation." >&2
+    echo "       Rerun install.sh to restore the latest canonical installation." >&2
     return 1
   fi
   if [[ -e "$runtime_root" || -L "$runtime_root" ]]; then
@@ -1869,7 +1869,7 @@ validate_fresh_install_state() {
       return 0
     fi
     echo "error: existing runtime state $runtime_root was found; ordinary install will not adopt or repair it." >&2
-    echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or pass --skip-python for a TUI-only install that preserves the runtime." >&2
+    echo "       Rerun install.sh to restore the latest canonical installation, or pass --skip-python for a TUI-only install." >&2
     return 1
   fi
 }
@@ -2180,6 +2180,13 @@ main() {
       elif [[ -e "$HOME/.lingtai-tui/install.json" ]]; then
         REINSTALL_OK=1
         say "Existing installation detected; reinstalling in place."
+      elif [[ -e "$HOME/.lingtai-tui/runtime" || -L "$HOME/.lingtai-tui/runtime" ]]; then
+        # No receipt means there is no supported installation to migrate or
+        # adopt. Ignore an old caller's pinned version and run the one normal
+        # latest-release install path over the canonical runtime location.
+        REINSTALL_OK=1
+        VERSION=""
+        say "Non-canonical runtime detected; reinstalling the latest release."
       else
         validate_fresh_install_state || exit 1
       fi

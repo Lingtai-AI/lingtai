@@ -2065,6 +2065,18 @@ function Invoke-Main {
         return
     }
 
+    # A runtime without the current install receipt is not a supported legacy
+    # layout. Do not migrate or adopt it: ignore an old caller's pinned release
+    # and run the ordinary latest-release installer path noninteractively.
+    $receiptPath = Join-Path $GlobalDir 'install.json'
+    $runtimeRoot = Join-Path $GlobalDir 'runtime'
+    if (-not $Update -and -not $Latest -and -not $Ref -and -not $FromSource -and -not $haveArchive -and
+        -not $SkipVenv -and (Test-Path -LiteralPath $runtimeRoot) -and
+        -not (Test-Path -LiteralPath $receiptPath)) {
+        $Version = ''
+        Write-Warn 'Non-canonical runtime detected; reinstalling the latest release.'
+    }
+
     if ($FromSource -and $haveArchive) { Fail '-FromSource cannot be combined with -ArchivePath/-ChecksumPath.' }
     if (-not $haveArchive -and (Get-Arch) -ne 'amd64') {
         Fail 'Native Windows release installs currently require amd64. Use WSL2 with install.sh on ARM64.'
