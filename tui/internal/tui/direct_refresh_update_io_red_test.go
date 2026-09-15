@@ -43,7 +43,6 @@ func newReviewBlockerRefreshFixture(t *testing.T) reviewBlockerRefreshFixture {
 		10,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 41

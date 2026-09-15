@@ -80,7 +80,6 @@ func newDirectAffinityFixture(t *testing.T, withOrchestrator bool) directAffinit
 		200,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 73

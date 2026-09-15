@@ -202,13 +202,6 @@ func TestEnsureConfigPersisted_DoesNotTouchEnvFile(t *testing.T) {
 	}
 }
 
-func TestDefaultTUIConfig_DisablesInsights(t *testing.T) {
-	cfg := DefaultTUIConfig()
-	if cfg.Insights {
-		t.Fatal("DefaultTUIConfig().Insights = true, want false")
-	}
-}
-
 func TestDefaultTUIConfig_NoToolCallTruncation(t *testing.T) {
 	// Default must show full tool call content (no truncation). 0 means
 	// "untruncated" in the rendering path.
@@ -309,21 +302,6 @@ func TestSaveAndLoadTUIConfig_PreservesToolCallTruncate(t *testing.T) {
 	loaded := LoadTUIConfig(dir)
 	if loaded.ToolCallTruncate != 200 {
 		t.Errorf("ToolCallTruncate = %d after round-trip, want 200", loaded.ToolCallTruncate)
-	}
-}
-
-func TestLoadTUIConfig_MissingOrAbsentInsightsDisablesInsights(t *testing.T) {
-	dir := t.TempDir()
-	if cfg := LoadTUIConfig(dir); cfg.Insights {
-		t.Fatal("missing tui_config.json enabled insights; want false")
-	}
-
-	payload := []byte(`{"language":"en","mail_page_size":100}`)
-	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
-		t.Fatalf("write tui_config.json: %v", err)
-	}
-	if cfg := LoadTUIConfig(dir); cfg.Insights {
-		t.Fatal("tui_config.json without insights enabled insights; want false")
 	}
 }
 

@@ -33,9 +33,6 @@ var proceduresFS embed.FS
 //go:embed all:templates
 var templatesFS embed.FS
 
-//go:embed all:soul
-var soulFS embed.FS
-
 //go:embed all:recipe_assets
 var recipeAssetsFS embed.FS
 
@@ -1585,7 +1582,6 @@ func Bootstrap(globalDir string) error {
 	populate(globalDir, covenantFS, "covenant")
 	populate(globalDir, principleFS, "principle")
 	populate(globalDir, proceduresFS, "procedures")
-	populate(globalDir, soulFS, "soul")
 	populate(globalDir, templatesFS, "templates")
 	populate(globalDir, recipeAssetsFS, "recipe_assets")
 	// Rename recipe_assets -> recipes at the target path.
@@ -1672,11 +1668,6 @@ func ReadBundledSkillFile(skill, relPath string) (string, error) {
 // CovenantPath returns the absolute path to the covenant file for a language.
 func CovenantPath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "covenant", lang, "covenant.md")
-}
-
-// SoulFlowPath returns the absolute path to the soul flow file for a language.
-func SoulFlowPath(globalDir, lang string) string {
-	return filepath.Join(globalDir, "soul", lang, "soul-flow.md")
 }
 
 // AddonConfigRelPath returns the path (relative to the project root) where an
@@ -1841,24 +1832,15 @@ func llmString(llm map[string]interface{}, key string) string {
 
 // AgentOpts holds per-agent configuration values set at creation time.
 type AgentOpts struct {
-	Language     string   // "en", "zh", or "wen"
-	ContextLimit int      // token budget
-	SoulDelay    *float64 // nil means omit soul.delay so the kernel default applies
-	// SoulFlowEnabled is the wizard's soul-flow opt-in. When true,
-	// GenerateInitJSONWithOpts writes LINGTAI_SOUL_FLOW_ENABLED=1 into the
-	// global .env (the env_file the agent inherits at boot); when false it
-	// removes the key. Default false — soul flow is opt-in, matching the
-	// kernel default. This is distinct from SoulFile (the soul-flow prompt
-	// path) and from SoulDelay (cadence after opt-in).
-	SoulFlowEnabled bool
-	MaxRpm          int      // API requests-per-minute cap (cooperative network gate); 0 disables
-	MaxAedAttempts  int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
-	Karma           bool     // lifecycle control over other agents
-	Nirvana         bool     // permanent agent destruction
-	CovenantFile    string   // path to covenant file
-	SoulFile        string   // path to soul flow file
-	CommentFile     string   // path to comment file (optional)
-	Addons          []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
+	Language       string   // "en", "zh", or "wen"
+	ContextLimit   int      // token budget
+	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
+	MaxAedAttempts int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
+	Karma          bool     // lifecycle control over other agents
+	Nirvana        bool     // permanent agent destruction
+	CovenantFile   string   // path to covenant file
+	CommentFile    string   // path to comment file (optional)
+	Addons         []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
 	// AllowedPresets lists the absolute (or ~-prefixed) paths of every
 	// preset this agent is authorized to swap to at runtime. The default
 	// preset is automatically included if missing. When empty, falls back
@@ -1877,7 +1859,6 @@ func DefaultAgentOpts() AgentOpts {
 	return AgentOpts{
 		Language:       "en",
 		ContextLimit:   500000,
-		SoulDelay:      nil,
 		MaxRpm:         60,
 		MaxAedAttempts: DefaultMaxAedAttempts,
 		Karma:          true,
@@ -1894,15 +1875,6 @@ const (
 	MinMaxAedAttempts     = 1
 	MaxMaxAedAttempts     = 100
 )
-
-// DefaultSoulFlowCadence is the soul.delay (seconds) the wizard stamps
-// when the user opts into soul flow but leaves the cadence field blank.
-// Two hours is a sane "proactive but not chatty" default. It is applied
-// ONLY when soul flow is enabled — a default disabled agent omits the
-// soul block entirely so the kernel's own default applies (and no fires
-// happen while the env opt-in is off). This prevents an enabled agent
-// from silently inheriting the kernel's huge no-op fallback delay.
-const DefaultSoulFlowCadence = 7200.0
 
 // ClampAedAttempts validates a user-supplied AED max-attempts value. A value of
 // zero or below (the zero value, or empty/invalid input parsed to 0) falls back
@@ -2026,9 +1998,10 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"karma":   opts.Karma,
 		"nirvana": opts.Nirvana,
 	}
-	if opts.SoulDelay != nil {
-		manifest["soul"] = map[string]interface{}{"delay": *opts.SoulDelay}
-	}
+	// No `soul` block is ever emitted: the Soul subsystem is retired. A
+	// legacy `soul` key already present in an existing manifest is carried
+	// through by the generic copy above (like other stale keys) and ignored
+	// by the kernel; it is never rewritten, extended, or propagated here.
 	manifest["context_limit"] = opts.ContextLimit
 	// molt_pressure and molt_prompt are intentionally NOT written: the kernel no
 	// longer accepts configurable context.molt thresholds or messages (Jason
@@ -2321,29 +2294,17 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		return fmt.Errorf("write init.json: %w", err)
 	}
 
-	// Persist the soul-flow opt-in into the global .env — the env_file the
-	// agent inherits at boot (init.json "env_file" above points here). The
-	// kernel reads LINGTAI_SOUL_FLOW_ENABLED from process env, so this is
-	// the seam that actually turns soul flow on/off. SetEnvVar is merge-
-	// preserving: it touches only this one key and leaves API keys,
-	// comments, and unrelated vars intact. OFF removes the key rather than
-	// writing =0, keeping the file minimal and matching the kernel default.
-	optInValue := ""
-	if opts.SoulFlowEnabled {
-		optInValue = "1"
-	}
-	if err := config.SetEnvVar(globalDir, config.SoulFlowEnabledEnvVar, optInValue); err != nil {
-		return fmt.Errorf("write soul-flow opt-in to .env: %w", err)
-	}
+	// The global .env is deliberately NOT touched here. Generating an
+	// agent never writes or removes feature flags; any pre-existing lines
+	// (including ones left by retired features) stay byte-for-byte.
 
 	// Build the wizard-controlled subset of .agent.json. Other fields the
 	// kernel populates at runtime (agent_id, created_at, molt_count,
-	// language, soul_delay, soul_voice, started_at, capabilities,
-	// nickname, etc) must NOT be touched here — re-running /setup against
-	// an existing agent should preserve the agent's identity and history,
+	// language, started_at, capabilities, nickname, legacy soul_* keys,
+	// etc) must NOT be touched here — re-running /setup against an
+	// existing agent should preserve the agent's identity and history,
 	// not reset it. Without this preservation, molt_count drops to 0 on
-	// every /setup, which makes psyche overwrite earlier snapshots and
-	// breaks soul-flow's "past self" continuity.
+	// every /setup, which makes psyche overwrite earlier snapshots.
 	agentManifest := map[string]interface{}{
 		"agent_name": agentName,
 		"address":    filepath.Base(agentDir),

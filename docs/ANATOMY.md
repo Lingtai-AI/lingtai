@@ -113,7 +113,7 @@ The documentation tree serves three audiences:
 
 ## Notes
 
-- **Update trigger:** when a PR changes a user-visible slash command, setup flow, install/upgrade path, `/mcp`/addon/channel behavior, daemon/avatar guidance, memory/molt behavior, soul-flow explanation, safety boundary, or troubleshooting path, keep the README orientation and shipped help assets accurate, and flag the website tutorial for a matching update (tracked in the separate website repo).
+- **Update trigger:** when a PR changes a user-visible slash command, setup flow, install/upgrade path, `/mcp`/addon/channel behavior, daemon/avatar guidance, memory/molt behavior, safety boundary, or troubleshooting path, keep the README orientation and shipped help assets accurate, and flag the website tutorial for a matching update (tracked in the separate website repo).
 - **No private paths or secrets:** docs may mention `.secrets/` and placeholders, but must not include real local paths, tokens, chat IDs, or account-specific values.
 - **Do not commit routine reports:** `reports/*.html` is local-only by default. Long-lived docs belong under `docs/` and should be represented here when they become maintenance obligations.
 - **`related_files` is this directory tree's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.

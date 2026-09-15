@@ -38,7 +38,7 @@ func TestMailProjectionUsesMailboxExactlyOnceBeyondEventWindow(t *testing.T) {
 		ReceivedAt: "1960-01-01T00:00:00Z", // older than the bounded 1970 event window
 	})
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", 0)
 	m, _ = m.Update(m.initialRebuild())
 
 	matches := 0
@@ -71,7 +71,7 @@ func TestMailProjectionKeepsExpandedEventHistoryWhileMailStaysSingleSource(t *te
 		ReceivedAt: "2026-07-12T00:00:00Z",
 	})
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 100, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 100, "", "en", 0)
 	m, _ = m.Update(m.initialRebuild())
 	m.verbose = verboseThinking
 	m.buildMessages()
@@ -116,7 +116,7 @@ func TestMailModelOnlyUsesAcceptedMailboxSnapshotForRender(t *testing.T) {
 		ReceivedAt: "2026-07-22T12:00:00Z",
 	})
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", 0)
 	m, _ = m.Update(m.initialRebuild())
 
 	writeMailboxProjectionMessage(t, humanDir, "inbox", "producer-only-mail", fs.MailMessage{
@@ -157,7 +157,7 @@ func TestMailModelBuildMessagesSortsRFC3339NanoTimestampsByInstant(t *testing.T)
 		{ID: "normal-four", MailboxID: "normal-four", From: orchDir, To: "human", Message: "normal four", ReceivedAt: "2026-08-14T10:00:02.4Z"},
 		{ID: "normal-five", MailboxID: "normal-five", From: orchDir, To: "human", Message: "normal five", ReceivedAt: "2026-08-14T10:00:02.5Z"},
 	}}
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", 0)
 	m.acceptedSnapshot = newAcceptedMailSnapshot(cache)
 
 	m.buildMessages()

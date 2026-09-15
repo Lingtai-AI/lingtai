@@ -451,8 +451,8 @@ func newTestDraftWithDirtyPreset(t *testing.T) (*ProjectDraft, string, string) {
 // TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset proves
 // the issue-scoped ordering boundary: a dirty preset is not persisted until
 // the staged project passes every build and orchestrator-validation phase.
-// Other pre-validation global writes (notably soul-flow configuration) are a
-// separate contract and deliberately not asserted here.
+// Other pre-validation global writes are a separate contract and
+// deliberately not asserted here.
 func TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset(t *testing.T) {
 	phases := []CreatePhase{
 		PhaseApplyRecipe, // the first phase strictly AFTER PhaseApplyPreset

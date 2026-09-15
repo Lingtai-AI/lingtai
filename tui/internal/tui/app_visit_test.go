@@ -29,7 +29,7 @@ func visitTestApp(t *testing.T) App {
 		width:       100,
 		height:      30,
 	}
-	a.installMailModel(NewMailModel(filepath.Join(originalProject, "human"), "human", originalProject, originalAgent, "orig", 20, global, "en", false, 0))
+	a.installMailModel(NewMailModel(filepath.Join(originalProject, "human"), "human", originalProject, originalAgent, "orig", 20, global, "en", 0))
 	return a
 }
 

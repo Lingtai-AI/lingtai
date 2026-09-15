@@ -128,7 +128,7 @@ func ctrlU() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtr
 
 func TestInitialContentWindowEqualsConfiguredPageSize(t *testing.T) {
 	orchDir := buildWindowedAgentDir(t, 405)
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), orchDir, "agent", 200, "", "en", 0)
 	m.verbose = verboseThinking
 	rm := m.initialRebuild().(mailRefreshMsg)
 	if got := rm.sessionCache.Len(); got != 200 {
@@ -151,7 +151,7 @@ func TestInitialContentWindowEqualsConfiguredPageSize(t *testing.T) {
 // TestInitialContentWindowNeverExceedsRecentMessageLimit pins the hard cap
 // against the largest configurable page size.
 func TestInitialContentWindowNeverExceedsRecentMessageLimit(t *testing.T) {
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", 2000, "", "en", 0)
 	if m.pageSize != 2000 {
 		t.Fatalf("fixture page size = %d, want the configured 2000", m.pageSize)
 	}
@@ -170,7 +170,7 @@ func TestInitialContentWindowNeverExceedsRecentMessageLimit(t *testing.T) {
 // that would read further history.
 func TestCtrlURevealsLoadedHistoryWithoutLoadingMore(t *testing.T) {
 	const page, total = 100, 250
-	m := NewMailModel(t.TempDir(), "human", t.TempDir(), buildWindowedAgentDir(t, total), "agent", page, "", "en", false, 0)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), buildWindowedAgentDir(t, total), "agent", page, "", "en", 0)
 	m.verbose = verboseThinking
 	m = installInitialWindow(t, m)
 
@@ -198,7 +198,7 @@ func TestCtrlURevealsLoadedHistoryWithoutLoadingMore(t *testing.T) {
 
 func TestUnsupportedMailPageSizeNormalizesAtConstruction(t *testing.T) {
 	for _, unsupported := range []int{-1, 0, 99, 300, 2001, 999999} {
-		m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", unsupported, "", "en", false, 0)
+		m := NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", unsupported, "", "en", 0)
 		if m.pageSize != 200 || m.contentWindow() != 200 {
 			t.Fatalf("page size %d normalized to page=%d window=%d, want 200/200", unsupported, m.pageSize, m.contentWindow())
 		}

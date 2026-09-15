@@ -66,7 +66,6 @@ func newDirectOrderingFixture(t *testing.T) directOrderingFixture {
 		10,
 		"",
 		"en",
-		false,
 		0,
 	)
 	mail.generation = 83

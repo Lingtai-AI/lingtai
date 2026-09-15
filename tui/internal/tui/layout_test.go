@@ -282,7 +282,7 @@ func mailLayoutApp(t *testing.T) App {
 			t.Fatal(err)
 		}
 	}
-	mail := NewMailModel(humanDir, "human@local", "~", orchDir, "main", 50, dir, "en", false, 0)
+	mail := NewMailModel(humanDir, "human@local", "~", orchDir, "main", 50, dir, "en", 0)
 	return App{currentView: appViewMail, mail: mail}
 }
 

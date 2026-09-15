@@ -48,7 +48,9 @@ func TestSlashPaletteFitsFrameAndScrollsSelection(t *testing.T) {
 				t.Errorf("slash palette maximum line width = %d, want <= terminal width %d", maxWidth, size.width)
 			}
 
-			for range 20 {
+			// /export is the 20th entry (index 19) of DefaultCommands; nineteen
+			// downs from the first row scroll it into the marked slot.
+			for range 19 {
 				model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 				app = model.(App)
 			}
@@ -151,17 +153,17 @@ func TestPaletteNavigationFilterAndExclusionKeepSelectionVisible(t *testing.T) {
 	for range len(DefaultCommands()) + 5 {
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
-	assertMarkedPaletteSelection(t, m, "btw")
-	assertPaletteSelection(t, m, "btw")
+	assertMarkedPaletteSelection(t, m, "sleep")
+	assertPaletteSelection(t, m, "sleep")
 
-	m.ExcludeCommands("btw", "quit")
+	m.ExcludeCommands("sleep", "quit")
 	m.SetFilter("presets")
 	assertMarkedPaletteSelection(t, m, "presets")
 	assertPaletteSelection(t, m, "presets")
 
 	m.SetFilter("")
-	assertMarkedPaletteSelection(t, m, "sleep")
-	assertPaletteSelection(t, m, "sleep")
+	assertMarkedPaletteSelection(t, m, "suspend")
+	assertPaletteSelection(t, m, "suspend")
 
 	m.SetFilter("no-command-matches-this")
 	if got := m.LineCount(); got != 0 {

@@ -14,7 +14,7 @@ import (
 // harness used by mail_input_height_test.go.
 func newSizedMailModel(t *testing.T) MailModel {
 	t.Helper()
-	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return m
 }
@@ -126,7 +126,7 @@ func TestCopyModeBadgeRenders(t *testing.T) {
 // onto a second line on small terminals (an explicit product constraint).
 func TestCopyModeBadgeFitsNarrowWidth(t *testing.T) {
 	for _, w := range []int{40, 50, 58} {
-		m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+		m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 		m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
 		m.copyMode = true
 		out := m.View()

@@ -86,7 +86,7 @@ func TestActiveElapsed(t *testing.T) {
 // seconds since the last API call), falling back to wall-clock when absent.
 func TestActiveSinceLifecycle(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", 0)
 	m = sizeMail(t, m)
 
 	// Enter ACTIVE → timer starts (wall-clock fallback when no progress field).
@@ -193,7 +193,7 @@ func TestResolveAgentLifecycleHeartbeatPresentation(t *testing.T) {
 				t.Errorf("manifest state = %q, want %q", node.State, tc.manifestState)
 			}
 
-			m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
+			m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", 0)
 			preparedMsg := m.refreshMail()
 			prepared, ok := preparedMsg.(mailRefreshMsg)
 			if !ok {

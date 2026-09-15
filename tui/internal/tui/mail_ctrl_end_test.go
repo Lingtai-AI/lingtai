@@ -117,7 +117,7 @@ func TestMailCtrlEndJumpsViewportToBottom(t *testing.T) {
 }
 
 func TestMailCtrlEndNotReadyReturnsNoop(t *testing.T) {
-	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", 0)
 	m.input.SetValue("draft")
 
 	updated, cmd := m.Update(ctrlEndKey(t))

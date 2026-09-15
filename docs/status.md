@@ -4,7 +4,7 @@
 
 The original prototype layout below (`intrinsics/`, `services/file_io.py` + friends, `layers/`) has since been restructured. The current kernel organizes tools under `tools/` (one package per capability/intrinsic, composed via `registry.py`'s `INTRINSICS`/`BUILTIN_TOOLS`) and keeps a much smaller `services/` directory:
 
-- [x] `tools/` — `file` (read/edit/write/glob/grep, replaces the old separate intrinsics), `shell` (was `bash`), `web` (replaces `web_search`), `email`, `vision`, `knowledge`, `skills`, `avatar`, `daemon`, `mcp`, `task_card`, `notification`, `psyche`, `soul`, `system`, `context` — no standalone `layers/` package; the old layer concepts (diary/plan/bash/delegate) are folded into these tools or the kernel itself.
+- [x] `tools/` — `file` (read/edit/write/glob/grep, replaces the old separate intrinsics), `shell` (was `bash`), `web` (replaces `web_search`), `email`, `vision`, `knowledge`, `skills`, `avatar`, `daemon`, `mcp`, `task_card`, `notification`, `psyche`, `system`, `context` — no standalone `layers/` package; the old layer concepts (diary/plan/bash/delegate) are folded into these tools or the kernel itself.
 - [x] `services/` — `file_io.py`, `file_io_sidecar.py`, `mail.py`, `mcp.py`, `mcp_inbox.py`, `mcp_licc.py`, `mcp_registry.py`, `vision/`, `websearch/`
 - [x] `kernel/services/` — `logging.py`, `mail.py`
 - [x] `kernel/` — BaseAgent lifecycle, tool dispatch, compaction, loop guard, streaming, session save/restore

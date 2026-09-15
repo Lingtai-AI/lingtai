@@ -30,7 +30,6 @@ print(list(ALL_INTRINSICS.keys()))
 
 Walk through each one you find:
 
-- **Soul** — the subconscious. Offer to demonstrate: explain that soul flow is opt-in (default off); enable it through `/setup` or `LINGTAI_SOUL_FLOW_ENABLED=1`, set a short cadence such as 10s only after enabling, tell the human to enable extended mode (ctrl+o twice), go idle, let soul flow fire, then report what happened. Reset by turning soul flow off (or removing the env opt-in) and restoring the cadence. See `soul-manual` for details.
 - **System** — runtime inspection and lifecycle control.
 - **Psyche** — the self. Manages four things: **lingtai** (identity), **pad** (working scratchpad), **context** (molt), and **name** (true name + nickname). The tool name comes from Greek for soul/self.
 - **Email** — filesystem-based communication. Always-on intrinsic; addon bridges (IMAP / Telegram / Feishu) plug in via the `mcp` capability. The distinction worth showing the human: **intrinsics are always loaded; capabilities are configured in init.json**.

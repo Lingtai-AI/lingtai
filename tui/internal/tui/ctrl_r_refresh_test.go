@@ -65,7 +65,7 @@ func TestPropsCtrlRRefreshesHeavySnapshotAsynchronously(t *testing.T) {
 
 func TestMailCtrlRTriggersRefresh(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", 0)
 	_, cmd := m.Update(ctrlR())
 	if cmd == nil {
 		t.Fatal("MailModel ctrl+r returned nil cmd; expected a refresh command")

@@ -198,8 +198,8 @@ func RecipeNeedsApply(projectRoot string) bool {
 //
 // For each agent dir it:
 //   - Writes .prompt from the recipe's greet template (with runtime
-//     substitutions for {{time}}, {{addr}}, {{lang}}, {{soul_delay}},
-//     {{location}}, {{commands}}). Greet substitution is delegated to the
+//     substitutions for {{time}}, {{addr}}, {{lang}}, {{location}},
+//     {{commands}}). Greet substitution is delegated to the
 //     caller via the greetSubstitutor callback so this package stays free
 //     of TUI-only helpers.
 //   - Updates init.json:

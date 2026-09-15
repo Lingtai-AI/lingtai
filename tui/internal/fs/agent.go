@@ -95,7 +95,7 @@ func ParseCapabilities(raw json.RawMessage) []string {
 // live agent (the kernel wires them in unconditionally) but are not listed
 // in .agent.json's `capabilities` field. The kanban/props view should still
 // present them so the operator sees the complete capability surface.
-var intrinsicCapabilities = []string{"system", "soul", "email", "psyche"}
+var intrinsicCapabilities = []string{"system", "email", "psyche"}
 
 // CapabilitiesForDisplay returns the operator-visible capability list:
 // the intrinsic capabilities first, followed by the manifest capabilities in
@@ -120,8 +120,9 @@ func CapabilitiesForDisplay(manifest []string) []string {
 }
 
 // ReadInitManifest returns the agent's manifest fields with the llm
-// sub-object (model, provider, base_url) and soul.delay flattened to top
-// level. It prefers the kernel-published resolved-manifest artifact
+// sub-object (model, provider, base_url) flattened to top level. Any
+// legacy `soul` block in an old init.json is carried through untouched
+// but is not flattened or surfaced. It prefers the kernel-published resolved-manifest artifact
 // (system/manifest.resolved.json — preset materialized, validated,
 // secret-redacted; kernel issue #259) and falls back to raw init.json when
 // the artifact is absent or malformed (stopped / never-booted agents).
@@ -204,34 +205,12 @@ func flattenInitManifest(manifest map[string]interface{}) {
 			}
 		}
 	}
-	// Flatten soul.delay into soul_delay
-	if soul, ok := manifest["soul"].(map[string]interface{}); ok {
-		if v, ok := soul["delay"]; ok {
-			manifest["soul_delay"] = v
-		}
-	}
 }
 
 // WritePrompt writes a .prompt signal file to inject a [system] text input message.
 // The agent's heartbeat loop picks this up and calls agent.send(content, sender="system").
 func WritePrompt(agentDir, content string) error {
 	return os.WriteFile(filepath.Join(agentDir, ".prompt"), []byte(content), 0o644)
-}
-
-// WriteInquiry writes a .inquiry signal file to trigger soul.inquiry.
-// No-op if .inquiry or .inquiry.taken already exists (one at a time).
-// Format: first line is source ("human", "insight"), rest is question.
-func WriteInquiry(agentDir, source, question string) error {
-	inquiryPath := filepath.Join(agentDir, ".inquiry")
-	takenPath := filepath.Join(agentDir, ".inquiry.taken")
-	if _, err := os.Stat(inquiryPath); err == nil {
-		return nil // already pending
-	}
-	if _, err := os.Stat(takenPath); err == nil {
-		return nil // already being processed
-	}
-	content := source + "\n" + question
-	return os.WriteFile(inquiryPath, []byte(content), 0o644)
 }
 
 // ReadAgentRaw reads .agent.json from dir and returns the full JSON as an ordered map.

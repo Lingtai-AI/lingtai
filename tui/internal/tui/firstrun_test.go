@@ -91,7 +91,7 @@ func TestFirstRunAndSetupViewsOmitObsoletePrincipleControl(t *testing.T) {
 			if strings.Contains(view, i18n.T("firstrun.principle")) || strings.Contains(view, "firstrun.principle") {
 				t.Fatalf("%s view exposes the obsolete Principle control: %s", tc.name, view)
 			}
-			for _, label := range []string{i18n.T("firstrun.covenant"), i18n.T("firstrun.soul_flow"), i18n.T("firstrun.comment")} {
+			for _, label := range []string{i18n.T("firstrun.covenant"), i18n.T("firstrun.comment")} {
 				if !strings.Contains(view, label) {
 					t.Fatalf("%s view lost supported prompt %q: %s", tc.name, label, view)
 				}
@@ -1183,7 +1183,8 @@ func TestSetupModeSelfHealFromEnv(t *testing.T) {
 	globalDir := t.TempDir()
 
 	// .env carries an API key (it survived the partial wipe) plus an
-	// unrelated flag that must NOT be treated as a recoverable key.
+	// unrelated flag left by a retired feature that must NOT be treated as
+	// a recoverable key — and must survive untouched.
 	envContent := "DEEPSEEK_API_KEY=sk-self-heal-test\nLINGTAI_SOUL_FLOW_ENABLED=1\n"
 	if err := os.WriteFile(filepath.Join(globalDir, ".env"), []byte(envContent), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
@@ -1224,6 +1225,6 @@ func TestSetupModeSelfHealFromEnv(t *testing.T) {
 		t.Fatalf("read .env after self-heal: %v", err)
 	}
 	if !strings.Contains(string(envAfter), "LINGTAI_SOUL_FLOW_ENABLED=1") {
-		t.Fatalf(".env lost the unmanaged soul-flow flag:\n%s", envAfter)
+		t.Fatalf(".env lost the unmanaged retired-feature line:\n%s", envAfter)
 	}
 }

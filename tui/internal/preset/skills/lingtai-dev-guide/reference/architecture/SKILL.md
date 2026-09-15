@@ -53,7 +53,7 @@ Key packages in `portal/internal/`:
 
 Published as the `lingtai` package on PyPI. Contains:
 
-- `src/lingtai/kernel/` — the minimal agent runtime (turn loop, lifecycle, tool dispatch, mailbox, soul/molt orchestration)
+- `src/lingtai/kernel/` — the minimal agent runtime (turn loop, lifecycle, tool dispatch, mailbox, molt orchestration)
 - `src/lingtai/` — the batteries-included wrapper (MCP, FileIO, Vision, Search, CLI)
 
 The wrapper depends on the kernel one-directionally. The kernel never imports from the wrapper.
@@ -65,7 +65,7 @@ The wrapper depends on the kernel one-directionally. The kernel never imports fr
 ┌──────────────┬───────────────┐        ┌────────────────────────┐
 │ lingtai-tui  │ lingtai-portal│        │     Agent runtime      │
 │  (terminal)  │     (web)     │◄──────►│ turn loop · tools ·    │
-└──────────────┴───────────────┘        │ mailbox · soul · molt  │
+└──────────────┴───────────────┘        │ mailbox · molt         │
          filesystem only                └────────────────────────┘
          (.lingtai/<agent>/)
 ```
@@ -80,7 +80,7 @@ other side poll).
 
 **TUI → filesystem (read):** `.agent.json`, `.agent.heartbeat`, `mailbox/`, `logs/token_ledger.jsonl`, `history/chat_history.jsonl`, `system/*.md`, `.notification/*.json`.
 
-**TUI → filesystem (write):** Signal files only: `.sleep`, `.suspend`, `.interrupt`, `.clear`, `.prompt`, `.refresh`, `.inquiry`. Plus `init.json` via explicit user actions.
+**TUI → filesystem (write):** Signal files only: `.sleep`, `.suspend`, `.interrupt`, `.clear`, `.prompt`, `.refresh`. Plus `init.json` via explicit user actions.
 
 **TUI ↔ Homebrew tap:** Pushing a release tag runs the root release workflow, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`.
 
@@ -116,7 +116,6 @@ other side poll).
 │   │   └── archive/
 │   ├── .notification/           # notification producer files
 │   │   ├── email.json
-│   │   ├── soul.json
 │   │   └── system.json
 │   ├── logs/                    # token ledger, events
 │   ├── history/                 # chat history, snapshots

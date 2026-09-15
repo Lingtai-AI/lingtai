@@ -84,7 +84,7 @@ func copyRecipeBundle(lingtaiDir, globalDir, recipeName string) (projectRoot str
 // library path entries).
 func applyRecipe(
 	lingtaiDir, orchDir, globalDir, humanDir, humanAddr string,
-	recipeName, lang, soulDelay string,
+	recipeName, lang string,
 ) error {
 	_ = orchDir // ApplyRecipe iterates every agent under lingtaiDir itself
 
@@ -92,7 +92,7 @@ func applyRecipe(
 	if err != nil {
 		return err
 	}
-	return applyRecipeBundle(projectRoot, lingtaiDir, humanDir, humanAddr, recipeName, lang, soulDelay)
+	return applyRecipeBundle(projectRoot, lingtaiDir, humanDir, humanAddr, recipeName, lang)
 }
 
 // applyRecipeBundle materializes an already-copied project-root recipe into
@@ -100,10 +100,10 @@ func applyRecipe(
 // Create finish the future .lingtai tree in its sibling staging directory.
 func applyRecipeBundle(
 	projectRoot, lingtaiDir, humanDir, humanAddr string,
-	recipeName, lang, soulDelay string,
+	recipeName, lang string,
 ) error {
 	greetSubst := func(tmpl string) string {
-		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, soulDelay)
+		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang)
 	}
 	if _, err := preset.ApplyRecipeToLingTaiDir(projectRoot, lingtaiDir, lang, greetSubst); err != nil {
 		return fmt.Errorf("applyRecipe: %w", err)
@@ -149,18 +149,19 @@ func resolveRecipeProcedures(projectRoot, lang string) string {
 // startup when ReconcileRecipe needs to render a greet template without
 // knowing the TUI's internal helper. Delegates to the internal
 // implementation so both call sites share behavior exactly.
-func SubstituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay string) string {
-	return substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay)
+func SubstituteGreetPlaceholders(template, humanAddr, humanDir, lang string) string {
+	return substituteGreetPlaceholders(template, humanAddr, humanDir, lang)
 }
 
 // substituteGreetPlaceholders replaces canonical placeholder tokens in a greet
-// template with runtime values before writing to .prompt.
-func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay string) string {
+// template with runtime values before writing to .prompt. The retired
+// `{{soul_delay}}` token is no longer substituted; a user recipe that still
+// carries it is left verbatim rather than filled with Soul config.
+func substituteGreetPlaceholders(template, humanAddr, humanDir, lang string) string {
 	out := template
 	out = strings.ReplaceAll(out, "{{time}}", time.Now().Format("2006-01-02 15:04"))
 	out = strings.ReplaceAll(out, "{{addr}}", humanAddr)
 	out = strings.ReplaceAll(out, "{{lang}}", lang)
-	out = strings.ReplaceAll(out, "{{soul_delay}}", soulDelay)
 	loc := "unknown"
 	if humanDir != "" {
 		if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Location != nil {

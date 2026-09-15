@@ -120,12 +120,6 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	insightsOptions := []string{"off", "on"}
-	insightsCurrent := 0
-	if tuiCfg.Insights {
-		insightsCurrent = 1
-	}
-
 	// Auto-refresh: when on (the default), reloadable views (e.g. the kanban
 	// dashboard) refresh from disk every second. Ctrl+R remains the manual
 	// fallback regardless of this setting.
@@ -184,7 +178,6 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		{Key: "language", Label: "settings.language", Options: langOptions, Current: langCurrent},
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
-		{Key: "insights", Label: "settings.insights", Options: insightsOptions, Current: insightsCurrent},
 		{Key: "auto_refresh", Label: "settings.auto_refresh", Options: autoRefreshOptions, Current: autoRefreshCurrent},
 		{Key: "tool_truncate", Label: "settings.tool_truncate", Options: toolTruncOptions, Current: toolTruncCurrent},
 		{Key: "agent_lang", Label: "settings.agent_lang", Options: agentLangOptions, Current: agentLangCurrent},
@@ -309,8 +302,6 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		size := config.DefaultTUIConfig().MailPageSize
 		fmt.Sscanf(val, "%d", &size)
 		m.tuiConfig.MailPageSize = size
-	case "insights":
-		m.tuiConfig.Insights = val == "on"
 	case "auto_refresh":
 		// Stored as an inverse flag (auto_refresh_off) so the default-on case
 		// writes no key; see config.TUIConfig.AutoRefreshOff.
@@ -458,7 +449,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "tool_truncate" && value == "off") {
+		if f.Key == "auto_refresh" || (f.Key == "tool_truncate" && value == "off") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)

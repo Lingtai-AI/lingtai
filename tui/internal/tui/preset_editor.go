@@ -1766,7 +1766,7 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	// (capabilitiesGuidanceRow below).
 	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
 	capabilityRows := []string{
-		"email", "psyche", "soul", "system",
+		"email", "psyche", "system",
 		"knowledge", "skills", "shell",
 		"avatar", "daemon", "mcp", "file",
 		"web_search", "vision",

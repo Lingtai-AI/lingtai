@@ -28,7 +28,7 @@ func runMailPersistCmd(t *testing.T, cmd tea.Cmd) mailPersistMsg {
 }
 
 func TestMailModelIgnoresOldGenerationAsyncMessages(t *testing.T) {
-	m := NewMailModel("", "", "", "", "agent", 10, "", "en", false, 0)
+	m := NewMailModel("", "", "", "", "agent", 10, "", "en", 0)
 	m.generation = 2
 	m.initialLoading = true
 	m.homeTelemetryInFlight = true
@@ -256,7 +256,7 @@ func TestInitialRebuildDoesNotMutateInstalledCacheBeforeAcceptance(t *testing.T)
 	orchDir := filepath.Join(root, "orch")
 	writeMailGenerationEvent(t, orchDir, "command-local history")
 
-	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 2000, "", "en", 0)
 	installed := m.sessionCache
 	msg := m.initialRebuild()
 
@@ -291,9 +291,9 @@ func TestMailPersistRejectsReplacedCacheWithinGeneration(t *testing.T) {
 	root := t.TempDir()
 	staleHumanDir := filepath.Join(root, "stale-human")
 	currentHumanDir := filepath.Join(root, "current-human")
-	m := NewMailModel(staleHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(staleHumanDir, "human", root, "", "agent", 2000, "", "en", 0)
 	staleCache := m.sessionCache
-	current := NewMailModel(currentHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
+	current := NewMailModel(currentHumanDir, "human", root, "", "agent", 2000, "", "en", 0)
 	m.sessionCache = current.sessionCache
 
 	updated, cmd := m.Update(mailPersistMsg{generation: m.generation, sessionCache: staleCache})
@@ -419,7 +419,7 @@ func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
 	writeMailGenerationEvent(t, orchDir, "generation B")
 
 	a := App{currentView: appViewMail}
-	a.installMailModel(NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0))
+	a.installMailModel(NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", 0))
 	a.mail.verbose = verboseThinking
 	lateA := a.mail.initialRebuild
 

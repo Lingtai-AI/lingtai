@@ -134,7 +134,7 @@ func TestHomeTelemetryExpressionWithNoAvailableFragmentReservesNoRow(t *testing.
 		orchName:    "agent",
 		tuiConfig:   config.LoadTUIConfig(globalDir),
 	}
-	a.installMailModel(NewMailModel(humanDir, "human", "~", orchDir, "agent", 200, globalDir, "en", false, 0))
+	a.installMailModel(NewMailModel(humanDir, "human", "~", orchDir, "agent", 200, globalDir, "en", 0))
 	a.mail, _ = a.mail.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	a.mail, _ = a.mail.Update(a.mail.initialRebuild())
 	a.mail, _ = a.mail.Update(a.mail.fetchHomeTelemetry())

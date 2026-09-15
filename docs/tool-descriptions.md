@@ -1,23 +1,12 @@
 # Tool Descriptions
 
-The complete model-facing tool surface: the six mandatory kernel intrinsics
+The complete model-facing tool surface: the five mandatory kernel intrinsics
 (`INTRINSICS`) and the ten built-in capabilities (`BUILTIN_TOOLS`). Both lists live in
 `lingtai-kernel/src/lingtai/tools/registry.py`, which is authoritative — this file is
 hand-maintained and has no generator, so re-check it against the registry when the tool
 surface changes.
 
 ## Kernel Intrinsics
-
-### soul
-
-**English:**
-Your inner voice — a second you that whispers back after you go idle. One tool, six actions: 'inquiry' asks a deep clone of your full conversation a question and returns its answer. 'flow' is opt-in periodic self-reflection (disabled by default until the operator enables it) — when enabled it fires every 'config'-tuned interval while idle, drawing on past-self voices from molt snapshots plus a stepped-back read of your current work. 'config' tunes flow's cadence (delay_seconds) and how many past-self voices speak per fire (consultation_past_count) — it does not turn flow on. 'voice' reads or sets which persona your soul-flow speaks in (built-in 'inner'/'observer', or 'custom' with your own prompt). 'dismiss' clears the current flow notification. 'manual' returns the installed soul-manual skill.
-
-**中文:**
-你的内心独白——空闲后向你低语的另一个你。一个工具，六个动作：'inquiry' 让完整对话的深度克隆回答你的一个自问。'flow' 是可选的周期性自省（默认关闭，需操作者开启）——开启后，每隔由 'config' 设定的时间在空闲时触发一次，取材于蜕变快照中的往昔之声与对当前工作的抽离式回顾。'config' 调整 flow 的节奏（delay_seconds）与每次触发发声的往昔之声数量（consultation_past_count）——不会开启 flow。'voice' 读取或设置内心独白发声的人格（内置 'inner'/'observer'，或 'custom' 自定义提示词）。'dismiss' 清除当前的 flow 通知。'manual' 返回已安装的 soul-manual 技能说明。
-
-**文言:**
-汝之内省——空闲之后向汝低语之另一个汝。一器六动：'inquiry' 令汝完整对话之克隆答汝一自问。'flow' 乃可选之周期自省（默认不启，须操者启之）——既启，则每隔 'config' 所定之候于空闲时一触，取往世蜕痕之声与今务抽离之读。'config' 调 flow 之候（delay_seconds）与每触发声之往世数（consultation_past_count）——不启 flow。'voice' 阅或择内省发声之相（固有 'inner'/'observer'，或 'custom' 自定提示）。'dismiss' 清当前 flow 之告。'manual' 返已装之 soul-manual 说明。
 
 ### email
 

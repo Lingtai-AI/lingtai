@@ -982,7 +982,6 @@ func (m PropsModel) renderDetail() string {
 	appendRawRow("language", i18n.T("props.language"))
 	appendRawRow("started_at", i18n.T("props.started_at"))
 	appendRawRow("combo", i18n.T("props.combo"))
-	appendRawRow("soul_delay", i18n.T("props.soul_flow"))
 	appendRawRow("molt_count", i18n.T("props.molt_count"))
 	appendRawRow("max_turns", i18n.T("props.max_turns"))
 	appendRawRow("max_rpm", i18n.T("props.max_rpm"))

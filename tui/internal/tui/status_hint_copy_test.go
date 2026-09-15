@@ -34,7 +34,7 @@ func newEnglishHomeModel(t *testing.T, w, h int) MailModel {
 	if err := os.MkdirAll(humanDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
+	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m, _ = m.Update(m.initialRebuild())
 	return m

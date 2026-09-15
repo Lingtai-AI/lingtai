@@ -49,7 +49,7 @@ func TestMailModelRemoteSendFailurePreservesRetryState(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			m := NewMailModel(humanDir, "human", baseDir, orchDir, "orch", 20, "", "en", false, 0)
+			m := NewMailModel(humanDir, "human", baseDir, orchDir, "orch", 20, "", "en", 0)
 			if m.orchAddr != remoteAddr {
 				t.Fatalf("orchAddr = %q, want %q", m.orchAddr, remoteAddr)
 			}

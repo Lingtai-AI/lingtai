@@ -44,7 +44,7 @@ func TestMailShowsInitialLoadingBanner(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", 0)
 	if !m.initialLoading {
 		t.Fatal("NewMailModel should start with initialLoading = true")
 	}
@@ -72,7 +72,7 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", 0)
 	m.verbose = verboseThinking
 	m = sizeMail(t, m)
 
@@ -119,7 +119,7 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 // banner back on after the initial rebuild has already cleared it.
 func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", 0)
 	m = sizeMail(t, m)
 
 	// Apply the initial rebuild to clear loading.

@@ -32,7 +32,7 @@ func TestNewMailModelDefersSessionRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", 0)
 	if got := m.sessionCache.Len(); got != 0 {
 		t.Fatalf("NewMailModel ingested %d session entries synchronously; expected 0 (rebuild must be deferred to Init)", got)
 	}
@@ -56,7 +56,7 @@ func TestMailInitRunsRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", 0)
 	m.verbose = verboseThinking
 
 	// Run the initial rebuild command (the deferred heavy work).
@@ -89,7 +89,7 @@ func TestMailInitRunsRebuild(t *testing.T) {
 // TestMailInitIncludesRebuildCmd verifies Init() actually schedules the rebuild.
 func TestMailInitIncludesRebuildCmd(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)
+	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", 0)
 	if cmd := m.Init(); cmd == nil {
 		t.Fatal("MailModel.Init returned nil cmd; expected at least the rebuild + refresh batch")
 	}

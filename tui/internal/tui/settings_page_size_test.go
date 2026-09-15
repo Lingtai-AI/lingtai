@@ -65,7 +65,7 @@ func TestReturningToMailAfterPageSizeChangeRebuildsExactWindow(t *testing.T) {
 		orchDir:     orchDir,
 		orchName:    "agent",
 	}
-	a.installMailModel(NewMailModel(t.TempDir(), "human", projectDir, orchDir, "agent", 200, globalDir, "en", false, 0))
+	a.installMailModel(NewMailModel(t.TempDir(), "human", projectDir, orchDir, "agent", 200, globalDir, "en", 0))
 	initial := a.mail.initialRebuild().(mailRefreshMsg)
 	a.mail, _ = a.mail.Update(initial)
 	if a.mail.sessionCache.Len() != 200 {

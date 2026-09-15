@@ -200,27 +200,18 @@ type FirstRunModel struct {
 	hasPresets        bool
 	fieldIdx          int // see agentNameDirFieldCount for field indices
 	// Agent config text inputs
-	agentLangIdx   int // cycle: 0=en, 1=zh, 2=wen
-	ctxLimitInput  textinput.Model
-	soulDelayInput textinput.Model
-	maxRpmInput    textinput.Model
-	maxAedInput    textinput.Model
+	agentLangIdx  int // cycle: 0=en, 1=zh, 2=wen
+	ctxLimitInput textinput.Model
+	maxRpmInput   textinput.Model
+	maxAedInput   textinput.Model
 	// Authority toggles
 	karmaIdx   int // 0=true, 1=false
 	nirvanaIdx int // 0=false, 1=true
-	// soulFlowEnabledIdx is the soul-flow opt-in toggle: 0=OFF, 1=ON.
-	// Default OFF, matching the kernel's default-disabled soul flow. When
-	// ON, commit writes LINGTAI_SOUL_FLOW_ENABLED=1 to the global .env.
-	// This is the real enable switch, distinct from soulFlowInput (the
-	// soul-flow prompt/file path) and soulDelayInput (cadence after opt-in).
-	soulFlowEnabledIdx int
 	// Prompt path inputs
 	covenantInput textinput.Model
-	soulFlowInput textinput.Model
 	commentInput  textinput.Model
 	// Track whether user manually edited prompt paths (dirty = don't auto-update on lang change)
 	covenantDirty bool
-	soulFlowDirty bool
 	// Welcome page language selector
 	langCursor            int
 	welcomeOnly           bool     // true when opened from /settings (return to mail after language pick)
@@ -481,11 +472,6 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	ci.SetWidth(15)
 	ci.Prompt = ""
 
-	sdi := textinput.New()
-	sdi.CharLimit = 10
-	sdi.SetWidth(15)
-	sdi.Prompt = ""
-
 	mri := textinput.New()
 	mri.CharLimit = 6
 	mri.SetWidth(15)
@@ -500,11 +486,6 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	covi.CharLimit = 256
 	covi.SetWidth(50)
 	covi.Prompt = ""
-
-	sfli := textinput.New()
-	sfli.CharLimit = 256
-	sfli.SetWidth(50)
-	sfli.Prompt = ""
 
 	comi := textinput.New()
 	comi.CharLimit = 256
@@ -557,11 +538,9 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 		presetKeyInput:       pki,
 		existingKeys:         existingKeys,
 		ctxLimitInput:        ci,
-		soulDelayInput:       sdi,
 		maxRpmInput:          mri,
 		maxAedInput:          mai,
 		covenantInput:        covi,
-		soulFlowInput:        sfli,
 		commentInput:         comi,
 		nirvanaIdx:           1, // default false (1=false)
 		progressCh:           make(chan string, 4),
@@ -919,7 +898,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.nameInput.SetWidth(inputWidth)
 		m.dirInput.SetWidth(inputWidth)
 		m.covenantInput.SetWidth(inputWidth)
-		m.soulFlowInput.SetWidth(inputWidth)
 		m.commentInput.SetWidth(inputWidth)
 		return m, nil
 
@@ -2217,12 +2195,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx - 1 + len(langs)) % len(langs)
 					m.updatePromptPaths()
-				case 7: // karma
+				case 6: // karma
 					m.karmaIdx = (m.karmaIdx + 1) % 2
-				case 8: // nirvana
+				case 7: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
-				case 9: // soul flow opt-in
-					m.soulFlowEnabledIdx = (m.soulFlowEnabledIdx + 1) % 2
 				case agentNameDirNextIdx: // Next button → Back
 					m.fieldIdx = agentNameDirBackIdx
 				}
@@ -2232,12 +2208,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx + 1) % len(langs)
 					m.updatePromptPaths()
-				case 7: // karma
+				case 6: // karma
 					m.karmaIdx = (m.karmaIdx + 1) % 2
-				case 8: // nirvana
+				case 7: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
-				case 9: // soul flow opt-in
-					m.soulFlowEnabledIdx = (m.soulFlowEnabledIdx + 1) % 2
 				case agentNameDirBackIdx: // Back button → Next
 					m.fieldIdx = agentNameDirNextIdx
 				}
@@ -2272,7 +2246,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					if ctxLimit <= 0 {
 						ctxLimit = 500000
 					}
-					soulDelay := resolveSoulDelay(m.soulDelayInput.Value(), m.soulFlowEnabledIdx == 1)
 					maxRpm, _ := strconv.Atoi(m.maxRpmInput.Value())
 					if maxRpm < 0 {
 						maxRpm = 60
@@ -2280,18 +2253,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					maxAedAttempts, _ := strconv.Atoi(m.maxAedInput.Value())
 					maxAedAttempts = preset.ClampAedAttempts(maxAedAttempts)
 					opts := preset.AgentOpts{
-						Language:        langs[m.agentLangIdx],
-						ContextLimit:    ctxLimit,
-						SoulDelay:       soulDelay,
-						SoulFlowEnabled: m.soulFlowEnabledIdx == 1,
-						MaxRpm:          maxRpm,
-						MaxAedAttempts:  maxAedAttempts,
-						Karma:           m.karmaIdx == 0,
-						Nirvana:         m.nirvanaIdx == 0,
-						CovenantFile:    normalizePromptPathValue(m.covenantInput.Value()),
-						SoulFile:        normalizePromptPathValue(m.soulFlowInput.Value()),
-						CommentFile:     normalizePromptPathValue(m.commentInput.Value()),
-						AllowedPresets:  m.allowedPresetRefs(),
+						Language:       langs[m.agentLangIdx],
+						ContextLimit:   ctxLimit,
+						MaxRpm:         maxRpm,
+						MaxAedAttempts: maxAedAttempts,
+						Karma:          m.karmaIdx == 0,
+						Nirvana:        m.nirvanaIdx == 0,
+						CovenantFile:   normalizePromptPathValue(m.covenantInput.Value()),
+						CommentFile:    normalizePromptPathValue(m.commentInput.Value()),
+						AllowedPresets: m.allowedPresetRefs(),
 					}
 					var selectedAddons []string
 					for _, addonName := range m.addonOrder {
@@ -2314,7 +2284,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || ctxLimit <= 0 {
 					ctxLimit = 500000
 				}
-				soulDelay := resolveSoulDelay(m.soulDelayInput.Value(), m.soulFlowEnabledIdx == 1)
 				maxRpm, err := strconv.Atoi(m.maxRpmInput.Value())
 				if err != nil || maxRpm < 0 {
 					maxRpm = 60
@@ -2325,18 +2294,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				maxAedAttempts = preset.ClampAedAttempts(maxAedAttempts)
 				opts := preset.AgentOpts{
-					Language:        langs[m.agentLangIdx],
-					ContextLimit:    ctxLimit,
-					SoulDelay:       soulDelay,
-					SoulFlowEnabled: m.soulFlowEnabledIdx == 1,
-					MaxRpm:          maxRpm,
-					MaxAedAttempts:  maxAedAttempts,
-					Karma:           m.karmaIdx == 0,
-					Nirvana:         m.nirvanaIdx == 0,
-					CovenantFile:    normalizePromptPathValue(m.covenantInput.Value()),
-					SoulFile:        normalizePromptPathValue(m.soulFlowInput.Value()),
-					CommentFile:     normalizePromptPathValue(m.commentInput.Value()),
-					AllowedPresets:  m.allowedPresetRefs(),
+					Language:       langs[m.agentLangIdx],
+					ContextLimit:   ctxLimit,
+					MaxRpm:         maxRpm,
+					MaxAedAttempts: maxAedAttempts,
+					Karma:          m.karmaIdx == 0,
+					Nirvana:        m.nirvanaIdx == 0,
+					CovenantFile:   normalizePromptPathValue(m.covenantInput.Value()),
+					CommentFile:    normalizePromptPathValue(m.commentInput.Value()),
+					AllowedPresets: m.allowedPresetRefs(),
 					// CommentFile is resolved from the staged .recipe/ in the finalizer
 				}
 				var selectedAddons []string
@@ -2392,18 +2358,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 3:
 					m.ctxLimitInput, cmd = m.ctxLimitInput.Update(msg)
 				case 4:
-					m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
-				case 5:
 					m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
-				case 6:
+				case 5:
 					m.maxAedInput, cmd = m.maxAedInput.Update(msg)
-				case 10:
+				case 8:
 					m.covenantInput, cmd = m.covenantInput.Update(msg)
 					m.covenantDirty = true
-				case 11:
-					m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
-					m.soulFlowDirty = true
-				case 12:
+				case 9:
 					m.commentInput, cmd = m.commentInput.Update(msg)
 				}
 				return m, cmd
@@ -2477,16 +2438,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case 3:
 				m.ctxLimitInput, cmd = m.ctxLimitInput.Update(msg)
 			case 4:
-				m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
-			case 5:
 				m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
-			case 6:
+			case 5:
 				m.maxAedInput, cmd = m.maxAedInput.Update(msg)
-			case 10:
+			case 8:
 				m.covenantInput, cmd = m.covenantInput.Update(msg)
-			case 11:
-				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
-			case 12:
+			case 9:
 				m.commentInput, cmd = m.commentInput.Update(msg)
 			}
 		case stepAPIKey:
@@ -3076,9 +3033,8 @@ func (m FirstRunModel) View() string {
 		}
 		numFields := []numField{
 			{3, i18n.T("firstrun.context_limit"), i18n.T("firstrun.context_limit_hint"), m.ctxLimitInput.View()},
-			{4, i18n.T("firstrun.soul_delay"), i18n.T("firstrun.soul_delay_hint"), m.soulDelayInput.View()},
-			{5, i18n.T("firstrun.max_rpm"), i18n.T("firstrun.max_rpm_hint"), m.maxRpmInput.View()},
-			{6, i18n.T("firstrun.max_aed_attempts"), i18n.T("firstrun.max_aed_attempts_hint"), m.maxAedInput.View()},
+			{4, i18n.T("firstrun.max_rpm"), i18n.T("firstrun.max_rpm_hint"), m.maxRpmInput.View()},
+			{5, i18n.T("firstrun.max_aed_attempts"), i18n.T("firstrun.max_aed_attempts_hint"), m.maxAedInput.View()},
 		}
 		for _, nf := range numFields {
 			hint := StyleFaint.Render(" (" + nf.hint + ")")
@@ -3089,29 +3045,23 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_authority")+" ──") + "\n")
 		karmaVal := boolLabel(m.karmaIdx)
 		karmaHint := StyleFaint.Render(" (" + i18n.T("firstrun.karma_hint") + ")")
-		b.WriteString(cur(7) + i18n.T("firstrun.karma") + ": " + renderToggle(karmaVal, m.fieldIdx == 7) + karmaHint + "\n")
+		b.WriteString(cur(6) + i18n.T("firstrun.karma") + ": " + renderToggle(karmaVal, m.fieldIdx == 6) + karmaHint + "\n")
 		nirvanaVal := boolLabel(m.nirvanaIdx)
 		nirvanaHint := StyleFaint.Render(" (" + i18n.T("firstrun.nirvana_hint") + ")")
-		b.WriteString(cur(8) + i18n.T("firstrun.nirvana") + ": " + renderToggle(nirvanaVal, m.fieldIdx == 8) + nirvanaHint + "\n")
-		// Soul-flow opt-in: 0=OFF, 1=ON. boolLabel maps 0→"false"/1→"true",
-		// which reads correctly as the enable/disable switch here.
-		soulFlowVal := boolLabel(1 - m.soulFlowEnabledIdx) // invert so idx 1 (ON) → "true"
-		soulFlowHint := StyleFaint.Render(" (" + i18n.T("firstrun.soul_flow_enabled_hint") + ")")
-		b.WriteString(cur(9) + i18n.T("firstrun.soul_flow_enabled") + ": " + renderToggle(soulFlowVal, m.fieldIdx == 9) + soulFlowHint + "\n")
+		b.WriteString(cur(7) + i18n.T("firstrun.nirvana") + ": " + renderToggle(nirvanaVal, m.fieldIdx == 7) + nirvanaHint + "\n")
 
 		// ── Prompts ──
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_prompts")+" ──") + "\n")
-		b.WriteString(cur(10) + i18n.T("firstrun.covenant") + ": " + m.covenantInput.View() + "\n")
-		b.WriteString(cur(11) + i18n.T("firstrun.soul_flow") + ": " + m.soulFlowInput.View() + "\n")
+		b.WriteString(cur(8) + i18n.T("firstrun.covenant") + ": " + m.covenantInput.View() + "\n")
 		commentHint := StyleFaint.Render(" (" + i18n.T("firstrun.comment_hint") + ")")
-		b.WriteString(cur(12) + i18n.T("firstrun.comment") + ": " + m.commentInput.View() + commentHint + "\n")
+		b.WriteString(cur(9) + i18n.T("firstrun.comment") + ": " + m.commentInput.View() + commentHint + "\n")
 
 		if m.message != "" {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
 
-		// Footer buttons: idx 13 = Back, idx 14 = Next.
+		// Footer buttons: idx 10 = Back, idx 11 = Next.
 		var nameDirFocused wizardFooterButton
 		switch m.fieldIdx {
 		case agentNameDirBackIdx:
@@ -3284,16 +3234,16 @@ func centerText(s string, width int) string {
 
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir,
 // including the Back/Next button slots at the end.
-const agentNameDirFieldCount = 15
+const agentNameDirFieldCount = 12
 
 // Field indices:
 // 0=name, 1=dir, 2=lang,
-// 3=context_limit, 4=soul_delay, 5=max_rpm, 6=max_aed_attempts,
-// 7=karma, 8=nirvana, 9=soul_flow_enabled,
-// 10=covenant, 11=soul_flow (prompt path), 12=comment
-// 13=Back, 14=Next  (footer buttons; no input is focused here)
-const agentNameDirBackIdx = 13
-const agentNameDirNextIdx = 14
+// 3=context_limit, 4=max_rpm, 5=max_aed_attempts,
+// 6=karma, 7=nirvana,
+// 8=covenant, 9=comment
+// 10=Back, 11=Next  (footer buttons; no input is focused here)
+const agentNameDirBackIdx = 10
+const agentNameDirNextIdx = 11
 
 // runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
 func (m FirstRunModel) runCheckCaps() tea.Cmd {
@@ -3976,11 +3926,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 
 	// Numeric defaults — overridden by saved init.json values in setup mode below.
 	m.ctxLimitInput.SetValue("500000")
-	m.soulDelayInput.SetValue("")
 	m.maxRpmInput.SetValue("60")
 	m.maxAedInput.SetValue(strconv.Itoa(preset.DefaultMaxAedAttempts))
 	m.ctxLimitInput.Blur()
-	m.soulDelayInput.Blur()
 	m.maxRpmInput.Blur()
 	m.maxAedInput.Blur()
 
@@ -3988,20 +3936,10 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
 	setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
-	setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
 	setPromptPathInputValue(&m.commentInput, "")
 	m.covenantDirty = false
-	m.soulFlowDirty = false
 	m.karmaIdx = 0   // true
 	m.nirvanaIdx = 1 // false
-	// Soul-flow opt-in defaults OFF, but seed from the existing global .env
-	// so re-running the wizard (first-run recovery or /setup) reflects the
-	// current on-disk state (LINGTAI_SOUL_FLOW_ENABLED) rather than silently
-	// resetting a user who already opted in.
-	m.soulFlowEnabledIdx = 0
-	if config.SoulFlowEnabled(m.globalDir) {
-		m.soulFlowEnabledIdx = 1
-	}
 
 	// Setup mode: re-running /setup on an existing agent should surface the
 	// agent's actual current values, not the preset's defaults. Pull them
@@ -4015,11 +3953,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 			if v, ok := numberFromJSON(manifest["context_limit"]); ok {
 				m.ctxLimitInput.SetValue(formatNumber(v))
 			}
-			if soul, ok := manifest["soul"].(map[string]interface{}); ok {
-				if v, ok := numberFromJSON(soul["delay"]); ok {
-					m.soulDelayInput.SetValue(formatNumber(v))
-				}
-			}
+			// A legacy manifest.soul block is deliberately not surfaced:
+			// the Soul subsystem is retired and /setup offers no control
+			// for it. The stale key is left in place on disk.
 			if v, ok := numberFromJSON(manifest["max_rpm"]); ok {
 				m.maxRpmInput.SetValue(formatNumber(v))
 			}
@@ -4053,10 +3989,6 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		if s, ok := m.setupKeepInitJSON["covenant_file"].(string); ok && s != "" {
 			setPromptPathInputValue(&m.covenantInput, s)
 			m.covenantDirty = true
-		}
-		if s, ok := m.setupKeepInitJSON["soul_file"].(string); ok && s != "" {
-			setPromptPathInputValue(&m.soulFlowInput, s)
-			m.soulFlowDirty = true
 		}
 		if s, ok := m.setupKeepInitJSON["comment_file"].(string); ok && s != "" {
 			setPromptPathInputValue(&m.commentInput, s)
@@ -4092,38 +4024,8 @@ func numberFromJSON(v interface{}) (float64, bool) {
 	return 0, false
 }
 
-func parseOptionalSoulDelay(value string) *float64 {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	v, err := strconv.ParseFloat(value, 64)
-	if err != nil || v <= 0 {
-		return nil
-	}
-	return &v
-}
-
-// resolveSoulDelay decides the soul.delay to stamp given the raw cadence
-// field and whether the soul-flow opt-in is ON.
-//
-//   - Opt-in OFF: return the parsed value as-is (nil when blank). A default
-//     disabled agent thus omits soul.delay entirely and the kernel default
-//     applies — harmless because no fires happen while the env opt-in is off.
-//   - Opt-in ON with a blank/invalid cadence: fall back to the sane UI
-//     default so enabling never silently inherits the kernel's huge no-op
-//     fallback. An explicit user cadence is always honored.
-func resolveSoulDelay(rawCadence string, enabled bool) *float64 {
-	parsed := parseOptionalSoulDelay(rawCadence)
-	if enabled && parsed == nil {
-		d := preset.DefaultSoulFlowCadence
-		return &d
-	}
-	return parsed
-}
-
 // formatNumber renders an integer-valued float as "N" (no decimal point), for
-// fields like context_limit / soul.delay / max_rpm that are conceptually
+// fields like context_limit / max_rpm that are conceptually
 // integers. Falls back to a compact float representation if the value is fractional.
 func formatNumber(v float64) string {
 	if v == float64(int64(v)) {
@@ -4136,11 +4038,9 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	m.nameInput.Blur()
 	m.dirInput.Blur()
 	m.ctxLimitInput.Blur()
-	m.soulDelayInput.Blur()
 	m.maxRpmInput.Blur()
 	m.maxAedInput.Blur()
 	m.covenantInput.Blur()
-	m.soulFlowInput.Blur()
 	m.commentInput.Blur()
 
 	switch m.fieldIdx {
@@ -4153,18 +4053,14 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	case 3:
 		return m.ctxLimitInput.Focus()
 	case 4:
-		return m.soulDelayInput.Focus()
-	case 5:
 		return m.maxRpmInput.Focus()
-	case 6:
+	case 5:
 		return m.maxAedInput.Focus()
-	case 7, 8, 9:
-		return nil // karma/nirvana/soul-flow-enabled — cycle selectors
-	case 10:
+	case 6, 7:
+		return nil // karma/nirvana — cycle selectors
+	case 8:
 		return m.covenantInput.Focus()
-	case 11:
-		return m.soulFlowInput.Focus()
-	case 12:
+	case 9:
 		return m.commentInput.Focus()
 	}
 	return nil
@@ -4187,13 +4083,10 @@ func (m *FirstRunModel) updatePromptPaths() {
 	if !m.covenantDirty {
 		setPromptPathInputValue(&m.covenantInput, preset.CovenantPath(m.globalDir, lang))
 	}
-	if !m.soulFlowDirty {
-		setPromptPathInputValue(&m.soulFlowInput, preset.SoulFlowPath(m.globalDir, lang))
-	}
 }
 
 // setPromptPathInputValue assigns a value to one of the Step 3 prompt-path
-// textinputs (covenant / soul-flow / comment fields), normalizing away
+// textinputs (covenant / comment fields), normalizing away
 // repeated newline-separated copies of the same value first. Bubble Tea's
 // textinput renders the raw value, so a value that accumulated duplicate lines
 // (an older runtime writing init.json, manual edits, or a paste) would
@@ -4616,13 +4509,9 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 	if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
 		humanAddr = humanNode.Address
 	}
-	soulDelayStr := "kernel default"
-	if opts.SoulDelay != nil {
-		soulDelayStr = formatNumber(*opts.SoulDelay)
-	}
 	if err := applyRecipe(
 		m.baseDir, orchDir, m.globalDir, humanDir, humanAddr,
-		recipeName, lang, soulDelayStr,
+		recipeName, lang,
 	); err != nil {
 		m.message = i18n.TF("firstrun.error", err)
 		m.step = stepAgentNameDir
