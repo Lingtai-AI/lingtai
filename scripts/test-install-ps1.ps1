@@ -104,6 +104,7 @@ function Invoke-Installer {
     return @{ ExitCode = $exitCode; Stdout = $stdout; Stderr = $stderr; Output = "$stdout`n$stderr" }
 }
 
+$testRoot = $null
 try {
     Write-Section 'precondition: installer sources present'
     Assert-True (Test-Path -LiteralPath $InstallScript) "install.ps1 exists at $InstallScript"
@@ -484,7 +485,6 @@ try {
     }
 
     Write-Section 'contract: local artifact DryRun is read-only and honestly worded'
-    $testRoot = $null
     $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("lingtai ps installer contract {0}" -f ([Guid]::NewGuid().ToString('N')))
     $inputDir = Join-Path $testRoot 'input'
     $tempDir = Join-Path $testRoot 'temp'
