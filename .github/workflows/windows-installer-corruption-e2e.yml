@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
 
       - name: Install, corrupt, and rerun
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         env:
           TEST_SHELL: ${{ matrix.shell }}
           CORRUPTION_SCENARIO: ${{ matrix.scenario }}
@@ -43,7 +43,8 @@ jobs:
           }
 
           $installer = (Resolve-Path -LiteralPath './install.ps1').Path
-          $hostExecutable = (Get-Process -Id $PID).Path
+          $hostCommand = if ($env:TEST_SHELL -eq 'powershell') { 'powershell.exe' } else { 'pwsh.exe' }
+          $hostExecutable = (Get-Command $hostCommand -CommandType Application).Source
           $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]'\/')
           $sandboxName = 'lingtai-corruption-{0}-{1}-{2}' -f $env:TEST_SHELL, $env:CORRUPTION_SCENARIO, ([Guid]::NewGuid().ToString('N'))
           $sandboxRoot = [IO.Path]::GetFullPath((Join-Path $runnerTemp $sandboxName))
