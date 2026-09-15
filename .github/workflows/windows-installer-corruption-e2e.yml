@@ -1,0 +1,202 @@
+name: Windows Installer Corruption E2E
+
+on:
+  pull_request:
+    paths:
+      - 'install.ps1'
+      - '.github/workflows/windows-installer-corruption-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  corruption-e2e:
+    name: ${{ matrix.shell }} / ${{ matrix.scenario }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - powershell
+          - pwsh
+        scenario:
+          - receipt
+          - runtime-python
+          - tui-binary
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install, corrupt, and rerun
+        shell: ${{ matrix.shell }}
+        env:
+          TEST_SHELL: ${{ matrix.shell }}
+          CORRUPTION_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+
+          $installer = (Resolve-Path -LiteralPath './install.ps1').Path
+          $hostExecutable = (Get-Process -Id $PID).Path
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]'\/')
+          $sandboxName = 'lingtai-corruption-{0}-{1}-{2}' -f $env:TEST_SHELL, $env:CORRUPTION_SCENARIO, ([Guid]::NewGuid().ToString('N'))
+          $sandboxRoot = [IO.Path]::GetFullPath((Join-Path $runnerTemp $sandboxName))
+          $runnerTempPrefix = $runnerTemp + [IO.Path]::DirectorySeparatorChar
+          if (-not $sandboxRoot.StartsWith($runnerTempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Sandbox escaped RUNNER_TEMP: $sandboxRoot"
+          }
+          if (Test-Path -LiteralPath $sandboxRoot) {
+            throw "Refusing to reuse sandbox: $sandboxRoot"
+          }
+
+          $userRoot = Join-Path $sandboxRoot 'user-root'
+          $binDir = Join-Path $userRoot 'bin'
+          $globalDir = Join-Path $userRoot '.lingtai-tui'
+          $tuiPath = Join-Path $binDir 'lingtai-tui.exe'
+          $runtimePython = Join-Path $globalDir 'runtime\venv\Scripts\python.exe'
+          $receiptPath = Join-Path $globalDir 'install.json'
+          New-Item -ItemType Directory -Path $sandboxRoot | Out-Null
+
+          $installerArguments = @(
+            '-NoProfile', '-NonInteractive', '-File', $installer,
+            '-BinDir', $binDir, '-GlobalDir', $globalDir,
+            '-NoModifyPath', '-NonInteractive'
+          )
+          $ErrorActionPreference = 'Continue'
+          & $hostExecutable @installerArguments
+          $cleanExit = $LASTEXITCODE
+          $ErrorActionPreference = 'Stop'
+          if ($cleanExit -ne 0) {
+            throw "Clean installer exited $cleanExit"
+          }
+
+          foreach ($requiredPath in @($tuiPath, $runtimePython, $receiptPath)) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+              throw "Clean install is missing $requiredPath"
+            }
+          }
+          $cleanReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ($cleanReceipt.schema -ne 'lingtai.tui.install/v1' -or $cleanReceipt.install_method -ne 'powershell') {
+            throw 'Clean install receipt is not canonical PowerShell metadata'
+          }
+          if ($cleanReceipt.bin_dir -ne $binDir -or @($cleanReceipt.managed_binaries) -notcontains $tuiPath) {
+            throw 'Clean install receipt does not own the isolated TUI path'
+          }
+          if (-not [string]::IsNullOrEmpty([string]$cleanReceipt.requested_ref) -or
+              [string]::IsNullOrWhiteSpace([string]$cleanReceipt.resolved_ref) -or
+              $cleanReceipt.stamped_version -ne $cleanReceipt.resolved_ref) {
+            throw 'Clean install receipt is not a canonical latest install'
+          }
+          if ($cleanReceipt.kernel_source -ne 'release' -or
+              [string]::IsNullOrWhiteSpace([string]$cleanReceipt.kernel_version)) {
+            throw 'Clean install receipt has no release kernel version'
+          }
+
+          $cleanTuiVersion = (& $tuiPath version | Out-String).Trim()
+          $cleanTuiExit = $LASTEXITCODE
+          if ($cleanTuiExit -ne 0 -or $cleanTuiVersion -ne "lingtai-tui $($cleanReceipt.stamped_version)") {
+            throw "Clean TUI version probe failed: exit=$cleanTuiExit output=$cleanTuiVersion"
+          }
+          $kernelProbe = 'import importlib.metadata as m; import lingtai; print(m.version(''lingtai''))'
+          $cleanKernelVersion = (& $runtimePython '-c' $kernelProbe | Out-String).Trim()
+          $cleanKernelExit = $LASTEXITCODE
+          if ($cleanKernelExit -ne 0 -or $cleanKernelVersion -ne $cleanReceipt.kernel_version) {
+            throw "Clean kernel version probe failed: exit=$cleanKernelExit output=$cleanKernelVersion"
+          }
+          Write-Host "Clean install verified: TUI=$cleanTuiVersion kernel=$cleanKernelVersion root=$sandboxRoot"
+
+          $obsoleteVersion = 'v0.11.8'
+          $rerunArguments = @($installerArguments)
+          switch ($env:CORRUPTION_SCENARIO) {
+            'receipt' {
+              $corruptionPath = $receiptPath
+              $rerunArguments += @('-Version', $obsoleteVersion)
+            }
+            'runtime-python' { $corruptionPath = $runtimePython }
+            'tui-binary' { $corruptionPath = $tuiPath }
+            default { throw "Unknown corruption scenario: $env:CORRUPTION_SCENARIO" }
+          }
+
+          $corruptionPath = [IO.Path]::GetFullPath($corruptionPath)
+          $sandboxPrefix = $sandboxRoot.TrimEnd([char[]]'\/') + [IO.Path]::DirectorySeparatorChar
+          if (-not $corruptionPath.StartsWith($sandboxPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to corrupt a path outside the sandbox: $corruptionPath"
+          }
+          Remove-Item -LiteralPath $corruptionPath -Force
+          if (Test-Path -LiteralPath $corruptionPath) {
+            throw "Corruption target still exists: $corruptionPath"
+          }
+          Write-Host "Corruption applied: scenario=$env:CORRUPTION_SCENARIO path=$corruptionPath"
+
+          $ErrorActionPreference = 'Continue'
+          & $hostExecutable @rerunArguments
+          $rerunExit = $LASTEXITCODE
+          $ErrorActionPreference = 'Stop'
+          if ($rerunExit -ne 0) {
+            $targetRestored = Test-Path -LiteralPath $corruptionPath -PathType Leaf
+            Write-Host "::error title=Corruption result::shell=$env:TEST_SHELL scenario=$env:CORRUPTION_SCENARIO healed=false rerun_exit=$rerunExit target_restored=$targetRestored"
+            throw "Installer rerun did not heal $env:CORRUPTION_SCENARIO corruption"
+          }
+
+          $verificationFailure = $null
+          try {
+            foreach ($requiredPath in @($tuiPath, $runtimePython, $receiptPath)) {
+              if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+                throw "Rerun is missing $requiredPath"
+              }
+            }
+            $rerunReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            if ($rerunReceipt.schema -ne 'lingtai.tui.install/v1' -or $rerunReceipt.install_method -ne 'powershell') {
+              throw 'Rerun receipt is not canonical PowerShell metadata'
+            }
+            if ($rerunReceipt.bin_dir -ne $binDir -or @($rerunReceipt.managed_binaries) -notcontains $tuiPath) {
+              throw 'Rerun receipt does not own the isolated TUI path'
+            }
+            if ($env:CORRUPTION_SCENARIO -eq 'receipt') {
+              $disposition = if ($rerunReceipt.requested_ref -eq $obsoleteVersion -or
+                  $rerunReceipt.resolved_ref -eq $obsoleteVersion -or
+                  $rerunReceipt.stamped_version -eq $obsoleteVersion) {
+                'honored-obsolete-pin'
+              } else {
+                'restored-canonical-latest'
+              }
+              Write-Host "Receipt observation: requested=$($rerunReceipt.requested_ref) resolved=$($rerunReceipt.resolved_ref) obsolete=$obsoleteVersion disposition=$disposition"
+              if ($disposition -ne 'restored-canonical-latest') {
+                throw "Receipt-loss rerun honored obsolete pin $obsoleteVersion"
+              }
+            }
+            if (-not [string]::IsNullOrEmpty([string]$rerunReceipt.requested_ref) -or
+                [string]::IsNullOrWhiteSpace([string]$rerunReceipt.resolved_ref) -or
+                $rerunReceipt.stamped_version -ne $rerunReceipt.resolved_ref) {
+              throw 'Rerun receipt is not a canonical latest install'
+            }
+            if ($rerunReceipt.kernel_source -ne 'release' -or
+                [string]::IsNullOrWhiteSpace([string]$rerunReceipt.kernel_version)) {
+              throw 'Rerun receipt has no release kernel version'
+            }
+
+            $rerunTuiVersion = (& $tuiPath version | Out-String).Trim()
+            $rerunTuiExit = $LASTEXITCODE
+            if ($rerunTuiExit -ne 0 -or $rerunTuiVersion -ne "lingtai-tui $($rerunReceipt.stamped_version)") {
+              throw "Rerun TUI version probe failed: exit=$rerunTuiExit output=$rerunTuiVersion"
+            }
+            $rerunKernelVersion = (& $runtimePython '-c' $kernelProbe | Out-String).Trim()
+            $rerunKernelExit = $LASTEXITCODE
+            if ($rerunKernelExit -ne 0 -or $rerunKernelVersion -ne $rerunReceipt.kernel_version) {
+              throw "Rerun kernel version probe failed: exit=$rerunKernelExit output=$rerunKernelVersion"
+            }
+          } catch {
+            $verificationFailure = $_.Exception.Message
+          }
+
+          if ($verificationFailure) {
+            Write-Host "::error title=Corruption result::shell=$env:TEST_SHELL scenario=$env:CORRUPTION_SCENARIO healed=false rerun_exit=$rerunExit detail=$verificationFailure"
+            throw $verificationFailure
+          }
+          Write-Host "::notice title=Corruption result::shell=$env:TEST_SHELL scenario=$env:CORRUPTION_SCENARIO healed=true rerun_exit=$rerunExit TUI=$rerunTuiVersion kernel=$rerunKernelVersion"
