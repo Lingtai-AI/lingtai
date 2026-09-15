@@ -533,7 +533,7 @@ try {
     Assert-Contains $psText 'lingtai.ai TUI source is unavailable; falling back to the latest GitHub TUI source release.' 'TUI caller retains its automatic fallback warning'
     Assert-Contains $psText 'lingtai.ai kernel release is unavailable; falling back to the latest GitHub kernel release.' 'kernel caller retains its automatic fallback warning'
 } finally {
-    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($null -ne $testRoot -and (Test-Path -LiteralPath $testRoot)) { Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ''
