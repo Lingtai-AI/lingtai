@@ -469,7 +469,7 @@ function Remove-OtherTuiOnPath {
     param([string]$CanonicalPath)
 
     $canonicalFull = [IO.Path]::GetFullPath($CanonicalPath)
-    $canonicalDirectory = Split-Path -LiteralPath $canonicalFull -Parent
+    $canonicalDirectory = [IO.Path]::GetDirectoryName($canonicalFull)
     $canonicalIdentity = Resolve-PhysicalDirectoryIdentity -Directory $canonicalDirectory
     $seen = @{}
     foreach ($rawEntry in @($env:PATH -split ';')) {

@@ -371,6 +371,8 @@ try {
     Assert-True ($null -ne $physicalResolverFunction) 'physical directory identity resolver is discoverable through the PowerShell AST'
     if ($null -ne $pathHealFunction -and $null -ne $physicalResolverFunction) {
         $pathHealText = $pathHealFunction.Extent.Text
+        Assert-Contains $pathHealText '$canonicalDirectory = [IO.Path]::GetDirectoryName($canonicalFull)' 'PowerShell canonical directory extraction uses the unambiguous .NET API'
+        Assert-NotContains $pathHealText '$canonicalDirectory = Split-Path -LiteralPath $canonicalFull -Parent' 'PowerShell canonical directory extraction cannot regress to the ambiguous Split-Path form'
         $candidateStart = $pathHealText.IndexOf('$candidate = Join-Path $directory ''lingtai-tui.exe''')
         $candidateProbe = $pathHealText.IndexOf('$item = Get-Item -LiteralPath $candidate', $candidateStart)
         $directoryResolve = $pathHealText.IndexOf('$directoryIdentity = Resolve-PhysicalDirectoryIdentity -Directory $directory')
