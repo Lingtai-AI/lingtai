@@ -11,12 +11,6 @@ related_files:
   - install.sh
   - install.ps1
   - .github/workflows/release.yml
-  - scripts/update.sh
-  - scripts/fix.sh
-  - scripts/verify.sh
-  - scripts/dev.sh
-  - scripts/remove.sh
-  - scripts/remove.ps1
   - scripts/test-install-sh.sh
   - scripts/test-install-sh-desktop.sh
   - scripts/test-install-sh-mirror-bundle.sh
@@ -450,8 +444,8 @@ reinstall remain outside this boundary. `scripts/test-install-sh-desktop.sh`
 proves these rules, retryable fail-clear behavior, and the non-macOS no-op with
 fake homes and a no-live-network transport.
 
-`scripts/remove.sh` deliberately leaves Desktop App and lazy-command state
-intact because the TUI receipt does not own them. On a later main install,
+The root installers do not own Desktop App or lazy-command state through the
+TUI receipt. On a later main install,
 Desktop registration MUST preserve a complete official launcher unchanged only
 if it contains Desktop's `# lingtai-desktop-owned-v1` marker and the managed
 current App executable is a regular executable. An ordinary stable install MUST

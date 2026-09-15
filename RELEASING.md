@@ -177,8 +177,8 @@ entry pins only the raw bootstrap trust set rather than duplicating Desktop's Ap
 manifest digests. Later command executions delegate to the installed current
 CLI without reinstalling. `--skip-desktop` opts out of registration.
 
-LingTai's `scripts/remove.sh` deliberately does not delete Desktop's App or
-command state because neither is owned by the TUI receipt. A later main install
+LingTai's root installers do not own or delete Desktop's App or command state
+through the TUI receipt. A later main install
 therefore treats a regular, executable, non-symlink command target as already satisfied only
 when it is this installer's marked lazy bootstrap, or when it carries Desktop's
 official launcher marker and the managed current App executable is complete.
