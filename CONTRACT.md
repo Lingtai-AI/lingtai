@@ -457,6 +457,28 @@ symlink. A foreign file, any symlink, a non-executable target, or an incomplete
 official launcher MUST remain unchanged and fail loud after the valid TUI
 receipt is written.
 
+### Installer closed-state and activation contract
+
+After a real installer branch has successfully installed the canonical
+platform TUI target, provisioned the requested managed runtime (unless the
+explicit runtime opt-out was selected), written its receipt, and completed any
+applicable Desktop registration, it MUST scan the current process `PATH` and
+remove every other exact `lingtai-tui` (POSIX) or `lingtai-tui.exe` (Windows)
+file in an existing PATH directory. PATH entries may be relative, duplicated,
+or lexically equivalent; normalization MUST preserve the canonical target.
+Removal is exact-name-only and directory-scoped: aliases, compatibility names,
+metadata, receipts, runtimes, directories, and files outside current PATH
+directories are not cleanup targets. A removal failure MUST abort loudly and
+name the exact conflicting path. Dry-run branches MUST not perform this cleanup.
+
+Completion output MUST describe activation truthfully: Bash/Zsh users receive
+the needed startup-file `source` and command-cache refresh (`hash -r` or
+`rehash`). The installer PowerShell process MUST be described as ready immediately;
+with `-NoModifyPath`, output MUST state that persistence was intentionally skipped
+and give the exact `$env:Path = "<BinDir>;$env:Path"` command only for a separate/
+calling PowerShell process if needed. Without `-NoModifyPath`, output MUST state
+that new PowerShell windows inherit the updated user PATH.
+
 ## Validation
 
 `tui/architecture_documents_test.go` is a small real-repository smoke test in
