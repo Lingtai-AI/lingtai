@@ -201,21 +201,74 @@ note() { echo "    $*"; }
 # shell on the supported macOS/Linux paths; use a direct export for an
 # unrecognized or unset shell rather than guessing its startup file.
 print_path_hint() {
-  local bin_dir="$1" shell_name="${SHELL:-}" rc_file
+  local bin_dir="$1" shell_name="${SHELL:-}" rc_file cache_refresh
+  local bin_on_path=0
   case ":${PATH}:" in
-    *":${bin_dir}:"*) return 0 ;;
+    *":${bin_dir}:"*) bin_on_path=1 ;;
   esac
   case "${shell_name##*/}" in
-    zsh)  rc_file="$HOME/.zshrc" ;;
-    bash) rc_file="$HOME/.bashrc" ;;
+    zsh)  rc_file="$HOME/.zshrc"; cache_refresh="rehash" ;;
+    bash) rc_file="$HOME/.bashrc"; cache_refresh="hash -r" ;;
     *)
-      say "Note: $bin_dir is not on your PATH. Add this export to your shell startup file:"
-      note "export PATH=\"$bin_dir:\$PATH\""
+      if [[ "$bin_on_path" != "1" ]]; then
+        say "Before invoking lingtai-tui in this shell, run:"
+        note "export PATH=\"$bin_dir:\$PATH\""
+      fi
       return 0
       ;;
   esac
-  say "Note: $bin_dir is not on your PATH. Add it with:"
-  note "echo 'export PATH=\"$bin_dir:\$PATH\"' >> \"$rc_file\" && source \"$rc_file\""
+  if [[ "$bin_on_path" == "1" ]]; then
+    say "Before invoking lingtai-tui in this shell, run: $cache_refresh"
+  else
+    say "Before invoking lingtai-tui in this shell, run:"
+    note "echo 'export PATH=\"$bin_dir:\$PATH\"' >> \"$rc_file\" && source \"$rc_file\" && $cache_refresh"
+  fi
+}
+
+# remove_other_tui_on_path removes only exact lingtai-tui files or symlinks
+# found in the current PATH, preserving the newly installed canonical target.
+# It deliberately scans directories only and never removes aliases, metadata,
+# parent directories, or files outside the exact command name.
+remove_other_tui_on_path() {
+  local canonical="$1" canonical_dir canonical_parent canonical_target path_entry normalized_entry
+  local candidate seen already_seen
+  local -a path_entries=() seen_entries=()
+
+  canonical_parent="${canonical%/*}"
+  canonical_dir="$(cd "$canonical_parent" 2>/dev/null && pwd -P)" || {
+    echo "error: cannot resolve canonical lingtai-tui directory: $canonical_parent" >&2
+    return 1
+  }
+  canonical_target="$canonical_dir/${canonical##*/}"
+  # The extra delimiter keeps a trailing empty component visible to Bash's
+  # array reader; empty components are current-directory entries too.
+  IFS=: read -r -a path_entries <<<"${PATH:-}:"
+  for path_entry in "${path_entries[@]}"; do
+    # An empty PATH component means the current working directory.
+    path_entry="${path_entry:-.}"
+    [[ -d "$path_entry" ]] || continue
+    normalized_entry="$(cd "$path_entry" 2>/dev/null && pwd -P)" || continue
+    already_seen=0
+    for seen in "${seen_entries[@]-}"; do
+      if [[ "$seen" == "$normalized_entry" ]]; then
+        already_seen=1
+        break
+      fi
+    done
+    [[ "$already_seen" == "1" ]] && continue
+    seen_entries+=("$normalized_entry")
+    candidate="$normalized_entry/lingtai-tui"
+    [[ "$candidate" == "$canonical_target" ]] && continue
+    [[ -f "$candidate" || -L "$candidate" ]] || continue
+    rm -f "$candidate" || {
+      echo "error: could not remove conflicting lingtai-tui at $candidate" >&2
+      return 1
+    }
+    [[ ! -e "$candidate" && ! -L "$candidate" ]] || {
+      echo "error: could not remove conflicting lingtai-tui at $candidate" >&2
+      return 1
+    }
+  done
 }
 
 # is_wsl reports whether we're running under Windows Subsystem for Linux.
@@ -2284,6 +2337,8 @@ main() {
       exit 1
     fi
   fi
+
+  remove_other_tui_on_path "$BIN_DIR/lingtai-tui" || exit 1
 
   say "Done. $("$BIN_DIR/lingtai-tui" version 2>&1 || echo "$VERSION")"
   print_path_hint "$BIN_DIR"

@@ -117,8 +117,8 @@ assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from
 
   out="$(print_path_hint "$hint_bin")"
   case "$out" in
-    *"Note: $hint_bin is not on your PATH."*) ;;
-    *) fail "zsh PATH hint should explain that the bin dir is absent: $out" ;;
+    *"Before invoking lingtai-tui in this shell"*) ;;
+    *) fail "zsh PATH hint should explain current-shell activation: $out" ;;
   esac
   case "$out" in
     *"$hint_home/.zshrc"*) ;;
@@ -141,6 +141,10 @@ assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from
     *"$hint_home/.bashrc"*) ;;
     *) fail "bash PATH hint should target ~/.bashrc: $out" ;;
   esac
+  case "$out" in
+    *"hash -r"*) ;;
+    *) fail "bash PATH hint should refresh the command cache: $out" ;;
+  esac
   [[ ! -e "$hint_home/.bashrc" ]] || fail "PATH hint must not write the bash rc file"
 )
 
@@ -153,7 +157,10 @@ assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from
   export PATH="$hint_bin:/usr/bin:/bin"
 
   out="$(print_path_hint "$hint_bin")"
-  assert_eq "" "$out" "PATH hint is silent when bin dir is already present"
+  case "$out" in
+    *"Before invoking lingtai-tui in this shell, run: rehash"*) ;;
+    *) fail "present zsh PATH should still refresh the command cache: $out" ;;
+  esac
   [[ ! -e "$hint_home/.zshrc" ]] || fail "present PATH check must not write the zsh rc file"
 )
 
@@ -167,14 +174,72 @@ assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from
 
   out="$(print_path_hint "$hint_bin")"
   case "$out" in
-    *"shell startup file"*) ;;
-    *) fail "unknown shell PATH hint should name the shell startup file: $out" ;;
+    *"Before invoking lingtai-tui in this shell"*) ;;
+    *) fail "unknown shell PATH hint should explain current-shell activation: $out" ;;
   esac
   case "$out" in
     *"export PATH="*) ;;
     *) fail "unknown shell PATH hint should provide a direct export: $out" ;;
   esac
   [[ ! -e "$hint_home/.profile" ]] || fail "unknown-shell PATH hint must not write .profile"
+)
+
+# --- stale TUI auto-heal is PATH-scoped and preserves the canonical target ----
+install_main="$(awk '/^main\(\) \{/{found=1} found{print}' "$ROOT_DIR/install.sh")"
+case "$install_main" in
+  *'if ! ensure_runtime_venv'*'write_install_metadata'*'if should_install_desktop'*'remove_other_tui_on_path'*'say "Done.'*) ;;
+  *) fail "PATH auto-heal must run after runtime/receipt/Desktop success and before Done" ;;
+esac
+(
+  canonical_dir="$tmp/path-heal-canonical"
+  stale_dir="$tmp/path-heal-stale"
+  relative_dir="$tmp/path-heal-relative"
+  empty_dir="$tmp/path-heal-empty"
+  tools_dir="$tmp/path-heal-tools"
+  mkdir -p "$canonical_dir" "$stale_dir" "$relative_dir" "$empty_dir" "$tools_dir"
+  stale_physical="$(cd "$stale_dir" && pwd -P)"
+  printf '#!/bin/sh\n/bin/rm "$@"\n' > "$tools_dir/rm"
+  chmod 755 "$tools_dir/rm"
+  printf 'canonical\n' > "$canonical_dir/lingtai-tui"
+  printf 'stale\n' > "$stale_dir/lingtai-tui"
+  printf 'relative\n' > "$relative_dir/lingtai-tui"
+  printf 'empty\n' > "$empty_dir/lingtai-tui"
+  chmod 755 "$canonical_dir/lingtai-tui" "$stale_dir/lingtai-tui" "$relative_dir/lingtai-tui" "$empty_dir/lingtai-tui"
+
+  # Exercise duplicate physical entries, a relative entry, and an empty entry
+  # (the current working directory) as separate PATH normalization invariants.
+  (
+    cd "$empty_dir"
+    export PATH=":$stale_dir:../path-heal-relative:$stale_dir:$tmp/path-heal-missing:$canonical_dir:$tools_dir"
+    remove_other_tui_on_path "$canonical_dir/lingtai-tui" || fail "PATH auto-heal should remove normalized stale TUIs"
+  )
+
+  # A trailing empty component must be retained by the PATH parser as well.
+  printf 'empty-trailing\n' > "$empty_dir/lingtai-tui"
+  (
+    cd "$empty_dir"
+    export PATH="$stale_dir:$tmp/path-heal-missing:$canonical_dir:$tools_dir:"
+    remove_other_tui_on_path "$canonical_dir/lingtai-tui" || fail "PATH auto-heal should remove trailing-empty-entry TUI"
+  )
+
+  [[ -f "$canonical_dir/lingtai-tui" ]] || fail "PATH auto-heal must preserve canonical TUI"
+  [[ ! -e "$stale_dir/lingtai-tui" ]] || fail "PATH auto-heal must remove stale TUI"
+  [[ ! -e "$relative_dir/lingtai-tui" ]] || fail "PATH auto-heal must remove relative-entry TUI"
+  [[ ! -e "$empty_dir/lingtai-tui" ]] || fail "PATH auto-heal must remove empty-entry TUI"
+
+  printf 'stale\n' > "$stale_dir/lingtai-tui"
+  export PATH="$stale_dir:$stale_dir:$tmp/path-heal-missing:$canonical_dir:$tools_dir"
+  rm() { return 1; }
+  set +e
+  heal_error="$(remove_other_tui_on_path "$canonical_dir/lingtai-tui" 2>&1)"
+  heal_rc=$?
+  set -e
+  [[ "$heal_rc" != 0 ]] || fail "PATH auto-heal must fail when stale TUI removal fails"
+  case "$heal_error" in
+    *"$stale_physical/lingtai-tui"*) ;;
+    *) fail "PATH auto-heal failure should name the exact stale path: $heal_error" ;;
+  esac
+  [[ -f "$stale_dir/lingtai-tui" ]] || fail "failed PATH auto-heal test must retain its fixture"
 )
 
 # --- uv bootstrap: no uv, system python3 too old (jammy scenario) -------------

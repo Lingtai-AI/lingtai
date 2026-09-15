@@ -344,6 +344,85 @@ try {
     Assert-Contains $psText 'if ($sourceArg -eq ''gitee'') { Fail' 'retired provider is rejected in the pre-provider validation block'
     Assert-Contains $psText 'if ($haveArchive -ne $haveChecksum) { Fail' 'archive/checksum pairing is validated before provider selection'
 
+    Write-Section 'contract: stale TUI auto-heal is PATH-scoped'
+    Assert-Contains $psText 'function Remove-OtherTuiOnPath' 'PowerShell defines the PATH-scoped stale TUI cleanup'
+    $addToPathStart = $psText.IndexOf('function Add-ToPath')
+    $removeOtherStart = $psText.IndexOf('function Remove-OtherTuiOnPath')
+    Assert-NotContains $psText.Substring($addToPathStart, $removeOtherStart - $addToPathStart) 'Remove-OtherTuiOnPath -CanonicalPath' 'PowerShell PATH mutation does not delete stale TUI copies before receipt success'
+    $invokeMainText = $psText.Substring($psText.IndexOf('function Invoke-Main'))
+    Assert-Equal 3 ([regex]::Matches($invokeMainText, '(?s)Write-InstallMetadata @metaArgs.*?Remove-OtherTuiOnPath.*?Write-Completion').Count) 'every real PowerShell branch cleans stale TUI copies after metadata and before completion'
+    Assert-Contains $psText 'Could not remove conflicting lingtai-tui.exe at' 'PowerShell stale TUI cleanup fails loudly with the exact path'
+    Assert-Contains $psText 'Confirm-StagedVersion -StagedTui $tuiDest' 'PowerShell verifies the installed canonical TUI target directly'
+    Assert-Contains $psText 'This installer PowerShell process is ready to invoke lingtai-tui now.' 'PowerShell completion states the installer process is ready immediately'
+    Assert-Contains $psText 'Persistence was intentionally skipped (-NoModifyPath). If a separate/calling PowerShell process needs PATH, run:' 'PowerShell -NoModifyPath completion scopes the activation command to a separate process'
+    Assert-Contains $psText 'New PowerShell windows inherit the updated user PATH.' 'PowerShell completion describes persistent PATH inheritance'
+    Assert-NotContains $psText 'Before invoking lingtai-tui' 'PowerShell completion has no false current-process activation warning'
+    Assert-Contains $psText 'function Resolve-PhysicalDirectoryIdentity' 'PowerShell resolves physical directory identity before PATH cleanup'
+    $pathHealFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-OtherTuiOnPath'
+    }, $true)
+    $physicalResolverFunction = $sourceAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-PhysicalDirectoryIdentity'
+    }, $true)
+    Assert-True ($null -ne $pathHealFunction) 'stale TUI cleanup is discoverable through the PowerShell AST'
+    Assert-True ($null -ne $physicalResolverFunction) 'physical directory identity resolver is discoverable through the PowerShell AST'
+    if ($null -ne $pathHealFunction -and $null -ne $physicalResolverFunction) {
+        $pathHealText = $pathHealFunction.Extent.Text
+        $candidateStart = $pathHealText.IndexOf('$candidate = Join-Path $directory ''lingtai-tui.exe''')
+        $candidateProbe = $pathHealText.IndexOf('$item = Get-Item -LiteralPath $candidate', $candidateStart)
+        $directoryResolve = $pathHealText.IndexOf('$directoryIdentity = Resolve-PhysicalDirectoryIdentity -Directory $directory')
+        Assert-True ($candidateStart -ge 0 -and $candidateProbe -gt $candidateStart -and $directoryResolve -gt $candidateProbe) 'PowerShell probes each PATH TUI candidate before resolving physical directory identity'
+
+        $pathHealRoot = Join-Path ([IO.Path]::GetTempPath()) ("lingtai ps path heal contract {0}" -f ([Guid]::NewGuid().ToString('N')))
+        $canonicalDir = Join-Path $pathHealRoot 'canonical'
+        $aliasDir = Join-Path $pathHealRoot 'canonical-alias'
+        $staleDir = Join-Path $pathHealRoot 'stale'
+        $missingDir = Join-Path $pathHealRoot 'missing'
+        $savedPath = $env:PATH
+        try {
+            New-Item -ItemType Directory -Force -Path $canonicalDir, $staleDir | Out-Null
+            Set-Content -LiteralPath (Join-Path $canonicalDir 'lingtai-tui.exe') -Value 'canonical' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $staleDir 'lingtai-tui.exe') -Value 'stale' -Encoding ASCII
+            # PowerShell 5.1 has no Junction item type; mklink is an inbox
+            # Windows command and does not add a test/runtime dependency.
+            & $env:ComSpec /d /c ('mklink /J "{0}" "{1}"' -f $aliasDir, $canonicalDir) 2>&1 | Out-Null
+            $junctionExit = $LASTEXITCODE
+            Assert-Equal 0 $junctionExit 'native Windows test creates a junction alias to the canonical directory'
+            Assert-True (Test-Path -LiteralPath $aliasDir -PathType Container) 'native Windows test has a reparse-point PATH alias'
+            $aliasAttributes = (Get-Item -LiteralPath $aliasDir -Force).Attributes
+            Assert-True (($aliasAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) 'native Windows test confirms the PATH alias is a reparse point'
+            $env:PATH = "$staleDir;$staleDir;$missingDir;$aliasDir;$canonicalDir"
+            function Fail { param([string]$Message) throw $Message }
+            Invoke-Expression $physicalResolverFunction.Extent.Text
+            Invoke-Expression $pathHealFunction.Extent.Text
+
+            Remove-OtherTuiOnPath -CanonicalPath (Join-Path $canonicalDir 'lingtai-tui.exe')
+            Assert-True (Test-Path -LiteralPath (Join-Path $canonicalDir 'lingtai-tui.exe')) 'PowerShell PATH auto-heal preserves the canonical TUI'
+            Assert-True (Test-Path -LiteralPath (Join-Path $aliasDir 'lingtai-tui.exe')) 'PowerShell PATH auto-heal preserves the canonical TUI through its junction alias'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $staleDir 'lingtai-tui.exe'))) 'PowerShell PATH auto-heal removes the stale TUI'
+
+            Set-Content -LiteralPath (Join-Path $staleDir 'lingtai-tui.exe') -Value 'stale' -Encoding ASCII
+            function Remove-Item {
+                param([string]$LiteralPath, [switch]$Force, [string]$ErrorAction)
+                throw 'controlled removal failure'
+            }
+            $healFailed = $false
+            try {
+                Remove-OtherTuiOnPath -CanonicalPath (Join-Path $canonicalDir 'lingtai-tui.exe')
+            } catch {
+                $healFailed = $true
+                Assert-Contains $_.Exception.Message (Join-Path $staleDir 'lingtai-tui.exe') 'PowerShell PATH auto-heal failure names the exact stale path'
+            }
+            Assert-True $healFailed 'PowerShell PATH auto-heal fails when stale TUI removal fails'
+        } finally {
+            $env:PATH = $savedPath
+            Microsoft.PowerShell.Management\Remove-Item -LiteralPath Function:\Remove-Item -Force -ErrorAction SilentlyContinue
+            Microsoft.PowerShell.Management\Remove-Item -LiteralPath $pathHealRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Section 'contract: phase and completion truthfulness'
     Assert-Contains $psText 'function Start-Phase' 'phase start helper exists'
     Assert-Contains $psText 'function Complete-Phase' 'phase completion helper exists'

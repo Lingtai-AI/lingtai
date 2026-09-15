@@ -196,8 +196,11 @@ function Write-Completion {
     Write-Host '    lingtai-tui       start the terminal UI' -ForegroundColor Green
     Write-Host ''
     Write-Host ('  Total time: {0}' -f (Format-Duration $script:InstallClock.Elapsed)) -ForegroundColor DarkGray
-    if (-not $NoModifyPath) {
-        Write-Host '  Open a new terminal so the updated PATH is picked up everywhere.' -ForegroundColor Yellow
+    Write-Host '  This installer PowerShell process is ready to invoke lingtai-tui now.' -ForegroundColor Green
+    if ($NoModifyPath) {
+        Write-Host "  Persistence was intentionally skipped (-NoModifyPath). If a separate/calling PowerShell process needs PATH, run: `$env:Path = `"$BinDir;`$env:Path`"" -ForegroundColor Yellow
+    } else {
+        Write-Host '  New PowerShell windows inherit the updated user PATH.' -ForegroundColor Yellow
     }
     Write-Host ''
 }
@@ -381,6 +384,116 @@ function Add-ToPath {
         Write-Ok "Added '$Dir' to your user PATH (open a new terminal to pick it up everywhere)."
     } else {
         Write-Step "'$Dir' is already on the user PATH."
+    }
+}
+
+function Resolve-PhysicalDirectoryIdentity {
+    param([string]$Directory)
+
+    try {
+        $fullDirectory = [IO.Path]::GetFullPath($Directory)
+        if ($null -eq ('LingTai.NativePath' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace LingTai {
+    public static class NativePath {
+        private const uint FileShareRead = 0x00000001;
+        private const uint FileShareWrite = 0x00000002;
+        private const uint FileShareDelete = 0x00000004;
+        private const uint OpenExisting = 3;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFile(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandle(
+            SafeFileHandle file,
+            StringBuilder path,
+            uint pathLength,
+            uint flags);
+
+        public static string GetFinalPathName(string path) {
+            using (SafeFileHandle handle = CreateFile(
+                path,
+                0,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics,
+                IntPtr.Zero)) {
+                if (handle.IsInvalid) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+
+                StringBuilder buffer = new StringBuilder(32768);
+                uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+                if (length == 0) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (length < buffer.Capacity) {
+                    return buffer.ToString();
+                }
+
+                buffer = new StringBuilder((int)length + 1);
+                length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+                if (length == 0 || length >= buffer.Capacity) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                return buffer.ToString();
+            }
+        }
+    }
+}
+'@ -ErrorAction Stop | Out-Null
+        }
+        return [LingTai.NativePath]::GetFinalPathName($fullDirectory)
+    } catch {
+        Fail "Could not resolve physical PATH directory at $Directory."
+    }
+}
+
+function Remove-OtherTuiOnPath {
+    param([string]$CanonicalPath)
+
+    $canonicalFull = [IO.Path]::GetFullPath($CanonicalPath)
+    $canonicalDirectory = Split-Path -LiteralPath $canonicalFull -Parent
+    $canonicalIdentity = Resolve-PhysicalDirectoryIdentity -Directory $canonicalDirectory
+    $seen = @{}
+    foreach ($rawEntry in @($env:PATH -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($rawEntry)) { continue }
+        try { $directory = [IO.Path]::GetFullPath($rawEntry.Trim()) } catch { continue }
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) { continue }
+        $candidate = Join-Path $directory 'lingtai-tui.exe'
+        $candidateFull = [IO.Path]::GetFullPath($candidate)
+        $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+        if (-not $item -or $item.PSIsContainer) { continue }
+
+        $directoryIdentity = Resolve-PhysicalDirectoryIdentity -Directory $directory
+        $directoryKey = $directoryIdentity.ToLowerInvariant()
+        if ($seen.ContainsKey($directoryKey)) { continue }
+        $seen[$directoryKey] = $true
+        if ([StringComparer]::OrdinalIgnoreCase.Equals($directoryIdentity, $canonicalIdentity)) { continue }
+        try {
+            Remove-Item -LiteralPath $candidate -Force -ErrorAction Stop
+        } catch {
+            Fail "Could not remove conflicting lingtai-tui.exe at $candidateFull."
+        }
+        if (Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue) {
+            Fail "Could not remove conflicting lingtai-tui.exe at $candidateFull."
+        }
     }
 }
 
@@ -1886,6 +1999,7 @@ function Install-FromBuiltMain {
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Remove-ParkedManagedBinaries -BinDir $BinDir
     Copy-ManagedBinary -Source $Build.Tui -Destination $tuiDest
+    Confirm-StagedVersion -StagedTui $tuiDest -Requested $Build.Version
     Write-Ok "Installed $Label TUI binary into $BinDir"
     return @($tuiDest)
 }
@@ -1949,6 +2063,7 @@ function Install-FromLocalArtifact {
     Remove-ParkedManagedBinaries -BinDir $BinDir
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Copy-ManagedBinary -Source $tui.FullName -Destination $tuiDest
+    Confirm-StagedVersion -StagedTui $tuiDest -Requested $Requested
     Write-Ok "Installed lingtai-tui.exe -> $BinDir"
 
     return @($tuiDest)
@@ -2022,6 +2137,7 @@ function Invoke-Main {
             TuiProvider='github'; SourceMode='source-ref'; TuiCommit=$refBuild.TuiSha
         }
         Write-InstallMetadata @metaArgs
+        Remove-OtherTuiOnPath -CanonicalPath (Join-Path $BinDir 'lingtai-tui.exe')
         Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline "Source build of '$Ref' complete." -Facts ([ordered]@{
             'TUI commit' = $refBuild.TuiSha
             'stamped as' = $refBuild.Version
@@ -2055,6 +2171,7 @@ function Invoke-Main {
             TuiCommit=$mainBuild.TuiSha; KernelCommit=$mainBuild.KernelSha
         }
         Write-InstallMetadata @metaArgs
+        Remove-OtherTuiOnPath -CanonicalPath (Join-Path $BinDir 'lingtai-tui.exe')
         Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline 'Current-main development install complete.' -Facts ([ordered]@{
             'TUI commit' = $mainBuild.TuiSha
             'kernel commit' = $mainBuild.KernelSha
@@ -2223,6 +2340,7 @@ function Invoke-Main {
     }
     Complete-Phase -Clock $phase -Message 'installation summary ready'
     $runtimeDir = if ($kernelMeta) { Join-Path $GlobalDir 'runtime\venv' } else { '' }
+    Remove-OtherTuiOnPath -CanonicalPath (Join-Path $BinDir 'lingtai-tui.exe')
     Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline 'Install complete.' -Facts $facts -RuntimeDir $runtimeDir
 }
 try {
