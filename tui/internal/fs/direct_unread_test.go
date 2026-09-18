@@ -272,6 +272,47 @@ func TestDirectUnreadCountsOnlyStrictIncomingDirectMail(t *testing.T) {
 	}
 }
 
+// A real email.reply envelope records absolute agent directories. It must count
+// as incoming unread mail; mail the human authored, in any spelling, and mail
+// from another project's same-named agent must not.
+func TestDirectUnreadCountsCanonicalAbsoluteReplyAsIncoming(t *testing.T) {
+	const human = "human"
+	project := t.TempDir()
+	target := directUnreadTarget(project, "luna", "id-luna", "luna")
+	humanDir := filepath.Join(project, ".lingtai", "human")
+	const instant = "2026-07-22T14:44:00Z"
+
+	sentBare := MailMessage{MailboxID: "sent-bare", ID: "sent-bare", From: human, To: []string{"luna"}, ReceivedAt: instant}
+	sentAbsolute := MailMessage{MailboxID: "sent-absolute", ID: "sent-absolute", From: humanDir, To: []string{target.Directory}, ReceivedAt: instant}
+	foreign := MailMessage{
+		MailboxID:  "reply-foreign",
+		ID:         "reply-foreign",
+		From:       filepath.Join(t.TempDir(), ".lingtai", "luna"),
+		To:         []interface{}{humanDir},
+		ReceivedAt: instant,
+		Identity:   map[string]interface{}{"agent_id": "id-luna"},
+	}
+	reply := MailMessage{
+		MailboxID:  "reply-absolute",
+		ID:         "reply-absolute",
+		From:       target.Directory,
+		To:         []interface{}{humanDir},
+		ReceivedAt: instant,
+		Identity:   map[string]interface{}{"agent_id": "id-luna"},
+	}
+	accepted := []MailMessage{sentBare, sentAbsolute, foreign, reply}
+
+	store, err := OpenDirectUnreadStore(project, human, []DirectTarget{target}, nil)
+	if err != nil {
+		t.Fatalf("OpenDirectUnreadStore: %v", err)
+	}
+	assertDirectUnreadCount(t, store, target, accepted, 1)
+	if err := store.MarkSeen(target, accepted); err != nil {
+		t.Fatalf("MarkSeen: %v", err)
+	}
+	assertDirectUnreadCount(t, store, target, accepted, 0)
+}
+
 func TestDirectUnreadRejectsUnresolvedIncomingWithoutChangingBytes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
