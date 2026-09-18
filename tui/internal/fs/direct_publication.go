@@ -9,9 +9,10 @@ import (
 
 // DirectMailPublication is an immutable, owner-neutral index over one accepted
 // mailbox snapshot and its canonical direct-target catalog. Construction walks
-// accepted mail once and evaluates IsDirectMail only for targets sharing the
-// message's strict peer address. Callers receive detached, page-bounded results;
-// the publication never exposes its retained message graph.
+// accepted mail once and evaluates IsDirectMail only for targets whose route
+// (bare address or absolute directory) is the message's strict peer. Callers
+// receive detached, page-bounded results; the publication never exposes its
+// retained message graph.
 type DirectMailPublication struct {
 	humanAddress string
 	threads      map[string]directThreadPublication
@@ -28,8 +29,8 @@ type directThreadPublication struct {
 
 // NewDirectMailPublication builds one immutable direct index. Invalid or
 // duplicate stable target keys are omitted fail-closed; canonical callers have
-// already removed such targets. Duplicate current addresses remain separate
-// candidates, preserving IsDirectMail's exact legacy routing semantics.
+// already removed such targets. Duplicate current routes remain separate
+// candidates, preserving IsDirectMail's legacy routing semantics.
 func NewDirectMailPublication(humanAddress string, targets []DirectTarget, accepted []MailMessage) *DirectMailPublication {
 	humanAddress = strings.TrimSpace(humanAddress)
 	publication := &DirectMailPublication{
@@ -44,7 +45,9 @@ func NewDirectMailPublication(humanAddress string, targets []DirectTarget, accep
 	for _, target := range targets {
 		keyCounts[DirectThreadKey(target)]++
 	}
-	byAddress := make(map[string][]string, len(targets))
+	humanSpelling := directSpelling(humanAddress)
+	humans := map[string]struct{}{humanSpelling: {}}
+	byRoute := make(map[string][]string, len(targets))
 	for _, target := range targets {
 		key := DirectThreadKey(target)
 		if key == "" || keyCounts[key] != 1 {
@@ -55,18 +58,24 @@ func NewDirectMailPublication(humanAddress string, targets []DirectTarget, accep
 			latest:       directUnreadCursor{ids: []string{}},
 			incomingByID: make(map[string]time.Time),
 		}
-		address := strings.TrimSpace(target.Address)
-		if address != "" && address != humanAddress {
-			byAddress[address] = append(byAddress[address], key)
+		if directory := directHumanEndpoint(humanAddress, target).directory; directory != "" {
+			humans[directory] = struct{}{}
+		}
+		route := directTargetEndpoint(target)
+		if route.address != "" && route.address != humanSpelling {
+			byRoute[route.address] = append(byRoute[route.address], key)
+			if route.directory != "" && route.directory != route.address {
+				byRoute[route.directory] = append(byRoute[route.directory], key)
+			}
 		}
 	}
 
 	for _, message := range accepted {
-		peer, ok := directMailPeerAddress(message, humanAddress)
+		peer, ok := directMailPeerAddress(message, humans)
 		if !ok {
 			continue
 		}
-		for _, key := range byAddress[peer] {
+		for _, key := range byRoute[peer] {
 			thread := publication.threads[key]
 			if !IsDirectMail(message, humanAddress, thread.target) {
 				continue
@@ -74,7 +83,9 @@ func NewDirectMailPublication(humanAddress string, targets []DirectTarget, accep
 			// Detach only matching mail so the fs-owned publication stays immutable
 			// even for legacy callers that supplied a mutable accepted slice.
 			thread.messages = append(thread.messages, cloneMailMessage(message))
-			if strings.TrimSpace(message.From) == strings.TrimSpace(thread.target.Address) {
+			// IsDirectMail tries the human as sender first and rejects any spelling the
+			// human and target share, so accepted mail from anyone else is the target's.
+			if !directHumanEndpoint(humanAddress, thread.target).names(message.From) {
 				thread.appendIncoming(message)
 			}
 			publication.threads[key] = thread
@@ -84,21 +95,25 @@ func NewDirectMailPublication(humanAddress string, targets []DirectTarget, accep
 }
 
 // directMailPeerAddress performs only the strict envelope geometry needed to
-// select same-address candidates. IsDirectMail remains the authoritative final
-// predicate for direction, identity.agent_id, CC, and normalization behavior.
-func directMailPeerAddress(message MailMessage, humanAddress string) (string, bool) {
+// select same-route candidates: the spelling opposite any spelling of the human
+// (humans holds every one across the targets' projects). IsDirectMail remains
+// the authoritative final predicate for direction, identity.agent_id, CC, and
+// normalization behavior.
+func directMailPeerAddress(message MailMessage, humans map[string]struct{}) (string, bool) {
 	if len(message.CC) != 0 {
 		return "", false
 	}
-	to, ok := strictMailRecipient(message.To)
+	recipient, ok := strictMailRecipient(message.To)
 	if !ok {
 		return "", false
 	}
-	from := strings.TrimSpace(message.From)
+	from, to := directSpelling(message.From), directSpelling(recipient)
+	_, fromHuman := humans[from]
+	_, toHuman := humans[to]
 	switch {
-	case from == humanAddress:
+	case fromHuman:
 		return to, true
-	case to == humanAddress:
+	case toHuman:
 		return from, from != ""
 	default:
 		return "", false

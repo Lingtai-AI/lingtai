@@ -3,14 +3,16 @@ package fs
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 )
 
 // DirectTarget identifies one inventory target without coupling target identity
 // to unread persistence or any future async acceptance store. ProjectDirectory
 // is the caller's canonical project directory; Directory is the target's
-// canonical working directory; AgentID is its durable manifest identity; and
-// Address is its current project-local network route.
+// canonical working directory, which is also the absolute spelling of its
+// route; AgentID is its durable manifest identity; and Address is its current
+// project-local network route.
 type DirectTarget struct {
 	ProjectDirectory string
 	Directory        string
@@ -109,10 +111,62 @@ func strictMailRecipient(value interface{}) (string, bool) {
 	return recipient, recipient != ""
 }
 
+// directEndpoint is one direct-thread participant's project-aware route: the
+// bare address its manifest publishes and, when the project layout supplies it,
+// the canonical absolute agent directory that a kernel envelope such as
+// email.reply may record instead. These are the only two spellings that name the
+// participant; a shared final path component, another agent's directory, a path
+// outside the project, or a nested path never does.
+type directEndpoint struct {
+	address   string
+	directory string
+}
+
+// directSpelling trims one raw endpoint and lexically cleans it when absolute.
+// It is the only normalization applied before routes are compared, so bare
+// addresses stay literal.
+func directSpelling(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if filepath.IsAbs(endpoint) {
+		return filepath.Clean(endpoint)
+	}
+	return endpoint
+}
+
+// directTargetEndpoint is the selected target's route: its manifest address and
+// its own working directory. A blank or relative Directory has no absolute
+// spelling.
+func directTargetEndpoint(target DirectTarget) directEndpoint {
+	endpoint := directEndpoint{address: directSpelling(target.Address)}
+	if directory := directSpelling(target.Directory); filepath.IsAbs(directory) {
+		endpoint.directory = directory
+	}
+	return endpoint
+}
+
+// directHumanEndpoint is the human's route inside the target's project: the
+// human address and the directory it names beside the agents under
+// <project>/.lingtai. Without an absolute ProjectDirectory only the literal
+// address names the human.
+func directHumanEndpoint(humanAddress string, target DirectTarget) directEndpoint {
+	endpoint := directEndpoint{address: directSpelling(humanAddress)}
+	project := directSpelling(target.ProjectDirectory)
+	if endpoint.address != "" && !filepath.IsAbs(endpoint.address) && filepath.IsAbs(project) {
+		endpoint.directory = filepath.Join(project, ".lingtai", endpoint.address)
+	}
+	return endpoint
+}
+
+// names reports whether raw is one of the participant's two spellings.
+func (e directEndpoint) names(raw string) bool {
+	spelling := directSpelling(raw)
+	return spelling != "" && (spelling == e.address || spelling == e.directory)
+}
+
 // suppliedAgentIDMatches reports whether an incoming message's optional Agent
 // identity is compatible with the selected target. Legacy messages without the
-// field may fall back to the exact current address; any supplied invalid,
-// unverifiable, or mismatching value fails closed.
+// field may fall back to route equality; any supplied invalid, unverifiable, or
+// mismatching value fails closed.
 func suppliedAgentIDMatches(identity map[string]interface{}, targetAgentID string) bool {
 	raw, supplied := identity["agent_id"]
 	if !supplied {
@@ -129,21 +183,24 @@ func suppliedAgentIDMatches(identity map[string]interface{}, targetAgentID strin
 
 // IsDirectMail reports whether msg belongs to the strict human-target thread.
 // Direct mail has exactly one raw primary recipient and no CC participants.
-// Incoming mail must match the target's current address and any supplied
-// identity.agent_id literally; group, malformed, copied, or contradictory mail fails closed.
+// Each side must name the human or the target by its bare address or its
+// canonical same-project absolute directory (see directEndpoint), and incoming
+// mail must match any supplied identity.agent_id literally; group, malformed,
+// copied, cross-project, or contradictory mail fails closed.
 func IsDirectMail(msg MailMessage, humanAddress string, target DirectTarget) bool {
-	humanAddress = strings.TrimSpace(humanAddress)
-	targetAddress := strings.TrimSpace(target.Address)
-	from := strings.TrimSpace(msg.From)
-	if humanAddress == "" || targetAddress == "" || humanAddress == targetAddress || len(msg.CC) != 0 {
+	human := directHumanEndpoint(humanAddress, target)
+	agent := directTargetEndpoint(target)
+	// The human and the target must share no spelling: NewDirectMailPublication
+	// relies on that to tell inbound mail from outbound.
+	if human.address == "" || agent.address == "" || human.names(agent.address) || human.names(agent.directory) || len(msg.CC) != 0 {
 		return false
 	}
 	to, valid := strictMailRecipient(msg.To)
 	if !valid {
 		return false
 	}
-	if from == humanAddress {
-		return to == targetAddress
+	if human.names(msg.From) {
+		return agent.names(to)
 	}
-	return from == targetAddress && to == humanAddress && suppliedAgentIDMatches(msg.Identity, target.AgentID)
+	return agent.names(msg.From) && human.names(to) && suppliedAgentIDMatches(msg.Identity, target.AgentID)
 }
