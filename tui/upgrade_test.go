@@ -67,19 +67,20 @@ func TestStartupSourceUpdateConfirmRoutesThroughSourceUpdater(t *testing.T) {
 		Detail:       "metadata at " + metadataPath,
 		MetadataPath: metadataPath,
 	}, "v0.8.0", "v0.8.1", startupTUIUpgradeOptions{
-		Input:               strings.NewReader("yes\n"),
-		Output:              &out,
-		ErrOutput:           &errOut,
-		Runner:              runner,
-		GlobalDir:           globalDir,
-		Stat:                statMissingForStartupTest,
-		SourceInstallScript: "/tmp/install.sh",
+		Input:                 strings.NewReader("yes\n"),
+		Output:                &out,
+		ErrOutput:             &errOut,
+		Runner:                runner,
+		GlobalDir:             globalDir,
+		Stat:                  statMissingForStartupTest,
+		SourceInstallScript:   "/tmp/install.sh",
+		VerifyTUIArchitecture: func(string) error { return nil },
 	})
 
 	if !updated {
 		t.Fatalf("confirmed source startup update should stop startup after update; stderr=%q output=\n%s", errOut.String(), out.String())
 	}
-	if !startupContainsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+	if !startupContainsCall(runner.calls, "/tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
 		t.Fatalf("expected source installer update call, got %#v", runner.calls)
 	}
 	if startupHasProgram(runner.calls, "brew") {

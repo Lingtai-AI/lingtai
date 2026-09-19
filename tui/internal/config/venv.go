@@ -664,13 +664,14 @@ type DoctorOptions struct {
 	QuietEnsureVenv   bool
 
 	// Test hooks. Production callers leave these nil.
-	HTTPClient     *http.Client
-	Runner         CommandRunner
-	LookPath       func(string) (string, error)
-	Executable     func() (string, error)
-	Readlink       func(string) (string, error)
-	Stat           func(string) (os.FileInfo, error)
-	EnsureVenvFunc func(string) error
+	HTTPClient            *http.Client
+	Runner                CommandRunner
+	LookPath              func(string) (string, error)
+	Executable            func() (string, error)
+	Readlink              func(string) (string, error)
+	Stat                  func(string) (os.FileInfo, error)
+	EnsureVenvFunc        func(string) error
+	VerifyTUIArchitecture func(string) error
 	// Home / LookupEnv override dev-checkout discovery. Production callers
 	// leave them empty/nil (os.UserHomeDir / os.LookupEnv are used).
 	Home      string
@@ -898,11 +899,12 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		return
 	}
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion: release.TagName,
-		GlobalDir:     globalDir,
-		Runner:        opts.Runner,
-		LookPath:      opts.LookPath,
-		Stat:          opts.Stat,
+		LatestVersion:         release.TagName,
+		GlobalDir:             globalDir,
+		Runner:                opts.Runner,
+		LookPath:              opts.LookPath,
+		Stat:                  opts.Stat,
+		VerifyTUIArchitecture: opts.VerifyTUIArchitecture,
 	})
 	for _, line := range update.Lines {
 		r.add(line.Severity, "%s", line.Text)

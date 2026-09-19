@@ -150,6 +150,10 @@ SH
   TUI_BUILD_LOG="$case_dir/build.log"; export TUI_BUILD_LOG
   ensure_build_deps() { :; }
   ensure_go_for_source() { :; }
+  # This provider-routing fixture intentionally emits a shell-script fake
+  # binary, not a Mach-O/ELF object. Architecture behavior is covered by the
+  # dedicated test-install-sh-architecture.sh suite.
+  verify_tui_binary_arch() { :; }
   BIN_DIR="$case_dir/installed"; BUILD_DIR="$case_dir/build"; UPDATE_MODE=0
   mkdir -p "$BIN_DIR"
   build_from_source "$tag" || fail "default TUI source archive should build locally"

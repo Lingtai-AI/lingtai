@@ -41,8 +41,9 @@ type startupTUIUpgradeOptions struct {
 	// call); tests inject a fake so no real brew ever runs.
 	UninstallHomebrew func() error
 
-	GlobalDir           string
-	SourceInstallScript string
+	GlobalDir             string
+	SourceInstallScript   string
+	VerifyTUIArchitecture func(string) error
 
 	CheckTUIUpgrade                 func(string) string
 	FindOtherTUIProcesses           func() []runningTUIProcess
@@ -119,6 +120,7 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 			LookPath:               opts.LookPath,
 			ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
 			UninstallHomebrew:      opts.UninstallHomebrew,
+			VerifyTUIArchitecture:  opts.VerifyTUIArchitecture,
 		})
 		printTUIUpdateLines(opts.Output, update.Lines)
 		return false
@@ -181,6 +183,7 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 		LookPath:               opts.LookPath,
 		ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
 		UninstallHomebrew:      opts.UninstallHomebrew,
+		VerifyTUIArchitecture:  opts.VerifyTUIArchitecture,
 	})
 	printTUIUpdateLines(opts.Output, update.Lines)
 	if !update.Healthy {
@@ -232,11 +235,12 @@ func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersio
 
 	fmt.Fprintln(opts.Output, "  Updating source install...")
 	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
-		LatestVersion:       latestVersion,
-		GlobalDir:           opts.GlobalDir,
-		Runner:              opts.Runner,
-		Stat:                opts.Stat,
-		SourceInstallScript: opts.SourceInstallScript,
+		LatestVersion:         latestVersion,
+		GlobalDir:             opts.GlobalDir,
+		Runner:                opts.Runner,
+		Stat:                  opts.Stat,
+		SourceInstallScript:   opts.SourceInstallScript,
+		VerifyTUIArchitecture: opts.VerifyTUIArchitecture,
 	})
 	printTUIUpdateLines(opts.Output, update.Lines)
 	if !update.Healthy {
