@@ -149,6 +149,7 @@ related_files:
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-nasa-ads.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-openalex.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-pubmed.md
+  - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-semantic-scholar-batch.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-semantic-scholar.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/api-unpaywall.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/authorized-publisher-access.md
