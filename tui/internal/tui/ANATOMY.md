@@ -8,6 +8,7 @@ related_files:
   - tui/main.go
   - tui/internal/tui/app.go
   - tui/internal/tui/app_test.go
+  - tui/internal/tui/app_cpr_test.go
   - tui/internal/tui/launch_heartbeat_test.go
   - tui/internal/tui/layout.go
   - tui/internal/tui/layout_test.go
@@ -117,6 +118,7 @@ related_files:
   - tui/internal/tui/library_test.go
   - tui/internal/tui/lock_unix.go
   - tui/internal/tui/lock_windows.go
+  - tui/internal/tui/lock_windows_test.go
   - tui/internal/tui/login_account_name_test.go
   - tui/internal/tui/login_active_test.go
   - tui/internal/tui/login_pool_test.go
