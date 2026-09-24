@@ -869,11 +869,12 @@ func TestRunDoctorUpdateReportsSourceInstallAndDoesNotRunBrew(t *testing.T) {
 			}
 			return "", errors.New("not found")
 		},
-		Executable: func() (string, error) { return exe, nil },
-		Home:       t.TempDir(),
-		LookupEnv:  func(string) (string, bool) { return "", false },
-		Readlink:   func(string) (string, error) { return "", os.ErrInvalid },
-		Stat:       statAllExist,
+		Executable:            func() (string, error) { return exe, nil },
+		Home:                  t.TempDir(),
+		LookupEnv:             func(string) (string, bool) { return "", false },
+		Readlink:              func(string) (string, error) { return "", os.ErrInvalid },
+		Stat:                  statAllExist,
+		VerifyTUIArchitecture: func(string) error { return nil },
 	})
 	if !report.Healthy {
 		t.Fatalf("source install guidance should not fail doctor: %+v", report.Lines)

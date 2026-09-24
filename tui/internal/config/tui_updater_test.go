@@ -445,18 +445,22 @@ func TestSourceTUIUpdaterRunsInstallScriptAndVerifiesRuntime(t *testing.T) {
 		Method:       TUIInstallMethodSource,
 		MetadataPath: filepath.Join(globalDir, "install.json"),
 	}, TUIUpdateOptions{
-		LatestVersion:       "v0.8.1",
-		GlobalDir:           globalDir,
-		Runner:              runner,
-		Stat:                statAllExist,
-		SourceInstallScript: "/tmp/install.sh",
+		LatestVersion:         "v0.8.1",
+		GlobalDir:             globalDir,
+		Runner:                runner,
+		Stat:                  statAllExist,
+		SourceInstallScript:   "/tmp/install.sh",
+		VerifyTUIArchitecture: func(string) error { return nil },
 	})
 
 	if !result.Healthy || !result.Updated {
 		t.Fatalf("expected healthy source update: %+v", result)
 	}
-	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+	if !containsCall(runner.calls, "/tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
 		t.Fatalf("expected installer update call, got %#v", runner.calls)
+	}
+	if appleSiliconHost() && !containsCall(runner.calls, "/usr/bin/arch -arm64 /bin/bash") {
+		t.Fatalf("Apple Silicon source updater must invoke native arm64 bash, got %#v", runner.calls)
 	}
 	if containsCall(runner.calls, "brew") {
 		t.Fatalf("source updater must not run brew, got %#v", runner.calls)
@@ -469,6 +473,34 @@ func TestSourceTUIUpdaterRunsInstallScriptAndVerifiesRuntime(t *testing.T) {
 	}
 	if !containsLine(result.Lines, "Source/user-local TUI update verified") {
 		t.Fatalf("expected source update completion line: %+v", result.Lines)
+	}
+}
+
+func TestSourceTUIUpdaterRejectsArchitectureMismatch(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	exe := filepath.Join(binDir, "lingtai-tui")
+	writeSourceInstallMetadataVersion(t, globalDir, prefix, binDir, "v0.8.0", []string{exe})
+	runner := &sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"}
+
+	result := RunTUIUpdate(TUIInstallInfo{
+		Method:       TUIInstallMethodSource,
+		MetadataPath: filepath.Join(globalDir, "install.json"),
+	}, TUIUpdateOptions{
+		LatestVersion:         "v0.8.1",
+		GlobalDir:             globalDir,
+		Runner:                runner,
+		Stat:                  statAllExist,
+		SourceInstallScript:   "/tmp/install.sh",
+		VerifyTUIArchitecture: func(string) error { return errors.New("x86_64 binary on arm64 host") },
+	})
+
+	if result.Healthy || result.Updated {
+		t.Fatalf("architecture mismatch must fail before update acceptance: %+v", result)
+	}
+	if !containsLine(result.Lines, "architecture verification failed") {
+		t.Fatalf("expected architecture failure line: %+v", result.Lines)
 	}
 }
 
@@ -648,14 +680,15 @@ func TestManualTUIUpdateSourceInstallSucceeds(t *testing.T) {
 	runner := &sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"}
 
 	report := RunManualTUIUpdate(globalDir, ManualTUIUpdateOptions{
-		CurrentTUIVersion:   "v0.8.0",
-		HTTPClient:          testVersionClient(t, "0.9.7", "v0.8.1"),
-		Runner:              runner,
-		LookPath:            func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
-		Stat:                statAllExist,
-		Executable:          func() (string, error) { return exe, nil },
-		LookupEnv:           func(string) (string, bool) { return "", false },
-		SourceInstallScript: "/tmp/install.sh",
+		CurrentTUIVersion:     "v0.8.0",
+		HTTPClient:            testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:                runner,
+		LookPath:              func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
+		Stat:                  statAllExist,
+		Executable:            func() (string, error) { return exe, nil },
+		LookupEnv:             func(string) (string, bool) { return "", false },
+		SourceInstallScript:   "/tmp/install.sh",
+		VerifyTUIArchitecture: func(string) error { return nil },
 	})
 
 	if !report.Healthy || !report.Updated {
@@ -822,15 +855,20 @@ func TestHomebrewMigrationBinDirCreationFailurePreventsRunner(t *testing.T) {
 }
 
 func TestNativeMigrationInstallCommandUsesVersionedRawReleaseInstaller(t *testing.T) {
+	native := appleSiliconHost()
 	name, args := nativeMigrationInstallCommand("", "/tmp/native", "v0.11.0")
-	if name != "bash" {
-		t.Fatalf("name = %q, want bash", name)
+	if native {
+		if name != "/usr/bin/arch" || len(args) < 3 || args[0] != "-arm64" || args[1] != "/bin/bash" {
+			t.Fatalf("Apple Silicon migration must run installer through native arm64 bash: %q %q", name, args)
+		}
+	} else if name != "bash" {
+		t.Fatalf("name = %q, want bash on non-Apple-Silicon host", name)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"https://raw.githubusercontent.com/Lingtai-AI/lingtai/v0.11.0/install.sh",
 		"--update --prefix /tmp/native --version v0.11.0 --non-interactive",
-		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
+		`shift; curl -fsSL "$script" | /bin/bash -s -- "$@"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("nativeMigrationInstallCommand args %q do not contain %q", joined, want)
@@ -844,15 +882,20 @@ func TestNativeMigrationInstallCommandUsesVersionedRawReleaseInstaller(t *testin
 }
 
 func TestSourceInstallCommandUsesVersionedRawReleaseInstallerAndForwardsAllArgs(t *testing.T) {
+	native := appleSiliconHost()
 	name, args := sourceInstallCommand("", "/tmp/lingtai prefix", "v0.11.0")
-	if name != "bash" {
-		t.Fatalf("name = %q, want bash", name)
+	if native {
+		if name != "/usr/bin/arch" || len(args) < 3 || args[0] != "-arm64" || args[1] != "/bin/bash" {
+			t.Fatalf("Apple Silicon source update must run installer through native arm64 bash: %q %q", name, args)
+		}
+	} else if name != "bash" {
+		t.Fatalf("name = %q, want bash on non-Apple-Silicon host", name)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"https://raw.githubusercontent.com/Lingtai-AI/lingtai/v0.11.0/install.sh",
 		"--update --prefix /tmp/lingtai prefix --version v0.11.0 --non-interactive",
-		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
+		`shift; curl -fsSL "$script" | /bin/bash -s -- "$@"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("sourceInstallCommand args %q do not contain %q", joined, want)

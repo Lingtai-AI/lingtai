@@ -525,9 +525,20 @@ PY
   note "The Desktop App will be downloaded and independently verified only when lingtai-desktop is first run."
 }
 
-# detect_arch prints amd64|arm64, or "unsupported".
+# detect_arch prints the physical host target amd64|arm64, or "unsupported".
+# On Apple Silicon a shell may be running under Rosetta, where uname -m reports
+# x86_64 even though the installer must build the native arm64 TUI.
 detect_arch() {
-  case "$(uname -m)" in
+  local process_arch host_arm64
+  process_arch="$(uname -m)"
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v sysctl &>/dev/null; then
+    host_arm64="$(sysctl -in hw.optional.arm64 2>/dev/null || true)"
+    if [[ "$host_arm64" == "1" ]]; then
+      echo "arm64"
+      return
+    fi
+  fi
+  case "$process_arch" in
     x86_64 | amd64)          echo "amd64" ;;
     arm64 | aarch64)         echo "arm64" ;;
     *)                       echo "unsupported" ;;
@@ -876,6 +887,44 @@ verify_tui_binary_version() {
     *"$want"*) ;;
     *)
       echo "error: built lingtai-tui reports '$output', expected '$want'" >&2
+      return 1
+      ;;
+  esac
+}
+
+# verify_tui_binary_arch refuses to install a binary whose file format does not
+# contain the physical host architecture. The installer deliberately fails
+# closed when file(1) is unavailable or returns an unrecognized description; a
+# version string alone cannot prove that a Rosetta build is safe to install.
+verify_tui_binary_arch() {
+  local binary="$1" expected="${2:-$(detect_arch)}" description
+  [[ -f "$binary" ]] || {
+    echo "error: TUI binary is missing for architecture verification: $binary" >&2
+    return 1
+  }
+  command -v file &>/dev/null || {
+    echo "error: file is required to verify the TUI binary architecture" >&2
+    return 1
+  }
+  description="$(file -b "$binary" 2>&1)" || {
+    echo "error: file could not inspect TUI binary $binary" >&2
+    return 1
+  }
+  case "$expected" in
+    arm64)
+      [[ "$description" == *"arm64"* || "$description" == *"aarch64"* ]] || {
+        echo "error: TUI binary architecture '$description' does not contain arm64" >&2
+        return 1
+      }
+      ;;
+    amd64)
+      [[ "$description" == *"x86_64"* || "$description" == *"x86-64"* ]] || {
+        echo "error: TUI binary architecture '$description' does not contain amd64" >&2
+        return 1
+      }
+      ;;
+    *)
+      echo "error: cannot verify TUI binary for unsupported architecture '$expected'" >&2
       return 1
       ;;
   esac
@@ -1963,7 +2012,13 @@ clone_tui_tag() {
 # archive when available; GitHub can use an exact peeled-tag checkout for
 # historical releases that predate the producer archive.
 build_from_source() {
-  local ref="$1" requested_tag source_tarball provider
+  local ref="$1" requested_tag source_tarball provider target_os target_arch
+  target_os="$(detect_os)"
+  target_arch="$(detect_arch)"
+  if [[ "$target_os" == "unsupported" || "$target_arch" == "unsupported" ]]; then
+    echo "error: source build is unsupported on $(uname -s)/$(uname -m)" >&2
+    return 1
+  fi
   requested_tag="$(release_tag_name "$ref")"
   mkdir -p "$(dirname "$BUILD_DIR")"
   rm -rf "$BUILD_DIR"
@@ -2011,13 +2066,15 @@ build_from_source() {
   INSTALL_KIND="source-build"
   ensure_go_for_source "$BUILD_DIR"
 
-  say "Building lingtai-tui ($VERSION) ..."
-  (cd "$BUILD_DIR/tui" && CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)
+  say "Building lingtai-tui ($VERSION) for $target_os/$target_arch ..."
+  (cd "$BUILD_DIR/tui" && GOOS="$target_os" GOARCH="$target_arch" CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)
+  verify_tui_binary_arch "$BUILD_DIR/lingtai-tui" "$target_arch" || return 1
 
   if [[ "$UPDATE_MODE" == "1" ]]; then
     local stage_bin="$BUILD_DIR/stage/bin"
     mkdir -p "$stage_bin"
     install -m 755 "$BUILD_DIR/lingtai-tui" "$stage_bin/lingtai-tui"
+    verify_tui_binary_arch "$stage_bin/lingtai-tui" "$target_arch" || return 1
     verify_tui_binary_version "$stage_bin/lingtai-tui" "$VERSION"
     say "Installing update to $BIN_DIR ..."
     install_binary_atomically "$stage_bin/lingtai-tui" "$BIN_DIR/lingtai-tui"
@@ -2026,6 +2083,7 @@ build_from_source() {
     install -m 755 "$BUILD_DIR/lingtai-tui" "$BIN_DIR/lingtai-tui"
   fi
   ensure_lingtai_alias "$BIN_DIR"
+  verify_tui_binary_arch "$BIN_DIR/lingtai-tui" "$target_arch" || return 1
   verify_tui_binary_version "$BIN_DIR/lingtai-tui" "$VERSION"
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -54,6 +55,11 @@ type TUIUpdateOptions struct {
 	// SourceInstallScript overrides the installer source for tests. Production
 	// uses the versioned raw GitHub install.sh URL.
 	SourceInstallScript string
+
+	// VerifyTUIArchitecture overrides the post-update architecture check for
+	// tests. Production verifies the installed file format against the physical
+	// host architecture before accepting the update.
+	VerifyTUIArchitecture func(string) error
 
 	// ConfirmHomebrewCleanup, when non-nil, is called by homebrewTUIUpdater.Upgrade
 	// exactly once a verified native install is confirmed (fresh migration or a
@@ -144,7 +150,8 @@ type ManualTUIUpdateOptions struct {
 	Executable func() (string, error)
 	LookupEnv  func(string) (string, bool)
 
-	SourceInstallScript string
+	SourceInstallScript   string
+	VerifyTUIArchitecture func(string) error
 }
 
 // RunManualTUIUpdate detects the current install method and runs the matching
@@ -202,12 +209,13 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 	}
 
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:       latestVersion,
-		GlobalDir:           globalDir,
-		Runner:              opts.Runner,
-		LookPath:            opts.LookPath,
-		Stat:                opts.Stat,
-		SourceInstallScript: opts.SourceInstallScript,
+		LatestVersion:         latestVersion,
+		GlobalDir:             globalDir,
+		Runner:                opts.Runner,
+		LookPath:              opts.LookPath,
+		Stat:                  opts.Stat,
+		SourceInstallScript:   opts.SourceInstallScript,
+		VerifyTUIArchitecture: opts.VerifyTUIArchitecture,
 	})
 	result.Lines = append(result.Lines, update.Lines...)
 	result.Updated = update.Updated
@@ -455,15 +463,7 @@ func installerScriptURL(override, version string) string {
 }
 
 func nativeMigrationInstallCommand(script, prefix, version string) (string, []string) {
-	script = installerScriptURL(script, version)
-	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
-	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
-		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
-		shellArgs := []string{"-c", shell, "lingtai-homebrew-migration", script}
-		shellArgs = append(shellArgs, args...)
-		return "bash", shellArgs
-	}
-	return "bash", append([]string{script}, args...)
+	return installerCommand(installerScriptURL(script, version), []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}, "lingtai-homebrew-migration")
 }
 
 type sourceTUIUpdater struct{}
@@ -479,6 +479,9 @@ func (sourceTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 	}
 	if opts.Stat == nil {
 		opts.Stat = os.Stat
+	}
+	if opts.VerifyTUIArchitecture == nil {
+		opts.VerifyTUIArchitecture = verifyTUIArchitecture
 	}
 	if opts.LatestVersion == "" {
 		result.Err = errors.New("latest TUI release is unknown")
@@ -545,6 +548,12 @@ func (sourceTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 		return result
 	}
 	result.add(DoctorInfo, "Updated TUI binary: %s", versionOut)
+	if err := opts.VerifyTUIArchitecture(target); err != nil {
+		result.Err = err
+		result.add(DoctorFail, "Updated lingtai-tui architecture verification failed: %v", err)
+		return result
+	}
+	result.add(DoctorOK, "Updated TUI binary architecture verified.")
 
 	postMeta, err := readTUIInstallMetadata(metadataPath)
 	if err != nil {
@@ -610,13 +619,93 @@ func tuiReleaseURL(version string) string {
 }
 
 func sourceInstallCommand(script, prefix, version string) (string, []string) {
-	script = installerScriptURL(script, version)
-	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
+	return installerCommand(installerScriptURL(script, version), []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}, "lingtai-source-update")
+}
+
+// physicalTUIArchitecture reports the architecture the installer must target,
+// not merely the architecture of a Go process that may be running under
+// Rosetta. macOS exposes the physical capability through sysctl; failure to
+// read it is an error for post-update verification rather than a guess.
+func physicalTUIArchitecture() (string, error) {
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("/usr/sbin/sysctl", "-in", "hw.optional.arm64").Output()
+		if err != nil {
+			return "", fmt.Errorf("read physical macOS architecture: %w", err)
+		}
+		switch strings.TrimSpace(string(out)) {
+		case "1":
+			return "arm64", nil
+		case "0":
+			if runtime.GOARCH == "amd64" {
+				return "amd64", nil
+			}
+			return "", fmt.Errorf("unsupported Intel macOS process architecture %s", runtime.GOARCH)
+		default:
+			return "", fmt.Errorf("unexpected hw.optional.arm64 value %q", strings.TrimSpace(string(out)))
+		}
+	}
+	switch runtime.GOARCH {
+	case "amd64":
+		return "amd64", nil
+	case "arm64":
+		return "arm64", nil
+	default:
+		return "", fmt.Errorf("unsupported process architecture %s", runtime.GOARCH)
+	}
+}
+
+func appleSiliconHost() bool {
+	arch, err := physicalTUIArchitecture()
+	return err == nil && arch == "arm64"
+}
+
+func installerCommand(script string, args []string, label string) (string, []string) {
+	native := appleSiliconHost()
 	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
-		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
-		shellArgs := []string{"-c", shell, "lingtai-source-update", script}
+		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | /bin/bash -s -- "$@"`
+		if native {
+			shellArgs := []string{"-arm64", "/bin/bash", "-c", shell, label, script}
+			shellArgs = append(shellArgs, args...)
+			return "/usr/bin/arch", shellArgs
+		}
+		shellArgs := []string{"-c", shell, label, script}
 		shellArgs = append(shellArgs, args...)
 		return "bash", shellArgs
 	}
+	if native {
+		return "/usr/bin/arch", append([]string{"-arm64", "/bin/bash", script}, args...)
+	}
 	return "bash", append([]string{script}, args...)
+}
+
+func fileDescriptionHasTUIArchitecture(description, expected string) bool {
+	description = strings.ToLower(description)
+	switch expected {
+	case "arm64":
+		return strings.Contains(description, "arm64") || strings.Contains(description, "aarch64")
+	case "amd64":
+		return strings.Contains(description, "x86_64") || strings.Contains(description, "x86-64")
+	default:
+		return false
+	}
+}
+
+func verifyTUIArchitecture(binary string) error {
+	expected, err := physicalTUIArchitecture()
+	if err != nil {
+		return err
+	}
+	filePath, err := exec.LookPath("file")
+	if err != nil {
+		return fmt.Errorf("locate file(1) for TUI architecture verification: %w", err)
+	}
+	out, err := exec.Command(filePath, "-b", binary).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("inspect %s architecture: %w (%s)", binary, err, strings.TrimSpace(string(out)))
+	}
+	description := strings.TrimSpace(string(out))
+	if !fileDescriptionHasTUIArchitecture(description, expected) {
+		return fmt.Errorf("binary %s has file description %q, expected %s", binary, description, expected)
+	}
+	return nil
 }
