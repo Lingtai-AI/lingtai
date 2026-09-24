@@ -486,7 +486,7 @@ func TestRuntimeRepairRemovesIncompleteFreshVenv(t *testing.T) {
 	}
 }
 
-func TestRuntimeRepairKeepsPreviousVenvAfterSuccess(t *testing.T) {
+func TestRuntimeRepairRemovesBackupAfterSuccess(t *testing.T) {
 	venv := filepath.Join(t.TempDir(), "runtime", "venv")
 	if err := os.MkdirAll(venv, 0o755); err != nil {
 		t.Fatal(err)
@@ -505,8 +505,8 @@ func TestRuntimeRepairKeepsPreviousVenvAfterSuccess(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(venv, "new-runtime")); err != nil {
 		t.Fatalf("replacement missing: %v", err)
 	}
-	backups, err := filepath.Glob(filepath.Join(filepath.Dir(venv), "backups", "venv-pre-repair-*", "venv", "previous-data"))
-	if err != nil || len(backups) != 1 {
-		t.Fatalf("previous venv backup missing: %v, %v", backups, err)
+	backups, err := filepath.Glob(filepath.Join(filepath.Dir(venv), "backups", "venv-pre-repair-*"))
+	if err != nil || len(backups) != 0 {
+		t.Fatalf("repair backup was not removed: %v, %v", backups, err)
 	}
 }

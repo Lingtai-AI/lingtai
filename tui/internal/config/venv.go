@@ -275,7 +275,8 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		if err := verify.Run(); err != nil {
 			return fmt.Errorf("lingtai installed but import failed — check for missing dependencies: %w", err)
 		}
-		return writeRuntimeEnvMarker(venvPath, nil)
+		_ = writeRuntimeEnvMarker(venvPath, nil)
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -288,7 +289,7 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 
 // withRuntimeVenvRollback builds at the final venv path because Python console
 // scripts embed that path. A failed build restores the previous directory and
-// removes the partial replacement; successful repairs retain the backup.
+// removes the partial replacement; successful repairs remove the backup.
 func withRuntimeVenvRollback(venvPath string, build func() error) (resultErr error) {
 	backupPath := ""
 	if info, err := os.Lstat(venvPath); err == nil {
@@ -313,6 +314,11 @@ func withRuntimeVenvRollback(venvPath string, build func() error) (resultErr err
 	}
 	defer func() {
 		if resultErr == nil {
+			if backupPath != "" {
+				if err := os.RemoveAll(filepath.Dir(backupPath)); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not remove runtime repair backup %s: %v\n", backupPath, err)
+				}
+			}
 			return
 		}
 		if err := os.RemoveAll(venvPath); err != nil {
