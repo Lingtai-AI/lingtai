@@ -75,6 +75,8 @@ event and not a surprise.
 |---|---|---|
 | Agents exist | `<project>/.lingtai/<agent>/init.json` | zero agents → real first-run setup |
 | Runtime/kernel | installed kernel + venv | readiness check; bootstrap gated on human consent |
+
+A consented runtime rebuild preserves the previous venv until the replacement passes interpreter, import, and marker checks. On failure, it restores the previous venv and removes the incomplete replacement.
 | Agent env | `<project>/.lingtai/<agent>/init.json` env_file | defines where agents load `.env` |
 
 ### R2 · Derived from the agent source of truth (.env)

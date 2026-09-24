@@ -149,7 +149,7 @@ func TestReleaseProvenanceRemainsIndependentlyUpgradeable(t *testing.T) {
 	}
 	var upgrades int
 	for _, call := range runner.calls {
-		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".whl#sha256=") {
+		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".tar.gz#sha256=") {
 			upgrades++
 		}
 	}
