@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 func mailPollRefreshFromCmd(t *testing.T, cmd tea.Cmd) mailRefreshMsg {
@@ -153,9 +155,161 @@ func TestMailInitialCompletionCannotReleaseNewerPeriodicLane(t *testing.T) {
 		t.Fatalf("older initial completion released newer lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
 	}
 
-	m, _ = m.Update(periodic())
+	var catchup tea.Cmd
+	m, catchup = m.Update(periodic())
+	if catchup == nil || !m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 3 {
+		t.Fatalf("owning periodic completion did not launch the coalesced post-initial catch-up: cmd:%v inFlight:%v owner:%d", catchup != nil, m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+	}
+	m, _ = m.Update(mailPollRefreshFromCmd(t, catchup))
 	if m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 0 {
-		t.Fatalf("owning periodic completion did not release lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+		t.Fatalf("post-initial catch-up did not release lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
+	}
+}
+
+func TestMailPeriodicFirstInitialSessionStillLaunchesCatchup(t *testing.T) {
+	const (
+		initialBody  = "present in initial serial 1"
+		periodicBody = "present in periodic serial 2"
+		lateBody     = "published after periodic serial 2 scan"
+	)
+
+	root := t.TempDir()
+	humanDir := filepath.Join(root, "human")
+	orchDir := filepath.Join(root, "agent")
+	writeMailboxProjectionMessage(t, humanDir, "inbox", "20260911T110000-0001", fs.MailMessage{
+		From:       "agent",
+		To:         []string{"human"},
+		Message:    initialBody,
+		ReceivedAt: "2026-09-11T11:00:00Z",
+	})
+
+	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 200, "", "en", false, 0)
+	initialSnapshotReady := make(chan struct{})
+	releaseInitial := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releaseInitial)
+		}
+	}()
+	m.afterInitialMailRefresh = func() {
+		close(initialSnapshotReady)
+		<-releaseInitial
+	}
+	initialCmd := m.initialRebuild
+	type initialResult struct {
+		msg mailRefreshMsg
+		ok  bool
+	}
+	initialResults := make(chan initialResult, 1)
+	go func() {
+		msg, ok := initialCmd().(mailRefreshMsg)
+		initialResults <- initialResult{msg: msg, ok: ok}
+	}()
+
+	select {
+	case <-initialSnapshotReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial serial 1 did not reach its post-mailbox-snapshot hold")
+	}
+
+	// Advance the mailbox after serial 1's snapshot, then prepare and accept
+	// periodic serial 2 while the initial session reconstruction remains held.
+	writeMailboxProjectionMessage(t, humanDir, "inbox", "20260911T110001-0002", fs.MailMessage{
+		From:       "agent",
+		To:         []string{"human"},
+		Message:    periodicBody,
+		ReceivedAt: "2026-09-11T11:00:01Z",
+	})
+	var periodicCmd tea.Cmd
+	m, periodicCmd = m.issueRefreshRequest()
+	periodic := mailPollRefreshFromCmd(t, periodicCmd)
+	if periodic.refreshRequestSerial != 2 || !periodic.prepared {
+		t.Fatalf("periodic completion = prepared:%v serial:%d, want prepared serial 2", periodic.prepared, periodic.refreshRequestSerial)
+	}
+	m, _ = m.Update(periodic)
+	if m.acceptedRefreshRequestSerial != periodic.refreshRequestSerial || !m.initialLoading {
+		t.Fatalf("periodic-first acceptance = watermark:%d loading:%v, want 2/true", m.acceptedRefreshRequestSerial, m.initialLoading)
+	}
+	acceptedPeriodicPublication := m.directPublication
+
+	// This mail is newer than serial 2's completed scan. Only the immediate
+	// post-initial ordinary catch-up can observe it in this deterministic trace.
+	writeMailboxProjectionMessage(t, humanDir, "inbox", "20260911T110002-0003", fs.MailMessage{
+		From:       "agent",
+		To:         []string{"human"},
+		Message:    lateBody,
+		ReceivedAt: "2026-09-11T11:00:02Z",
+	})
+	close(releaseInitial)
+	released = true
+
+	var initial mailRefreshMsg
+	select {
+	case result := <-initialResults:
+		if !result.ok {
+			t.Fatal("initialRebuild did not return mailRefreshMsg")
+		}
+		initial = result.msg
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial serial 1 did not complete after release")
+	}
+	if initial.refreshRequestSerial != 1 || !initial.initial || initial.sessionCache == nil {
+		t.Fatalf("initial completion = serial:%d initial:%v session:%v, want serial 1 current initial session", initial.refreshRequestSerial, initial.initial, initial.sessionCache != nil)
+	}
+
+	m, catchupCmd := m.Update(initial)
+	if m.initialLoading || m.sessionCache != initial.sessionCache {
+		t.Fatalf("stale-serial initial session transition = loading:%v installed:%v, want false/true", m.initialLoading, m.sessionCache == initial.sessionCache)
+	}
+	if m.acceptedRefreshRequestSerial != periodic.refreshRequestSerial {
+		t.Fatalf("stale initial advanced accepted watermark to %d, want %d", m.acceptedRefreshRequestSerial, periodic.refreshRequestSerial)
+	}
+	if m.directPublication != acceptedPeriodicPublication || m.directPublication == initial.directPublication {
+		t.Fatal("stale serial-1 direct payload replaced the accepted serial-2 publication")
+	}
+	cacheCount := func(body string) int {
+		count := 0
+		for _, msg := range m.cache.Messages {
+			if msg.Message == body {
+				count++
+			}
+		}
+		return count
+	}
+	if gotInitial, gotPeriodic, gotLate := cacheCount(initialBody), cacheCount(periodicBody), cacheCount(lateBody); gotInitial != 1 || gotPeriodic != 1 || gotLate != 0 {
+		t.Fatalf("cache after stale initial = initial:%d periodic:%d late:%d, want 1/1/0", gotInitial, gotPeriodic, gotLate)
+	}
+
+	catchup := mailPollRefreshFromCmd(t, catchupCmd)
+	if !catchup.prepared || catchup.refreshRequestSerial <= periodic.refreshRequestSerial {
+		t.Fatalf("post-initial catch-up = prepared:%v serial:%d, want newer than periodic %d", catchup.prepared, catchup.refreshRequestSerial, periodic.refreshRequestSerial)
+	}
+	lateInCatchup := 0
+	for _, msg := range catchup.cache.Messages {
+		if msg.Message == lateBody {
+			lateInCatchup++
+		}
+	}
+	if lateInCatchup != 1 {
+		t.Fatalf("newer catch-up contains late mail %d times, want exactly once", lateInCatchup)
+	}
+
+	m, _ = m.Update(catchup)
+	messageCount := func(body string) int {
+		count := 0
+		for _, msg := range m.messages {
+			if msg.Type == "mail" && msg.Body == body {
+				count++
+			}
+		}
+		return count
+	}
+	if gotInitial, gotPeriodic, gotLate := messageCount(initialBody), messageCount(periodicBody), messageCount(lateBody); gotInitial != 1 || gotPeriodic != 1 || gotLate != 1 {
+		t.Fatalf("final projection = initial:%d periodic:%d late:%d, want each exactly once", gotInitial, gotPeriodic, gotLate)
+	}
+	if m.mailRefreshInFlight || m.mailRefreshInFlightSerial != 0 {
+		t.Fatalf("catch-up did not release its lane: inFlight:%v owner:%d", m.mailRefreshInFlight, m.mailRefreshInFlightSerial)
 	}
 }
 

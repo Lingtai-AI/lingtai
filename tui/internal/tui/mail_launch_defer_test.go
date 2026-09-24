@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // TestNewMailModelDefersSessionRebuild guards the launch-performance contract:
@@ -94,4 +95,71 @@ func TestMailInitIncludesRebuildCmd(t *testing.T) {
 		t.Fatal("MailModel.Init returned nil cmd; expected at least the rebuild + refresh batch")
 	}
 	_ = tea.Batch // keep the bubbletea import meaningful even if Batch isn't referenced directly
+}
+
+func TestInitialRebuildReusesMailboxSnapshotThenCatchesUp(t *testing.T) {
+	root := t.TempDir()
+	humanDir := filepath.Join(root, "human")
+	orchDir := filepath.Join(root, "agent")
+	writeMailboxProjectionMessage(t, humanDir, "inbox", "20260911T100000-0001", fs.MailMessage{
+		From:       "agent",
+		To:         []string{"human"},
+		Message:    "present at initial snapshot",
+		ReceivedAt: "2026-09-11T10:00:00Z",
+	})
+
+	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 200, "", "en", false, 0)
+	m.afterInitialMailRefresh = func() {
+		writeMailboxProjectionMessage(t, humanDir, "inbox", "20260911T100001-0002", fs.MailMessage{
+			From:       "agent",
+			To:         []string{"human"},
+			Message:    "arrived during session rebuild",
+			ReceivedAt: "2026-09-11T10:00:01Z",
+		})
+	}
+
+	prepared, ok := m.initialRebuild().(mailRefreshMsg)
+	if !ok {
+		t.Fatal("initialRebuild did not return mailRefreshMsg")
+	}
+	for _, msg := range prepared.cache.Messages {
+		if msg.Message == "arrived during session rebuild" {
+			t.Fatal("initial rebuild enumerated the mailbox again instead of reusing its first snapshot")
+		}
+	}
+
+	m, cmd := m.Update(prepared)
+	if m.initialLoading {
+		t.Fatal("accepted initial snapshot did not clear loading")
+	}
+	initialCount, lateCount := 0, 0
+	for _, msg := range m.messages {
+		switch msg.Body {
+		case "present at initial snapshot":
+			initialCount++
+		case "arrived during session rebuild":
+			lateCount++
+		}
+	}
+	if initialCount != 1 || lateCount != 0 {
+		t.Fatalf("initial projection counts = initial:%d late:%d, want 1/0", initialCount, lateCount)
+	}
+
+	catchup := mailPollRefreshFromCmd(t, cmd)
+	if catchup.refreshRequestSerial <= prepared.refreshRequestSerial || !catchup.prepared {
+		t.Fatalf("post-initial catch-up = prepared:%v serial:%d, initial serial:%d", catchup.prepared, catchup.refreshRequestSerial, prepared.refreshRequestSerial)
+	}
+	m, _ = m.Update(catchup)
+	initialCount, lateCount = 0, 0
+	for _, msg := range m.messages {
+		switch msg.Body {
+		case "present at initial snapshot":
+			initialCount++
+		case "arrived during session rebuild":
+			lateCount++
+		}
+	}
+	if initialCount != 1 || lateCount != 1 {
+		t.Fatalf("catch-up projection counts = initial:%d late:%d, want 1/1", initialCount, lateCount)
+	}
 }
