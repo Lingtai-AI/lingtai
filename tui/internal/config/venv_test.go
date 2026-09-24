@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -116,86 +115,6 @@ func TestRuntimeEnvMarkerDetectsDelegatedMismatch(t *testing.T) {
 	}
 	if state != runtimeEnvMarkerMismatch {
 		t.Fatalf("state = %s, want %s", state, runtimeEnvMarkerMismatch)
-	}
-}
-
-func TestRuntimeEnvMarkerMismatchRemovesManagedVenv(t *testing.T) {
-	venvPath := filepath.Join(t.TempDir(), "venv")
-	mkdirTestVenv(t, venvPath)
-	if err := os.WriteFile(filepath.Join(venvPath, "sentinel"), []byte("stale"), 0o644); err != nil {
-		t.Fatalf("write sentinel: %v", err)
-	}
-	runner := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Stdout: `{"status":"mismatch"}` + "\n"}
-	})
-
-	if err := removeRuntimeVenvIfEnvMismatch(venvPath, runner); err != nil {
-		t.Fatalf("remove mismatched venv: %v", err)
-	}
-	if _, err := os.Stat(venvPath); !os.IsNotExist(err) {
-		t.Fatalf("mismatched managed venv should be removed, stat err=%v", err)
-	}
-}
-
-func TestRuntimeEnvMarkerLocalPlatformMismatchRemovesManagedVenvWhenPythonCannotRun(t *testing.T) {
-	venvPath := filepath.Join(t.TempDir(), "venv")
-	mkdirTestVenv(t, venvPath)
-	if err := os.WriteFile(filepath.Join(venvPath, "sentinel"), []byte("stale"), 0o644); err != nil {
-		t.Fatalf("write sentinel: %v", err)
-	}
-	markerOS := "windows"
-	if runtime.GOOS == markerOS {
-		markerOS = "darwin"
-	}
-	marker := `{"schema":"lingtai.runtime-env","schema_version":1,"lingtai_env_version":1,"os":"` + markerOS + `","arch":"` + runtime.GOARCH + `","python":{}}` + "\n"
-	if err := os.WriteFile(filepath.Join(venvPath, runtimeEnvMarkerFileName), []byte(marker), 0o644); err != nil {
-		t.Fatalf("write marker: %v", err)
-	}
-	runner := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Err: errors.New("exec format error"), Stderr: "cannot execute"}
-	})
-
-	if err := removeRuntimeVenvIfEnvMismatch(venvPath, runner); err != nil {
-		t.Fatalf("remove platform-mismatched venv: %v", err)
-	}
-	if _, err := os.Stat(venvPath); !os.IsNotExist(err) {
-		t.Fatalf("platform-mismatched managed venv should be removed, stat err=%v", err)
-	}
-}
-
-func TestRuntimeEnvMarkerCheckFailureDoesNotRemoveManagedVenv(t *testing.T) {
-	venvPath := filepath.Join(t.TempDir(), "venv")
-	mkdirTestVenv(t, venvPath)
-	if err := os.WriteFile(filepath.Join(venvPath, "sentinel"), []byte("keep"), 0o644); err != nil {
-		t.Fatalf("write sentinel: %v", err)
-	}
-	runner := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Err: errors.New("timeout"), Stderr: "timed out"}
-	})
-
-	if err := removeRuntimeVenvIfEnvMismatch(venvPath, runner); err != nil {
-		t.Fatalf("checker failure should not surface as delete error: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(venvPath, "sentinel")); err != nil {
-		t.Fatalf("checker failure must leave managed venv intact: %v", err)
-	}
-}
-
-func TestRuntimeEnvMarkerInvalidOutputDoesNotRemoveManagedVenv(t *testing.T) {
-	venvPath := filepath.Join(t.TempDir(), "venv")
-	mkdirTestVenv(t, venvPath)
-	if err := os.WriteFile(filepath.Join(venvPath, "sentinel"), []byte("keep"), 0o644); err != nil {
-		t.Fatalf("write sentinel: %v", err)
-	}
-	runner := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Stdout: "not-json\n"}
-	})
-
-	if err := removeRuntimeVenvIfEnvMismatch(venvPath, runner); err != nil {
-		t.Fatalf("invalid checker output should not surface as delete error: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(venvPath, "sentinel")); err != nil {
-		t.Fatalf("invalid checker output must leave managed venv intact: %v", err)
 	}
 }
 
@@ -326,7 +245,7 @@ func TestInspectKernelDevCheckoutNeedsNoUpdate(t *testing.T) {
 
 func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	// Non-editable, out-of-date install: RunKernelUpdate runs exactly one
-	// uv/pip install --upgrade <release wheel URL> (the kernel path) and no brew.
+	// uv/pip install --upgrade <release source URL> (the kernel path) and no brew.
 	// Version probes consumed in order: pre-check import (repair gate),
 	// UpgradePythonRuntime's installed read, then the post-upgrade verify.
 	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.6", "0.9.7"}}
@@ -344,7 +263,7 @@ func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	}
 	upgrades := 0
 	for _, call := range runner.calls {
-		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".whl#sha256=") {
+		if strings.Contains(call, "releases/download/") && strings.Contains(call, ".tar.gz#sha256=") {
 			upgrades++
 		}
 		if strings.Contains(call, "install --upgrade lingtai") {
@@ -516,5 +435,78 @@ func TestRunKernelUpdateTouchesOnlyKernel(t *testing.T) {
 		if strings.Contains(call, "file_io_sidecar") {
 			t.Fatalf("RunKernelUpdate must not probe the file-search sidecar: %#v", runner.calls)
 		}
+	}
+}
+
+func TestRuntimeRepairRestoresPreviousVenvOnFailure(t *testing.T) {
+	venv := filepath.Join(t.TempDir(), "runtime", "venv")
+	if err := os.MkdirAll(venv, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(venv, "previous-data")
+	if err := os.WriteFile(marker, []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := withRuntimeVenvRollback(venv, func() error {
+		if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("old venv should be out of the build path: %v", err)
+		}
+		if err := os.MkdirAll(venv, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(venv, "partial-install"), []byte("bad"), 0o600); err != nil {
+			return err
+		}
+		return errInjectedRebuild
+	})
+	if !errors.Is(err, errInjectedRebuild) {
+		t.Fatalf("repair error = %v", err)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "kept" {
+		t.Fatalf("previous venv was not restored: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(venv, "partial-install")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial install survived: %v", err)
+	}
+}
+
+func TestRuntimeRepairRemovesIncompleteFreshVenv(t *testing.T) {
+	venv := filepath.Join(t.TempDir(), "runtime", "venv")
+	err := withRuntimeVenvRollback(venv, func() error {
+		if err := os.MkdirAll(venv, 0o755); err != nil {
+			return err
+		}
+		return errInjectedRebuild
+	})
+	if !errors.Is(err, errInjectedRebuild) {
+		t.Fatalf("repair error = %v", err)
+	}
+	if _, err := os.Stat(venv); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("incomplete fresh venv survived: %v", err)
+	}
+}
+
+func TestRuntimeRepairRemovesBackupAfterSuccess(t *testing.T) {
+	venv := filepath.Join(t.TempDir(), "runtime", "venv")
+	if err := os.MkdirAll(venv, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(venv, "previous-data"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := withRuntimeVenvRollback(venv, func() error {
+		if err := os.MkdirAll(venv, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(venv, "new-runtime"), []byte("ready"), 0o600)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(venv, "new-runtime")); err != nil {
+		t.Fatalf("replacement missing: %v", err)
+	}
+	backups, err := filepath.Glob(filepath.Join(filepath.Dir(venv), "backups", "venv-pre-repair-*"))
+	if err != nil || len(backups) != 0 {
+		t.Fatalf("repair backup was not removed: %v, %v", backups, err)
 	}
 }

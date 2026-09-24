@@ -23,6 +23,7 @@ related_files:
   - scripts/sync_gitee_mirror.sh
   - scripts/test-install-ps1.ps1
   - scripts/test-install-sh-hardening.sh
+  - scripts/test-install-sh-architecture.sh
   - scripts/test-install-sh-desktop.sh
   - tui/main.go
   - tui/go.mod

@@ -65,7 +65,7 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 		return CommandResult{Stdout: `{"implementation":"CPython","machine":"arm64","sys_platform":"darwin","sysconfig_platform":"macosx-14.0-arm64","version":"3.13.5","version_major":3,"version_minor":13,"version_micro":5}` + "\n"}
 	}
 	if strings.Contains(call, "sys.version_info[0]") {
-		// venvPythonTag probe: which CPython wheel tag the managed venv needs.
+		// Managed Python version probe.
 		tag := r.pythonTag
 		if tag == "" {
 			tag = "cp313"

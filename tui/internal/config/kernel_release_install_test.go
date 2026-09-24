@@ -90,14 +90,14 @@ func mustFetchFixtureManifest(t *testing.T, version string) *kernelReleaseManife
 	return manifest
 }
 
-// assertReleaseWheelInstall is the core contract of this change: the install
-// command names a pinned, checksum-verified release wheel URL and never asks
+// assertReleaseSourceInstall is the core contract of this change: the install
+// command names a pinned, checksum-verified release source URL and never asks
 // an index for the package called "lingtai".
-func assertReleaseWheelInstall(t *testing.T, name string, args []string) {
+func assertReleaseSourceInstall(t *testing.T, name string, args []string) {
 	t.Helper()
 	call := name + " " + strings.Join(args, " ")
-	if !strings.Contains(call, "releases/download/") || !strings.Contains(call, ".whl#sha256=") {
-		t.Fatalf("install command must install the pinned release wheel, got %q", call)
+	if !strings.Contains(call, "releases/download/") || !strings.Contains(call, ".tar.gz#sha256=") {
+		t.Fatalf("install command must install the pinned release source, got %q", call)
 	}
 	for _, arg := range args {
 		if arg == "lingtai" {
@@ -149,102 +149,27 @@ func TestFetchKernelReleaseManifestRejectsUnknownSchema(t *testing.T) {
 	}
 }
 
-func TestSelectKernelWheelMatchesPythonAndPlatform(t *testing.T) {
+func TestKernelSourceArtifactRequiresMatchingNameAndChecksum(t *testing.T) {
 	manifest := mustFetchFixtureManifest(t, "1.0.1")
-	cases := []struct {
-		python string
-		goos   string
-		goarch string
-		want   string
-	}{
-		{"cp311", "darwin", "arm64", "lingtai-1.0.1-cp311-cp311-macosx_11_0_arm64.whl"},
-		{"cp312", "darwin", "arm64", "lingtai-1.0.1-cp312-cp312-macosx_11_0_arm64.whl"},
-		{"cp313", "darwin", "arm64", "lingtai-1.0.1-cp313-cp313-macosx_11_0_arm64.whl"},
-		{"cp311", "darwin", "amd64", "lingtai-1.0.1-cp311-cp311-macosx_10_13_x86_64.whl"},
-		{"cp313", "darwin", "amd64", "lingtai-1.0.1-cp313-cp313-macosx_10_13_x86_64.whl"},
-		{"cp311", "linux", "amd64", "lingtai-1.0.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"},
-		{"cp313", "linux", "amd64", "lingtai-1.0.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"},
-		{"cp312", "linux", "arm64", "lingtai-1.0.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"},
-		{"cp313", "windows", "amd64", "lingtai-1.0.1-cp313-cp313-win_amd64.whl"},
-		// The bare version form resolves to the same wheel as the cp form.
-		{"3.13", "linux", "amd64", "lingtai-1.0.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"},
+	artifact, err := kernelSourceArtifact(manifest)
+	if err != nil || artifact.Filename != "lingtai-1.0.1.tar.gz" {
+		t.Fatalf("source artifact = %+v, %v", artifact, err)
 	}
-	for _, tc := range cases {
-		artifact, err := selectKernelWheel(manifest, tc.python, tc.goos, tc.goarch)
-		if err != nil {
-			t.Fatalf("selectKernelWheel(%s, %s/%s): %v", tc.python, tc.goos, tc.goarch, err)
-		}
-		if artifact.Filename != tc.want {
-			t.Fatalf("selectKernelWheel(%s, %s/%s) = %q, want %q", tc.python, tc.goos, tc.goarch, artifact.Filename, tc.want)
-		}
-		if artifact.SHA256 == "" {
-			t.Fatalf("selected wheel %q has no sha256", artifact.Filename)
-		}
+	manifest.Artifacts[len(manifest.Artifacts)-1].SHA256 = "not-a-digest"
+	if _, err := kernelSourceArtifact(manifest); err == nil {
+		t.Fatal("malformed source checksum must fail")
 	}
 }
 
-func TestSelectKernelWheelErrorsWithoutAMatch(t *testing.T) {
-	manifest := mustFetchFixtureManifest(t, "1.0.1")
-	cases := []struct {
-		name   string
-		python string
-		goos   string
-		goarch string
-	}{
-		{"unpublished python", "cp310", "linux", "amd64"},
-		{"unpublished platform", "cp313", "windows", "arm64"},
-		{"unknown platform", "cp313", "plan9", "mips"},
-		{"missing python tag", "", "linux", "amd64"},
-	}
-	for _, tc := range cases {
-		if artifact, err := selectKernelWheel(manifest, tc.python, tc.goos, tc.goarch); err == nil {
-			t.Fatalf("%s: expected an error, got %q", tc.name, artifact.Filename)
-		}
-	}
-}
-
-func TestVenvPythonTagReadsTheManagedInterpreter(t *testing.T) {
-	var probed string
-	runner := commandRunnerFunc(func(name string, args ...string) CommandResult {
-		probed = name + " " + strings.Join(args, " ")
-		return CommandResult{Stdout: "cp313\n"}
-	})
-	tag, err := venvPythonTag(runner, "/venv/bin/python")
-	if err != nil {
-		t.Fatalf("venvPythonTag: %v", err)
-	}
-	if tag != "cp313" {
-		t.Fatalf("tag = %q, want cp313", tag)
-	}
-	if !strings.Contains(probed, "/venv/bin/python") || !strings.Contains(probed, "sys.version_info") {
-		t.Fatalf("probe should ask the managed interpreter, got %q", probed)
-	}
-}
-
-func TestVenvPythonTagRejectsUnusableOutput(t *testing.T) {
-	failing := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Err: errors.New("exit status 1"), Stderr: "no such file"}
-	})
-	if _, err := venvPythonTag(failing, "/venv/bin/python"); err == nil {
-		t.Fatal("expected an error when the probe fails")
-	}
-	garbage := commandRunnerFunc(func(string, ...string) CommandResult {
-		return CommandResult{Stdout: "ok\n"}
-	})
-	if _, err := venvPythonTag(garbage, "/venv/bin/python"); err == nil {
-		t.Fatal("expected an error for a non cp<major><minor> tag")
-	}
-}
-
-func TestKernelWheelInstallURLPinsTagAndChecksum(t *testing.T) {
-	url := kernelWheelInstallURL("v1.0.1", kernelReleaseArtifact{Filename: "lingtai-1.0.1-cp313-cp313-win_amd64.whl", SHA256: "abc123"})
-	want := "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/lingtai-1.0.1-cp313-cp313-win_amd64.whl#sha256=abc123"
+func TestKernelReleaseArtifactURLPinsTagAndChecksum(t *testing.T) {
+	url := kernelReleaseArtifactURL("v1.0.1", kernelReleaseArtifact{Filename: "lingtai-1.0.1.tar.gz", SHA256: "abc123"})
+	want := "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/lingtai-1.0.1.tar.gz#sha256=abc123"
 	if url != want {
 		t.Fatalf("url = %q, want %q", url, want)
 	}
 }
 
-func TestKernelInstallCommandUsesReleaseWheelWithUV(t *testing.T) {
+func TestKernelInstallCommandUsesReleaseSourceWithUV(t *testing.T) {
 	globalDir := t.TempDir()
 	python := VenvPython(RuntimeVenvDir(globalDir))
 	client, _ := manifestClient(kernelReleaseManifestFixture("1.0.1"))
@@ -257,10 +182,10 @@ func TestKernelInstallCommandUsesReleaseWheelWithUV(t *testing.T) {
 	if name != "/usr/bin/uv" {
 		t.Fatalf("name = %q, want the uv binary", name)
 	}
-	assertReleaseWheelInstall(t, name, args)
+	assertReleaseSourceInstall(t, name, args)
 	call := name + " " + strings.Join(args, " ")
-	if !strings.Contains(call, "pip install https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/lingtai-1.0.1-cp313-") {
-		t.Fatalf("uv install must pin the v1.0.1 cp313 wheel URL, got %q", call)
+	if !strings.Contains(call, "pip install https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/lingtai-1.0.1.tar.gz#sha256=") {
+		t.Fatalf("uv install must pin the v1.0.1 source archive URL, got %q", call)
 	}
 	if !strings.Contains(call, "-p "+RuntimeVenvDir(globalDir)) {
 		t.Fatalf("uv install must target the managed venv, got %q", call)
@@ -270,7 +195,7 @@ func TestKernelInstallCommandUsesReleaseWheelWithUV(t *testing.T) {
 	}
 }
 
-func TestKernelInstallCommandUsesReleaseWheelWithPip(t *testing.T) {
+func TestKernelInstallCommandUsesReleaseSourceWithPip(t *testing.T) {
 	globalDir := t.TempDir()
 	python := VenvPython(RuntimeVenvDir(globalDir))
 	client, _ := manifestClient(kernelReleaseManifestFixture("1.0.1"))
@@ -290,7 +215,7 @@ func TestKernelInstallCommandUsesReleaseWheelWithPip(t *testing.T) {
 	if args[0] != "install" {
 		t.Fatalf("first pip arg = %q, want install", args[0])
 	}
-	assertReleaseWheelInstall(t, name, args)
+	assertReleaseSourceInstall(t, name, args)
 }
 
 func TestKernelInstallCommandFailsInsteadOfFallingBackToPyPI(t *testing.T) {
@@ -311,19 +236,38 @@ func TestKernelInstallCommandFailsInsteadOfFallingBackToPyPI(t *testing.T) {
 	}
 }
 
-func TestKernelInstallCommandFailsWhenNoWheelMatchesThisPython(t *testing.T) {
+func TestKernelInstallCommandFailsWhenNoVerifiedSourceExists(t *testing.T) {
 	globalDir := t.TempDir()
 	python := VenvPython(RuntimeVenvDir(globalDir))
-	client, _ := manifestClient(kernelReleaseManifestFixture("1.0.1"))
+	manifest := strings.Replace(kernelReleaseManifestFixture("1.0.1"), `"sdist_fallback": "lingtai-1.0.1.tar.gz"`, `"sdist_fallback": ""`, 1)
+	client, _ := manifestClient(manifest)
 	_, _, err := kernelInstallCommand(globalDir, python,
 		func(string) (string, error) { return "/usr/bin/uv", nil },
 		&fakeRunner{pythonTag: "cp399"}, client, false)
-	if err == nil || !strings.Contains(err.Error(), "cp399") {
-		t.Fatalf("expected a no-matching-wheel error naming cp399, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "source archive") {
+		t.Fatalf("expected a missing source archive error, got %v", err)
 	}
 }
 
-func TestEnsureVenvInstallCommandNonDevInstallsReleaseWheel(t *testing.T) {
+func TestKernelInstallCommandAcceptsV108GenericWheelRelease(t *testing.T) {
+	// v1.0.8 publishes py3-any and the verified source archive, but no cp313
+	// macOS wheel. This is the release that left doctor unable to repair.
+	manifest := `{"schema":"lingtai.kernel.release/v1","kernel_version":"1.0.8","kernel_tag":"v1.0.8","sdist_fallback":"lingtai-1.0.8.tar.gz","artifacts":[{"filename":"lingtai-1.0.8-py3-none-any.whl","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","kind":"wheel","python_tag":"py3","abi_tag":"none","platform_tag":"any"},{"filename":"lingtai-1.0.8.tar.gz","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}]}`
+	client, _ := manifestClient(manifest)
+	globalDir := t.TempDir()
+	name, args, err := kernelInstallCommand(globalDir, VenvPython(RuntimeVenvDir(globalDir)),
+		func(string) (string, error) { return "/usr/bin/uv", nil },
+		&fakeRunner{pythonTag: "cp313"}, client, true)
+	if err != nil {
+		t.Fatalf("generic-wheel release must be repairable: %v", err)
+	}
+	assertReleaseSourceInstall(t, name, args)
+	if !strings.Contains(strings.Join(args, " "), "lingtai-1.0.8.tar.gz#sha256=bbbb") {
+		t.Fatalf("doctor must select the verified source archive: %v", args)
+	}
+}
+
+func TestEnsureVenvInstallCommandNonDevInstallsReleaseSource(t *testing.T) {
 	globalDir := t.TempDir()
 	venvPython := VenvPython(RuntimeVenvDir(globalDir))
 	home, env := noDevHome(t)
@@ -333,7 +277,7 @@ func TestEnsureVenvInstallCommandNonDevInstallsReleaseWheel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureVenvInstallCommand: %v", err)
 	}
-	assertReleaseWheelInstall(t, name, args)
+	assertReleaseSourceInstall(t, name, args)
 }
 
 func TestEnsureVenvInstallCommandKeepsDevCheckoutEditable(t *testing.T) {
@@ -342,7 +286,7 @@ func TestEnsureVenvInstallCommandKeepsDevCheckoutEditable(t *testing.T) {
 	home := t.TempDir()
 	devRoot := filepath.Join(home, "devroot")
 	kernel := makeKernelCheckout(t, home, "devroot")
-	// A dev checkout must never reach the release-wheel path at all: the
+	// A dev checkout must never reach the release-source path at all: the
 	// manifest client here would fail the test if it were consulted.
 	client := &http.Client{Transport: &kernelManifestRoundTripper{err: errors.New("dev checkout must not fetch the release manifest")}}
 
@@ -356,11 +300,11 @@ func TestEnsureVenvInstallCommandKeepsDevCheckoutEditable(t *testing.T) {
 		t.Fatalf("dev checkout must install editable, got %q", call)
 	}
 	if strings.Contains(call, "releases/download/") {
-		t.Fatalf("dev checkout must not install the release wheel, got %q", call)
+		t.Fatalf("dev checkout must not install the release source, got %q", call)
 	}
 }
 
-func TestRuntimeUpgradeCommandPinsReleaseWheelWithUpgrade(t *testing.T) {
+func TestRuntimeUpgradeCommandPinsReleaseSourceWithUpgrade(t *testing.T) {
 	globalDir := t.TempDir()
 	python := VenvPython(RuntimeVenvDir(globalDir))
 
@@ -370,10 +314,10 @@ func TestRuntimeUpgradeCommandPinsReleaseWheelWithUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeUpgradeCommand (uv): %v", err)
 	}
-	assertReleaseWheelInstall(t, name, args)
+	assertReleaseSourceInstall(t, name, args)
 	uvCall := name + " " + strings.Join(args, " ")
 	if !strings.Contains(uvCall, "pip install --upgrade https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/") {
-		t.Fatalf("uv upgrade must pin the release wheel URL, got %q", uvCall)
+		t.Fatalf("uv upgrade must pin the release source URL, got %q", uvCall)
 	}
 
 	client, _ = manifestClient(kernelReleaseManifestFixture("1.0.1"))
@@ -382,10 +326,10 @@ func TestRuntimeUpgradeCommandPinsReleaseWheelWithUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeUpgradeCommand (pip): %v", err)
 	}
-	assertReleaseWheelInstall(t, name, args)
+	assertReleaseSourceInstall(t, name, args)
 	pipCall := name + " " + strings.Join(args, " ")
 	if !strings.Contains(pipCall, "install --upgrade https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v1.0.1/") {
-		t.Fatalf("pip upgrade must pin the release wheel URL, got %q", pipCall)
+		t.Fatalf("pip upgrade must pin the release source URL, got %q", pipCall)
 	}
 }
 
@@ -402,17 +346,17 @@ func TestRuntimeUpgradeCommandFailureIsReportedNotSwallowed(t *testing.T) {
 		LookupEnv:  env,
 	})
 	if result.Healthy {
-		t.Fatalf("an unresolvable release wheel must be unhealthy: %+v", result.Lines)
+		t.Fatalf("an unresolvable release source must be unhealthy: %+v", result.Lines)
 	}
 	if result.Updated {
 		t.Fatalf("no install ran, so Updated must be false: %+v", result.Lines)
 	}
-	if !containsLine(result.Lines, "release wheel") {
-		t.Fatalf("expected a release-wheel failure line: %+v", result.Lines)
+	if !containsLine(result.Lines, "release source archive") {
+		t.Fatalf("expected a release-source failure line: %+v", result.Lines)
 	}
 	for _, call := range runner.calls {
 		if strings.Contains(call, "install") && strings.Contains(call, "lingtai") && !strings.Contains(call, "import lingtai") {
-			t.Fatalf("no install command may run when the wheel cannot be resolved: %#v", runner.calls)
+			t.Fatalf("no install command may run when the source cannot be resolved: %#v", runner.calls)
 		}
 	}
 }
