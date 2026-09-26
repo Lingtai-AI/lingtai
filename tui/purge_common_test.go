@@ -17,6 +17,7 @@ func TestPurgeProcsFromAgentProcessesPreservesSpacesAndFilter(t *testing.T) {
 		{PID: 111, AgentDir: agentDir},
 		{PID: 222, AgentDir: otherAgentDir},
 		{PID: 333, AgentDir: agentDir},
+		{PID: 444, AgentDir: agentDir, PuffoACP: true},
 	}, project, 333)
 
 	if len(got) != 1 {

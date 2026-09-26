@@ -1,6 +1,10 @@
 package processscan
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -9,19 +13,19 @@ import (
 	"unicode"
 )
 
-// AgentProcess is a single `lingtai run <agentDir>` process discovered by
-// scanning the process table. AgentDir is parsed from the final run argument
-// so paths containing spaces remain intact.
+// AgentProcess is a LingTai agent process discovered by scanning the process
+// table. Puffo ACP processes resolve their workdir through the local registry.
 type AgentProcess struct {
 	PID      int
 	Uptime   string
 	AgentDir string
 	Command  string
+	PuffoACP bool
 }
 
 // ParsePSOutput extracts AgentProcess records from `ps -eo pid=,command=`
-// output that match `lingtai run <abs>`. Split out from FindAgentProcesses so
-// the parsing logic is unit-testable without shelling out to ps.
+// output that match a LingTai agent in the given workdir. Split out from
+// FindAgentProcesses so parsing is testable without shelling out to ps.
 //
 // The ps output format is: leading whitespace, PID, single space, command
 // line (which itself may contain spaces). We split on the first whitespace
@@ -37,7 +41,7 @@ func ParsePSOutput(out, abs string) []AgentProcess {
 		if err != nil {
 			continue
 		}
-		agentDir, ok := agentDirForCommand(command, abs)
+		agentDir, puffoACP, ok := agentDirForCommand(command, abs)
 		if !ok {
 			continue
 		}
@@ -45,6 +49,7 @@ func ParsePSOutput(out, abs string) []AgentProcess {
 			PID:      pid,
 			AgentDir: agentDir,
 			Command:  strings.TrimSpace(command),
+			PuffoACP: puffoACP,
 		})
 	}
 	return results
@@ -64,7 +69,7 @@ func ParsePSListOutput(out string) []AgentProcess {
 		if err != nil {
 			continue
 		}
-		agentDir, ok := ExtractAgentDir(command)
+		agentDir, puffoACP, ok := agentDirForCommand(command, "")
 		if !ok {
 			continue
 		}
@@ -73,6 +78,7 @@ func ParsePSListOutput(out string) []AgentProcess {
 			Uptime:   fields[1],
 			AgentDir: agentDir,
 			Command:  strings.TrimSpace(command),
+			PuffoACP: puffoACP,
 		})
 	}
 	return results
@@ -92,12 +98,13 @@ func ParseWMICOutput(out, abs string) []AgentProcess {
 		}
 		pidText := strings.TrimPrefix(line, "ProcessId=")
 		pid, err := strconv.Atoi(strings.TrimSpace(pidText))
-		agentDir, ok := agentDirForCommand(cmdline, abs)
+		agentDir, puffoACP, ok := agentDirForCommand(cmdline, abs)
 		if err == nil && ok {
 			results = append(results, AgentProcess{
 				PID:      pid,
 				AgentDir: agentDir,
 				Command:  strings.TrimSpace(cmdline),
+				PuffoACP: puffoACP,
 			})
 		}
 		cmdline = ""
@@ -105,21 +112,32 @@ func ParseWMICOutput(out, abs string) []AgentProcess {
 	return results
 }
 
-func agentDirForCommand(command, abs string) (string, bool) {
+func agentDirForCommand(command, abs string) (string, bool, bool) {
+	if dir, ok := puffoACPAgentDir(command); ok {
+		if abs == "" {
+			return dir, true, true
+		}
+		return abs, true, filepath.Clean(dir) == filepath.Clean(abs)
+	}
 	if abs == "" {
-		return ExtractAgentDir(command)
+		dir, ok := extractRunAgentDir(command)
+		return dir, false, ok
 	}
 	if commandMatchesAgentDir(command, abs) {
-		return abs, true
+		return abs, false, true
 	}
-	return "", false
+	return "", false, false
 }
 
-// ExtractAgentDir returns the argument after a supported LingTai launch marker.
-// The launcher passes the agent directory as the final argv element; when ps
-// or WMIC joins argv back into text, taking the rest after the marker preserves
-// spaces inside that directory.
+// ExtractAgentDir resolves the workdir of a supported LingTai launch. For run
+// commands the directory is the final argument; for Puffo ACP it is bound in
+// the local registry. This remains an advisory process-table projection.
 func ExtractAgentDir(command string) (string, bool) {
+	dir, _, ok := agentDirForCommand(command, "")
+	return dir, ok
+}
+
+func extractRunAgentDir(command string) (string, bool) {
 	rest, ok := agentDirRestAfterMarker(command)
 	if !ok {
 		return "", false
@@ -129,6 +147,74 @@ func ExtractAgentDir(command string) (string, bool) {
 		return "", false
 	}
 	return agentDir, true
+}
+
+// puffoACPAgentDir recognizes only the fixed Puffo-owned argv shape. ACP does
+// not receive an agent directory on the command line; its runtime id is bound
+// to one in the local registry. This is advisory discovery, not authentication
+// of the process or the registry. The kernel's workdir lease remains the gate.
+func puffoACPAgentDir(command string) (string, bool) {
+	const maxRegistryBytes = 1 << 20
+	markers := []string{
+		"-m lingtai acp --profile puffo-v1 --runtime-id ",
+		"lingtai-agent.exe acp --profile puffo-v1 --runtime-id ",
+		"lingtai-agent acp --profile puffo-v1 --runtime-id ",
+		"lingtai.exe acp --profile puffo-v1 --runtime-id ",
+		"lingtai acp --profile puffo-v1 --runtime-id ",
+	}
+	lower := strings.ToLower(command)
+	for _, marker := range markers {
+		idx := strings.Index(lower, marker)
+		if idx < 0 || !hasLaunchMarkerBoundary(command, idx) {
+			continue
+		}
+		rest := strings.TrimSpace(command[idx+len(marker):])
+		id, registryArg, ok := strings.Cut(rest, " --registry ")
+		id = strings.TrimSpace(id)
+		registryArg = strings.TrimSpace(registryArg)
+		if !ok || id == "" || strings.ContainsAny(id, " \t\r\n\"'") || registryArg == "" {
+			return "", false
+		}
+		if value, tail, quoted := splitQuoted(registryArg); quoted {
+			if strings.TrimSpace(tail) != "" {
+				return "", false
+			}
+			registryArg = value
+		}
+		if !filepath.IsAbs(registryArg) {
+			return "", false
+		}
+		file, err := os.Open(registryArg)
+		if err != nil {
+			return "", false
+		}
+		var registry struct {
+			Runtimes map[string]struct {
+				AgentDir string `json:"agent_dir"`
+			} `json:"runtimes"`
+		}
+		info, statErr := file.Stat()
+		if statErr != nil || !info.Mode().IsRegular() || info.Size() > maxRegistryBytes {
+			file.Close()
+			return "", false
+		}
+		decoder := json.NewDecoder(io.LimitReader(file, maxRegistryBytes+1))
+		decodeErr := decoder.Decode(&registry)
+		var trailing any
+		if decodeErr == nil && decoder.Decode(&trailing) != io.EOF {
+			decodeErr = fmt.Errorf("registry has trailing data")
+		}
+		file.Close()
+		if decodeErr != nil {
+			return "", false
+		}
+		dir := registry.Runtimes[id].AgentDir
+		if filepath.IsAbs(dir) {
+			return filepath.Clean(dir), true
+		}
+		return "", false
+	}
+	return "", false
 }
 
 func commandMatchesAgentDir(command, abs string) bool {
@@ -256,8 +342,8 @@ func splitLeadingFields(line string, count int) ([]string, string, bool) {
 	return fields, rest, true
 }
 
-// FindAgentProcesses returns all running `lingtai run <agentDir>` processes
-// visible to the current user via process listing. Empty slice on
+// FindAgentProcesses returns LingTai agent processes visible to the current
+// user via process listing. Empty slice on
 // error or no match. Use IsAgentRunning if you only need a boolean.
 func FindAgentProcesses(agentDir string) []AgentProcess {
 	abs, err := filepath.Abs(agentDir)
@@ -306,7 +392,7 @@ func FindWindowsAgentProcesses(abs string) []AgentProcess {
 }
 
 // WindowsAgentProcessOutput returns raw `CommandLine=` / `ProcessId=` records
-// for candidate `lingtai run` processes. wmic is tried first and PowerShell's
+// for candidate LingTai processes. wmic is tried first and PowerShell's
 // Get-CimInstance is the fallback: wmic is no longer shipped on Windows 11
 // 24H2+ and Server 2025, where a wmic-only scan silently reports zero
 // processes. Exported so every Windows process count shares one fallback.
@@ -315,7 +401,7 @@ func WindowsAgentProcessOutput() ([]byte, error) {
 		"wmic",
 		"process",
 		"where",
-		"commandline like '%lingtai%run%'",
+		"commandline like '%lingtai%'",
 		"get",
 		"processid,commandline",
 		"/format:list",
@@ -323,7 +409,7 @@ func WindowsAgentProcessOutput() ([]byte, error) {
 	if err == nil {
 		return out, nil
 	}
-	script := `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*lingtai*run*' } | ForEach-Object { "CommandLine=$($_.CommandLine)"; "ProcessId=$($_.ProcessId)"; "" }`
+	script := `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*lingtai*' } | ForEach-Object { "CommandLine=$($_.CommandLine)"; "ProcessId=$($_.ProcessId)"; "" }`
 	return exec.Command(
 		"powershell.exe",
 		"-NoProfile",
@@ -333,8 +419,8 @@ func WindowsAgentProcessOutput() ([]byte, error) {
 	).Output()
 }
 
-// IsAgentRunning returns true if any supported `lingtai run <agentDir>` launch
-// form is visible on this machine.
+// IsAgentRunning returns true if any supported run or Puffo ACP launch is
+// visible for this workdir on this machine.
 func IsAgentRunning(agentDir string) bool {
 	return len(FindAgentProcesses(agentDir)) > 0
 }

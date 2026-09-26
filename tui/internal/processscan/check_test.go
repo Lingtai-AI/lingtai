@@ -1,6 +1,67 @@
 package processscan
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestPuffoACPProcessResolvesRegistryWorkdir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Project With Spaces", ".lingtai", "agent A")
+	registry := filepath.Join(t.TempDir(), "runtime registry.json")
+	data := `{"runtimes":{"puffo-123":{"agent_dir":` + jsonString(dir) + `}}}`
+	if err := os.WriteFile(registry, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := "/opt/bin/lingtai-agent acp --profile puffo-v1 --runtime-id puffo-123 --registry " + registry
+	listed := ParsePSListOutput("  1234 00:01:02 " + command + "\n")
+	if len(listed) != 1 || listed[0].AgentDir != dir || !listed[0].PuffoACP {
+		t.Fatalf("ACP list = %+v", listed)
+	}
+	matched := ParsePSOutput("  1234 "+command+"\n", dir)
+	if len(matched) != 1 || !matched[0].PuffoACP {
+		t.Fatalf("ACP workdir match = %+v", matched)
+	}
+	if got := ParsePSOutput("  1234 "+command+"\n", dir+"-sibling"); len(got) != 0 {
+		t.Fatalf("matched a sibling workdir: %+v", got)
+	}
+	if got := ParsePSOutput("  1234 "+command+"\n", dir); len(got) != 1 {
+		t.Fatalf("lost ACP after sibling check: %+v", got)
+	}
+	quoted := "/opt/bin/lingtai-agent acp --profile puffo-v1 --runtime-id puffo-123 --registry \"" + registry + "\""
+	if got := ParsePSListOutput("1234 00:01:02 " + quoted + "\n"); len(got) != 1 || got[0].AgentDir != dir {
+		t.Fatalf("quoted ACP registry = %+v", got)
+	}
+}
+
+func TestPuffoACPProcessFailsClosedOnUnresolvedRuntime(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "runtime-registry.json")
+	if err := os.WriteFile(registry, []byte(`{"runtimes":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commands := []string{
+		"lingtai-agent acp --profile puffo-v1 --runtime-id absent --registry " + registry,
+		"lingtai-agent acp --profile other --runtime-id absent --registry " + registry,
+		"evil-lingtai-agent acp --profile puffo-v1 --runtime-id absent --registry " + registry,
+	}
+	for _, command := range commands {
+		if got := ParsePSListOutput("1234 00:01:02 " + command + "\n"); len(got) != 0 {
+			t.Fatalf("unresolved ACP command %q = %+v", command, got)
+		}
+	}
+	if err := os.WriteFile(registry, []byte(`{"runtimes":{"absent":{"agent_dir":"/tmp/a"}}} trailing`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ParsePSListOutput("1234 00:01:02 " + commands[0] + "\n"); len(got) != 0 {
+		t.Fatalf("malformed registry was accepted: %+v", got)
+	}
+}
+
+func jsonString(value string) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
+}
 
 func TestParsePSListOutputPreservesAgentDirsWithSpaces(t *testing.T) {
 	out := `  1234 00:01:02 /usr/bin/python -m lingtai run /tmp/Project With Spaces/.lingtai/agent A

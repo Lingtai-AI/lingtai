@@ -7,6 +7,11 @@ related_files:
   - tui/internal/config/global.go
   - tui/internal/tui/firstrun.go
   - tui/internal/tui/app.go
+  - tui/internal/tui/puffo_acp_lifecycle_test.go
+  - tui/internal/processscan/check.go
+  - tui/internal/processscan/check_test.go
+  - tui/internal/process/launcher.go
+  - tui/purge_common.go
   - tui/internal/tui/layout.go
   - tui/internal/tui/props.go
   - tui/internal/tui/setup.go
@@ -49,6 +54,32 @@ maintenance: |
   contract_version for a breaking change to the requirement classes.
 ---
 # TUI Runtime Contract
+
+## Puffo-owned ACP agent visibility
+
+The TUI's process inventory and duplicate-launch gate recognize the fixed
+`lingtai-agent acp --profile puffo-v1 --runtime-id <id> --registry <path>`
+launch. The ACP command does not expose its workdir, so discovery reads the
+local registry to map the runtime id to its agent directory. Discovery is
+best-effort: unreadable, missing, or malformed registry entries are not
+reported as running processes. The kernel workdir lease remains the
+authoritative duplicate-run protection.
+
+Opening the TUI remains filesystem observation, not a second ACP session or a
+transfer of process ownership. Puffo owns the ACP process and transport:
+TUI `/refresh` and `/cpr` must reject a visible Puffo-owned process before
+writing lifecycle signals or removing its workdir lock, and TUI process
+termination/purge must never target that process. To hand the agent over to a
+LingTai-started process, pause it in Puffo, start it in LingTai, then resume it
+in Puffo so Puffo attaches to that running process.
+
+On POSIX, every TUI-started `lingtai-agent run` child receives
+`LINGTAI_ACP_SOCKET_AGENT_DIR` set to that agent's canonical absolute directory.
+Kernels that support the resident ACP socket may then accept a Puffo attach;
+older kernels ignore the environment marker without losing the normal run
+path. Windows launches omit the marker because the resident socket requires
+POSIX peer credentials. The TUI itself never opens the socket or assumes an
+attach succeeded.
 
 ## Definition principle
 

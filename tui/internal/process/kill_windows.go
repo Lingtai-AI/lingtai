@@ -16,7 +16,10 @@ import (
 // Normal launch paths must NOT call this — duplicate-launch protection in
 // LaunchAgent assumes the prior agent shut down gracefully.
 func TerminateAgentProcesses(agentDir string) error {
-	procs := FindAgentProcesses(agentDir)
+	procs, err := tuiOwnedRunProcesses(agentDir)
+	if err != nil {
+		return err
+	}
 	if len(procs) == 0 {
 		return nil
 	}
@@ -27,12 +30,20 @@ func TerminateAgentProcesses(agentDir string) error {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(FindAgentProcesses(agentDir)) == 0 {
+		remaining, err := tuiOwnedRunProcesses(agentDir)
+		if err != nil {
+			return err
+		}
+		if len(remaining) == 0 {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if remaining := FindAgentProcesses(agentDir); len(remaining) > 0 {
+	remaining, err := tuiOwnedRunProcesses(agentDir)
+	if err != nil {
+		return err
+	}
+	if len(remaining) > 0 {
 		return &terminateError{remaining: len(remaining)}
 	}
 	return nil
