@@ -20,6 +20,19 @@ import (
 // to the user rather than re-attempting the launch.
 var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in this workdir")
 
+// ErrPuffoManagedAgent prevents TUI force-refresh from taking ownership of a
+// Puffo-controlled ACP process. Puffo owns its lifecycle and stdio transport.
+var ErrPuffoManagedAgent = errors.New("this agent is managed by Puffo; restart it from Puffo")
+
+func HasPuffoManagedAgent(agentDir string) bool {
+	for _, proc := range FindAgentProcesses(agentDir) {
+		if proc.PuffoACP {
+			return true
+		}
+	}
+	return false
+}
+
 // ProjectCreateRequest is the literal input to `lingtai-agent project create`.
 // Callers must keep CovenantFile available until CreateProject returns because
 // the kernel reads its contents while the child is running.

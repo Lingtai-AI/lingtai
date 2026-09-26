@@ -23,7 +23,7 @@ maintenance: |
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in the same commit as code changes.
 
-`process` is the TUI's subprocess boundary with the Python kernel: it runs the noninteractive fresh-seed `lingtai-agent project create` command with literal argv and captured output, and it starts/terminates the guarded `lingtai-agent run <dir>` child under the managed runtime venv. It is the *only* direct process-level coupling between the two languages — after a create or launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation.
+`process` is the TUI's subprocess boundary with the Python kernel: it runs the noninteractive fresh-seed `lingtai-agent project create` command with literal argv and captured output, and it starts/terminates the guarded `lingtai-agent run <dir>` child under the managed runtime venv. It is the *only* direct process-level coupling between the two languages — after a create or launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation. Puffo ACP processes are detected for launch prevention but are not owned or terminated by this package.
 
 ## Components
 
@@ -31,15 +31,15 @@ maintenance: |
 |---|---|---|
 | `AgentProcess` | `tui/internal/process/check.go:9` | type alias re-exporting `processscan.AgentProcess` so callers need only one import |
 | `FindAgentProcesses` | `tui/internal/process/check.go:18` | delegates to `processscan` for the running processes bound to one agent dir |
-| `IsAgentRunning` | `tui/internal/process/check.go:30` | the boolean launch/refresh gate built on that scan |
-| `ErrAgentAlreadyRunning` | `tui/internal/process/launcher.go:21` | the sentinel `LaunchAgent` returns instead of starting a second kernel in one workdir |
-| `ProjectCreateRequest` / `ProjectCreateResult` / `ProjectCreateError` | `tui/internal/process/launcher.go:26,36,57` | literal create inputs plus captured accepted output or classified handler/transport failure |
-| `kernelCLI` / `kernelCLIForOS` | `tui/internal/process/launcher.go:151,157` | resolves the managed sibling executable; the production resolver supplies `runtime.GOOS` while the suffix decision remains platform-neutral and unit-testable |
-| `CreateProject` | `tui/internal/process/launcher.go:170` | synchronously runs `lingtai-agent project create --dir --name --preset --covenant-file --json`; accepts only exit-0 one-object `created` output for the requested agent with a nonempty canonical `preset_ref`, and preserves all other terminal outcomes for conservative callers |
-| `InitProject` | `tui/internal/process/launcher.go:83` | legacy TUI-owned `.lingtai/` skeleton helper retained for its independent callers; headless spawn does not use it |
-| `LaunchAgent` | `tui/internal/process/launcher.go:295` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking |
-| `ForceLaunchAgent` | `tui/internal/process/launcher.go:308` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
-| `TerminateAgentProcesses` | `tui/internal/process/kill_unix.go:18`, `tui/internal/process/kill_windows.go:18` | per-OS termination of every process matched for an agent dir; `terminateError` (`kill_unix.go:54`, `kill_windows.go:43`) names the PIDs that survived |
+| `IsAgentRunning` | `tui/internal/process/check.go:40` | the boolean launch/refresh gate built on that scan |
+| `ErrAgentAlreadyRunning` / `ErrPuffoManagedAgent` | `tui/internal/process/launcher.go:21-35` | sentinels for duplicate launch and Puffo-owned lifecycle rejection, with `HasPuffoManagedAgent` scan |
+| `ProjectCreateRequest` / `ProjectCreateResult` / `ProjectCreateError` | `tui/internal/process/launcher.go:39,49,70` | literal create inputs plus captured accepted output or classified handler/transport failure |
+| `kernelCLI` / `kernelCLIForOS` | `tui/internal/process/launcher.go:164,170` | resolves the managed sibling executable; the production resolver supplies `runtime.GOOS` while the suffix decision remains platform-neutral and unit-testable |
+| `CreateProject` | `tui/internal/process/launcher.go:183` | synchronously runs `lingtai-agent project create --dir --name --preset --covenant-file --json`; accepts only exit-0 one-object `created` output for the requested agent with a nonempty canonical `preset_ref`, and preserves all other terminal outcomes for conservative callers |
+| `InitProject` | `tui/internal/process/launcher.go:96` | legacy TUI-owned `.lingtai/` skeleton helper retained for its independent callers; headless spawn does not use it |
+| `LaunchAgent` | `tui/internal/process/launcher.go:308` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking |
+| `ForceLaunchAgent` | `tui/internal/process/launcher.go:321` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
+| `TerminateAgentProcesses` | `tui/internal/process/kill_unix.go:18`, `tui/internal/process/kill_windows.go:18` | per-OS termination of TUI-owned run processes; `terminateError` (`kill_unix.go:71`, `kill_windows.go:52`) names the PIDs that survived |
 
 ## Connections
 
@@ -58,6 +58,7 @@ maintenance: |
 
 - **Create completion is process-authoritative.** `CreateProject` never deletes a root or `.lingtai/` tree after a child error: malformed output, a signal, cancellation, timeout, or another transport outcome can leave an uncertain tree for explicit recovery.
 - **One agent per workdir.** `LaunchAgent` fails with `ErrAgentAlreadyRunning` rather than starting a second kernel against the same `.lingtai/<agent>/`. `ForceLaunchAgent` is the explicit, operator-visible override — do not make it the default path.
+- **External ACP ownership.** `HasPuffoManagedAgent` identifies a visible Puffo ACP process for TUI refresh/revive guards. `TerminateAgentProcesses` rejects such a process before signaling any PID; it cannot take over Puffo's ACP transport or lifecycle.
 - **Process-table detection is advisory.** Same caveat as `processscan`: matching is best-effort and racy. The kernel's own workdir lock is the authoritative gate; never rely on `IsAgentRunning` alone for correctness under concurrency.
 - **Keep the import direction clean.** `processscan` exists precisely because `process` imports `migrate`; packages below that line must import `processscan`, never `process`.
 - **Termination reports survivors.** `TerminateAgentProcesses` returns a `terminateError` naming the PIDs it could not stop instead of silently reporting success — callers surface that to the user.

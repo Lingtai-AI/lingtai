@@ -2,25 +2,34 @@ package process
 
 import "github.com/anthropics/lingtai-tui/internal/processscan"
 
-// AgentProcess is a single `lingtai run <agentDir>` process discovered by
-// scanning the process table. Used by FindAgentProcesses /
-// TerminateAgentProcesses so callers can both detect and act on lingering
-// interpreters while preserving the full agent dir.
+// AgentProcess is a LingTai agent process discovered by
+// scanning the process table. Puffo ACP rows are visible for inventory and
+// duplicate prevention, but only TUI-owned run rows may be terminated here.
 type AgentProcess = processscan.AgentProcess
 
 func parsePSOutput(out, abs string) []AgentProcess {
 	return processscan.ParsePSOutput(out, abs)
 }
 
-// FindAgentProcesses returns all running `lingtai run <agentDir>` processes
-// visible to the current user via `ps -eo pid=,command=`. Empty slice on
+// FindAgentProcesses returns LingTai agent processes visible to the current
+// user via `ps -eo pid=,command=`. Empty slice on
 // error or no match. Use IsAgentRunning if you only need a boolean.
 func FindAgentProcesses(agentDir string) []AgentProcess {
 	return processscan.FindAgentProcesses(agentDir)
 }
 
-// IsAgentRunning returns true if any `python -m lingtai run <agentDir>`
-// (or `lingtai-agent run <agentDir>`) process exists on this machine.
+func tuiOwnedRunProcesses(agentDir string) ([]AgentProcess, error) {
+	procs := FindAgentProcesses(agentDir)
+	for _, proc := range procs {
+		if proc.PuffoACP {
+			return nil, ErrPuffoManagedAgent
+		}
+	}
+	return procs, nil
+}
+
+// IsAgentRunning returns true if any supported `lingtai run` or Puffo ACP
+// process exists for the workdir on this machine.
 // Independent of `.agent.heartbeat`: even when the heartbeat file is missing or
 // stale, the lingering Python interpreter is still visible in `ps`.
 //
