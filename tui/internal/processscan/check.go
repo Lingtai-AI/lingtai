@@ -117,7 +117,7 @@ func agentDirForCommand(command, abs string) (string, bool, bool) {
 		if abs == "" {
 			return dir, true, true
 		}
-		return abs, true, filepath.Clean(dir) == filepath.Clean(abs)
+		return abs, true, sameAgentDir(dir, abs)
 	}
 	if abs == "" {
 		dir, ok := extractRunAgentDir(command)
@@ -127,6 +127,18 @@ func agentDirForCommand(command, abs string) (string, bool, bool) {
 		return abs, false, true
 	}
 	return "", false, false
+}
+
+// sameAgentDir compares existing workdirs by filesystem identity so a TUI
+// opened through a symlink still recognizes the Puffo process. Retain lexical
+// matching for synthetic process rows and paths that no longer exist.
+func sameAgentDir(a, b string) bool {
+	aInfo, aErr := os.Stat(a)
+	bInfo, bErr := os.Stat(b)
+	if aErr == nil && bErr == nil {
+		return aInfo.IsDir() && bInfo.IsDir() && os.SameFile(aInfo, bInfo)
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // ExtractAgentDir resolves the workdir of a supported LingTai launch. For run
@@ -184,7 +196,13 @@ func puffoACPAgentDir(command string) (string, bool) {
 		if !filepath.IsAbs(registryArg) {
 			return "", false
 		}
-		file, err := os.Open(registryArg)
+		// Check before opening: os.Open on a FIFO blocks waiting for a writer.
+		// Reject symlinks as well so the path cannot alias a special file.
+		pathInfo, err := os.Lstat(registryArg)
+		if err != nil || !pathInfo.Mode().IsRegular() || pathInfo.Size() > maxRegistryBytes {
+			return "", false
+		}
+		file, err := openRegistryFile(registryArg)
 		if err != nil {
 			return "", false
 		}

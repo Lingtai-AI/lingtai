@@ -62,7 +62,10 @@ The TUI's process inventory and duplicate-launch gate recognize the fixed
 launch. The ACP command does not expose its workdir, so discovery reads the
 local registry to map the runtime id to its agent directory. Discovery is
 best-effort: unreadable, missing, or malformed registry entries are not
-reported as running processes. The kernel workdir lease remains the
+reported as running processes. Registry discovery rejects non-regular files
+before opening them and must not block on a FIFO; existing agent directories
+are matched by filesystem identity so opening the TUI through a symlink does
+not bypass Puffo lifecycle protection. The kernel workdir lease remains the
 authoritative duplicate-run protection.
 
 Opening the TUI remains filesystem observation, not a second ACP session or a

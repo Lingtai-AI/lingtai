@@ -1,11 +1,94 @@
 package processscan
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
+
+func TestPuffoACPProcessMatchesSymlinkedAgentDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real", ".lingtai", "agent")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(filepath.Join(root, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(root, "registry.json")
+	data := `{"runtimes":{"puffo-123":{"agent_dir":` + jsonString(realDir) + `}}}`
+	if err := os.WriteFile(registry, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := "lingtai-agent acp --profile puffo-v1 --runtime-id puffo-123 --registry " + registry
+	linkedDir := filepath.Join(link, ".lingtai", "agent")
+	got := ParsePSOutput("1234 "+command+"\n", linkedDir)
+	if len(got) != 1 || !got[0].PuffoACP {
+		t.Fatalf("symlinked agent directory was not protected: %+v", got)
+	}
+}
+
+func TestPuffoACPProcessDoesNotBlockOnFIFORegistry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO is POSIX-only")
+	}
+	if os.Getenv("LINGTAI_TEST_FIFO_REGISTRY") == "1" {
+		command := "lingtai-agent acp --profile puffo-v1 --runtime-id puffo-123 --registry " + os.Getenv("LINGTAI_TEST_FIFO_PATH")
+		if got := ParsePSListOutput("1234 00:01:02 " + command + "\n"); len(got) != 0 {
+			t.Fatalf("FIFO registry was accepted: %+v", got)
+		}
+		return
+	}
+	path := filepath.Join(t.TempDir(), "registry.fifo")
+	if err := exec.Command("mkfifo", path).Run(); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPuffoACPProcessDoesNotBlockOnFIFORegistry$")
+	cmd.Env = append(os.Environ(), "LINGTAI_TEST_FIFO_REGISTRY=1", "LINGTAI_TEST_FIFO_PATH="+path)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("FIFO registry scan blocked or failed (%v): %s", err, output)
+	}
+}
+
+func TestOpenRegistryFileNeverBlocksOnFIFO(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO is POSIX-only")
+	}
+	if os.Getenv("LINGTAI_TEST_NONBLOCK_FIFO") == "1" {
+		file, err := openRegistryFile(os.Getenv("LINGTAI_TEST_FIFO_PATH"))
+		if err != nil {
+			return // rejecting the FIFO is also safe
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || info.Mode().IsRegular() {
+			t.Fatalf("FIFO was not recognized as non-regular: %v, %v", info, err)
+		}
+		return
+	}
+	path := filepath.Join(t.TempDir(), "registry.fifo")
+	if err := exec.Command("mkfifo", path).Run(); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOpenRegistryFileNeverBlocksOnFIFO$")
+	cmd.Env = append(os.Environ(), "LINGTAI_TEST_NONBLOCK_FIFO=1", "LINGTAI_TEST_FIFO_PATH="+path)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("nonblocking registry open failed (%v): %s", err, output)
+	}
+}
 
 func TestPuffoACPProcessResolvesRegistryWorkdir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Project With Spaces", ".lingtai", "agent A")
