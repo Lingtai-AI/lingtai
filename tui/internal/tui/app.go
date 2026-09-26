@@ -1223,6 +1223,8 @@ func (a *App) hardRefresh() error {
 	return hardRefreshDir(a.lingtaiCmd, a.orchDir)
 }
 
+var hasPuffoManagedAgent = process.HasPuffoManagedAgent
+
 // hardRefreshDir force-restarts the agent in the given directory. It is the
 // escape hatch behind `/refresh`: rather than refusing when an interpreter is
 // still alive, it escalates through suspend → lock-clear poll → SIGTERM/SIGKILL
@@ -1244,6 +1246,9 @@ func (a *App) hardRefresh() error {
 //  6. ForceLaunchAgent (bypassing the duplicate-protection gate; we've
 //     already verified the agent dir is clear above).
 func hardRefreshDir(lingtaiCmd, dir string) error {
+	if hasPuffoManagedAgent(dir) {
+		return process.ErrPuffoManagedAgent
+	}
 	suspendFile := filepath.Join(dir, ".suspend")
 	os.WriteFile(suspendFile, []byte(""), 0o644)
 	waitForLockClear(dir)
@@ -1251,7 +1256,9 @@ func hardRefreshDir(lingtaiCmd, dir string) error {
 	// detached child), kill the lingering interpreter so LaunchAgent's
 	// duplicate-protection gate doesn't refuse the relaunch.
 	if process.IsAgentRunning(dir) {
-		_ = process.TerminateAgentProcesses(dir)
+		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
+			return err // ownership changed during the refresh; preserve its lock
+		}
 	}
 	// Clear lingering handshake files. waitForLockClear may have force-removed
 	// .agent.lock; the others (.refresh/.refresh.taken/.suspend) get removed
@@ -1692,11 +1699,16 @@ func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 // The caller is expected to have already validated presetPath via
 // resolvePresetInAllowed.
 func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
+	if hasPuffoManagedAgent(dir) {
+		return process.ErrPuffoManagedAgent
+	}
 	suspendFile := filepath.Join(dir, ".suspend")
 	os.WriteFile(suspendFile, []byte(""), 0o644)
 	waitForLockClear(dir)
 	if process.IsAgentRunning(dir) {
-		_ = process.TerminateAgentProcesses(dir)
+		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
+			return err
+		}
 	}
 	os.Remove(filepath.Join(dir, ".agent.lock"))
 	os.Remove(filepath.Join(dir, ".refresh"))
@@ -1718,6 +1730,9 @@ func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
 // is gone), then relaunches the agent. Used by /cpr (dead agent, no prior
 // suspend) and as the tail of hardRefreshDir (after writing .suspend).
 func reviveDir(lingtaiCmd, dir string) error {
+	if hasPuffoManagedAgent(dir) {
+		return process.ErrPuffoManagedAgent
+	}
 	lockFile := filepath.Join(dir, ".agent.lock")
 	locked := true
 	for i := 0; i < 120; i++ { // 120 × 500ms = 60s max

@@ -16,6 +16,9 @@ type purgeProc struct {
 func purgeProcsFromAgentProcesses(found []processscan.AgentProcess, filterDir string, selfPID int) []purgeProc {
 	procs := make([]purgeProc, 0, len(found))
 	for _, proc := range found {
+		if proc.PuffoACP {
+			continue // Puffo owns this process and its ACP transport.
+		}
 		if proc.PID == selfPID {
 			continue
 		}

@@ -16,7 +16,10 @@ import (
 // Normal launch paths must NOT call this — duplicate-launch protection in
 // LaunchAgent assumes the prior agent shut down gracefully.
 func TerminateAgentProcesses(agentDir string) error {
-	procs := FindAgentProcesses(agentDir)
+	procs, err := tuiOwnedRunProcesses(agentDir)
+	if err != nil {
+		return err
+	}
 	if len(procs) == 0 {
 		return nil
 	}
@@ -26,24 +29,40 @@ func TerminateAgentProcesses(agentDir string) error {
 	// Poll up to ~2s for graceful exit before escalating.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(FindAgentProcesses(agentDir)) == 0 {
+		remaining, err := tuiOwnedRunProcesses(agentDir)
+		if err != nil {
+			return err
+		}
+		if len(remaining) == 0 {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	// Escalate: SIGKILL anything still alive.
-	for _, p := range FindAgentProcesses(agentDir) {
+	remaining, err := tuiOwnedRunProcesses(agentDir)
+	if err != nil {
+		return err
+	}
+	for _, p := range remaining {
 		_ = syscall.Kill(p.PID, syscall.SIGKILL)
 	}
 	// Brief final wait so callers observe a clean ps.
 	deadline = time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(FindAgentProcesses(agentDir)) == 0 {
+		remaining, err := tuiOwnedRunProcesses(agentDir)
+		if err != nil {
+			return err
+		}
+		if len(remaining) == 0 {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if remaining := FindAgentProcesses(agentDir); len(remaining) > 0 {
+	remaining, err = tuiOwnedRunProcesses(agentDir)
+	if err != nil {
+		return err
+	}
+	if len(remaining) > 0 {
 		return &terminateError{remaining: len(remaining)}
 	}
 	return nil
