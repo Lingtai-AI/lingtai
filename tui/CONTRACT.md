@@ -69,7 +69,9 @@ Opening the TUI remains filesystem observation, not a second ACP session or a
 transfer of process ownership. Puffo owns the ACP process and transport:
 TUI `/refresh` and `/cpr` must reject a visible Puffo-owned process before
 writing lifecycle signals or removing its workdir lock, and TUI process
-termination/purge must never target that process. Restart it through Puffo.
+termination/purge must never target that process. To hand the agent over to a
+LingTai-started process, pause it in Puffo, start it in LingTai, then resume it
+in Puffo so Puffo attaches to that running process.
 
 ## Definition principle
 

@@ -22,7 +22,7 @@ var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in t
 
 // ErrPuffoManagedAgent prevents TUI force-refresh from taking ownership of a
 // Puffo-controlled ACP process. Puffo owns its lifecycle and stdio transport.
-var ErrPuffoManagedAgent = errors.New("this agent is managed by Puffo; restart it from Puffo")
+var ErrPuffoManagedAgent = errors.New("this agent is managed by Puffo; to run it in LingTai, pause it in Puffo, start it in LingTai, then resume it in Puffo")
 
 func HasPuffoManagedAgent(agentDir string) bool {
 	for _, proc := range FindAgentProcesses(agentDir) {

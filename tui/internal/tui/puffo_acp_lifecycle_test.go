@@ -32,3 +32,11 @@ func TestPuffoManagedAgentRejectsTUIRelaunchBeforeSignals(t *testing.T) {
 		})
 	}
 }
+
+func TestPuffoManagedAgentErrorExplainsHandoff(t *testing.T) {
+	got := process.ErrPuffoManagedAgent.Error()
+	want := "this agent is managed by Puffo; to run it in LingTai, pause it in Puffo, start it in LingTai, then resume it in Puffo"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
