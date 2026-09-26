@@ -332,6 +332,22 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	}
 
 	cmd := exec.Command(kernelCLI(python), "run", agentDir)
+	// A resident ACP socket lets Puffo attach to a TUI-started agent without
+	// launching a second process. The kernel compares this marker to
+	// Path(working_dir).resolve(), so use the canonical absolute path. Keep the
+	// argv unchanged for older kernels that do not know --acp-socket; they
+	// simply ignore the environment marker. The socket requires POSIX peers.
+	if runtime.GOOS != "windows" {
+		canonicalDir, err := filepath.EvalSymlinks(agentDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent dir for resident ACP: %w", err)
+		}
+		canonicalDir, err = filepath.Abs(canonicalDir)
+		if err != nil {
+			return nil, fmt.Errorf("make agent dir absolute for resident ACP: %w", err)
+		}
+		cmd.Env = append(cmd.Environ(), "LINGTAI_ACP_SOCKET_AGENT_DIR="+canonicalDir)
+	}
 	// Redirect agent output to a log file instead of the TUI terminal
 	logPath := filepath.Join(agentDir, "logs")
 	if err := os.MkdirAll(logPath, 0o755); err != nil {

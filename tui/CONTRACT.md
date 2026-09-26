@@ -73,6 +73,14 @@ termination/purge must never target that process. To hand the agent over to a
 LingTai-started process, pause it in Puffo, start it in LingTai, then resume it
 in Puffo so Puffo attaches to that running process.
 
+On POSIX, every TUI-started `lingtai-agent run` child receives
+`LINGTAI_ACP_SOCKET_AGENT_DIR` set to that agent's canonical absolute directory.
+Kernels that support the resident ACP socket may then accept a Puffo attach;
+older kernels ignore the environment marker without losing the normal run
+path. Windows launches omit the marker because the resident socket requires
+POSIX peer credentials. The TUI itself never opens the socket or assumes an
+attach succeeded.
+
 ## Definition principle
 
 An agent is defined **solely** by `<project>/.lingtai/<agent>/init.json`

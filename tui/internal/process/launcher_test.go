@@ -164,6 +164,53 @@ func TestLaunchAgentUnsafeValidAddonKeyKeepsLaunchBehavior(t *testing.T) {
 	}
 }
 
+func TestLaunchAgentUnsafeEnablesResidentACPForCanonicalAgentDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("resident ACP socket requires POSIX peer credentials")
+	}
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "python-calls.log")
+	stub := writeStubPython(t, dir, logPath, 0)
+	writeStubLingtaiAgent(t, dir, logPath, 0)
+
+	agentDir := filepath.Join(dir, "alice")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), []byte(`{"addons": {}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(dir, "agent-alias")
+	if err := os.Symlink(agentDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	canonicalDir, err := filepath.EvalSymlinks(agentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := launchAgentUnsafe(stub, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmd.Args) != 3 || cmd.Args[1] != "run" || cmd.Args[2] != alias {
+		t.Fatalf("unexpected agent argv: %q", cmd.Args)
+	}
+	const key = "LINGTAI_ACP_SOCKET_AGENT_DIR="
+	var got string
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, key) {
+			got = strings.TrimPrefix(entry, key)
+		}
+	}
+	if got != canonicalDir {
+		t.Fatalf("resident ACP directory = %q, want canonical %q", got, canonicalDir)
+	}
+}
+
 func writeProjectCreateStub(t *testing.T, dir, logPath, stdout, stderr string, exitStatus int) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
