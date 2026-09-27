@@ -1465,27 +1465,28 @@ func runVersionPreflightWithOptions(opts preflightOptions) bool {
 // startupDecision computes the launch mode from the R1/R2/R3 requirement
 // state (tui/CONTRACT.md).
 //   - R1  orchestrators present (zero agents → real first-run setup; also
-//        catches the `lingtai-tui clean` recreated-empty-.lingtai case)
+//     catches the `lingtai-tui clean` recreated-empty-.lingtai case)
 //   - R2  API keys resolvable (resolvedKeys = .env authoritative + config.json
-//        mirror fills gaps)
+//     mirror fills gaps; declaredKeyEnvs are the orchestrators' exact names)
 //   - R3.1  the config.json keys mirror is present (configOK) and non-empty
 //
 // Returns:
-//   firstRun — no agents (or rehydration, applied by the caller)
-//   recovery — R2 fail: no API key anywhere → real setup wizard
-//   degraded — R3.1 loss while R2 ok → launch with banner, keys from .env
+//
+//	firstRun — no agents (or rehydration, applied by the caller)
+//	recovery — R2 fail: no API key anywhere → real setup wizard
+//	degraded — R3.1 loss while R2 ok → launch with banner, keys from .env
 //
 // Content-based (fable F7): a present-but-keyless config.json degrades exactly
 // like an absent one, so the original config-wipe incident cannot silently
 // recur through a keyless-but-present mirror.
-func startupDecision(orchestrators int, resolvedKeys map[string]string, configOK bool, mirrorKeys map[string]string) (firstRun, recovery, degraded bool) {
+func startupDecision(orchestrators int, resolvedKeys map[string]string, configOK bool, mirrorKeys map[string]string, declaredKeyEnvs ...string) (firstRun, recovery, degraded bool) {
 	if orchestrators == 0 {
 		return true, false, false
 	}
-	if !config.HasAPIKeys(resolvedKeys) {
+	if !config.HasAPIKeys(resolvedKeys, declaredKeyEnvs...) {
 		return false, true, false
 	}
-	if !configOK || !config.HasAPIKeys(mirrorKeys) {
+	if !configOK || !config.HasAPIKeys(mirrorKeys, declaredKeyEnvs...) {
 		return false, false, true
 	}
 	return false, false, false
@@ -1620,9 +1621,13 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// cannot silently recur. Zero orchestrators force first-run (the
 	// `lingtai-tui clean` recreated-empty-.lingtai case).
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+	var declaredKeyEnvs []string
+	for _, name := range orchestrators {
+		declaredKeyEnvs = append(declaredKeyEnvs, config.ReadAgentAPIKeyEnv(filepath.Join(lingtaiDir, name)))
+	}
 	keys, configOK := config.ResolveKeys(globalDir)
 	mirror, _ := config.LoadConfigReadOnly(globalDir)
-	needsFirstRun, needsRecovery, degradedConfig := startupDecision(len(orchestrators), keys, configOK, mirror.Keys)
+	needsFirstRun, needsRecovery, degradedConfig := startupDecision(len(orchestrators), keys, configOK, mirror.Keys, declaredKeyEnvs...)
 
 	// Rehydration forces us into the first-run wizard regardless of whether
 	// the user has a global config.json — cloned networks always need to be

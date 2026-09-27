@@ -464,6 +464,19 @@ func TestHasAPIKeys(t *testing.T) {
 	}
 }
 
+func TestHasAPIKeysDeclaredCustomName(t *testing.T) {
+	keys := map[string]string{"PUFFO_ATTACH_QA_DEEPSEEK_KEY": "test-only", "UNRELATED_SETTING": "1"}
+	if HasAPIKeys(keys) {
+		t.Fatal("custom key without a declaration should not satisfy the fallback")
+	}
+	if !HasAPIKeys(keys, "PUFFO_ATTACH_QA_DEEPSEEK_KEY") {
+		t.Fatal("agent-declared custom key was ignored")
+	}
+	if HasAPIKeys(map[string]string{"UNRELATED_SETTING": "1"}, "PUFFO_ATTACH_QA_DEEPSEEK_KEY") {
+		t.Fatal("unrelated setting satisfied agent-declared key")
+	}
+}
+
 // home_telemetry_display is an optional presentation preference the user hand-
 // edits, so an invalid value must fail closed on its OWN key: discarded on
 // load, never re-written as durable config on save, and never costing the user

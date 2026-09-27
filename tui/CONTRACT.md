@@ -117,7 +117,7 @@ A consented runtime rebuild preserves the previous venv until the replacement pa
 
 | Requirement | Source | Notes |
 |---|---|---|
-| API keys | `~/.lingtai-tui/.env` (via `ResolveKeys`) | agents load this at boot; `.env` is authoritative |
+| API keys | `~/.lingtai-tui/.env` (via `ResolveKeys`) and each agent's `manifest.llm.api_key_env` | agents load this at boot; `.env` is authoritative. The declared variable name is valid even without an `_API_KEY` suffix. |
 
 ### R3 · Purely additive (user-level, loss must not block launch)
 
@@ -145,14 +145,17 @@ appears as the degraded state below.
 |---|---|
 | No agents in `.lingtai/` (R1 fail) | first-run wizard (create first agent) |
 | Agents exist, `config.json` missing or its keys mirror empty (R3.1 loss), `.env` has API keys (R2 ok) | **degraded launch** — derive keys from `.env`, show persistent banner, key-dependent features limited; self-heal offered to regenerate the R3.1 mirror; recovery wizard not forced. Content-based (fable F7): a present-but-keyless mirror degrades exactly like an absent file. |
-| Agents exist, `.env` has no API keys (R2 fail) | recovery wizard (real missing key → setup) |
+| Agents exist, resolved keys have neither a conventional `_API_KEY` nor a nonempty agent-declared `api_key_env` (R2 fail) | recovery wizard (real missing key → setup) |
 | Agents exist, everything present | normal launch |
 
 ## Alignment rules
 
 1. `.env` is the single source of truth for API keys (R2). `config.json` keys
    are an R3.1 mirror; `ResolveKeys` prefers `.env` and fills gaps from the
-   mirror for legacy setups.
+   mirror for legacy setups. Startup and doctor also accept the exact
+   `manifest.llm.api_key_env` named by an orchestrator, even if that name does
+   not use the conventional `_API_KEY` suffix; unrelated env variables do not
+   satisfy R2.
 2. Losing `~/.lingtai-tui/config.json` (or its keys mirror) is an R3 degraded
    condition, not a setup event — the TUI launches with a banner and offers
    self-heal for the regenerable mirror (R3.1). Losing `tui_config.json`
@@ -296,8 +299,8 @@ so that race can have platform-dependent behavior.
 ## Doctor checks (TUI-can't-start diagnostic set)
 
 - [x] D1 agents running / orchestrators detected (R1)
-- [x] D2 config.json present, readable, and keys mirror non-empty — `ResolveKeys` configOK + `HasAPIKeys(mirror)` (R3.1, content-based fable F7)
-- [x] D3 effective API keys present — `HasAPIKeys(resolved)` (.env + mirror gap-fill, matching the gate)
+- [x] D2 config.json present, readable, and keys mirror non-empty — `ResolveKeys` configOK + `HasAPIKeys(mirror, declaredKeyEnvs...)` using all detected orchestrators' declarations (R3.1, content-based fable F7)
+- [x] D3 effective API keys present — `HasAPIKeys(resolved, declaredKeyEnvs...)` using the same network-wide declarations (.env + mirror gap-fill, matching the gate)
 - [x] D4 addon `.secrets`/config present for declared addons (R1; honors declared `mcp.<addon>.env` / legacy `addons.<name>.config` paths)
 - [x] D5 runtime/version skew reported (R1, extends existing doctor; plain-release stamps only)
 

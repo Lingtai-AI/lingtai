@@ -576,7 +576,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		Model:         model,
 		BaseHost:      baseHostForReport(baseURL),
 		APICompat:     apiCompat,
-		APIKeyEnv:     readLLMAPIKeyEnv(orchDir),
+		APIKeyEnv:     config.ReadAgentAPIKeyEnv(orchDir),
 		APIKeyPresent: apiKey != "",
 	}
 	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
@@ -649,23 +649,6 @@ func baseHostForReport(raw string) string {
 		withoutCreds = withoutCreds[:slash]
 	}
 	return strings.TrimRight(withoutCreds, "/")
-}
-
-// readLLMAPIKeyEnv returns manifest.llm.api_key_env from init.json (the env var
-// NAME, never its value). Best-effort: returns "" on any read/parse failure.
-func readLLMAPIKeyEnv(orchDir string) string {
-	data, err := os.ReadFile(filepath.Join(orchDir, "init.json"))
-	if err != nil {
-		return ""
-	}
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return ""
-	}
-	manifest, _ := raw["manifest"].(map[string]interface{})
-	llm, _ := manifest["llm"].(map[string]interface{})
-	env, _ := llm["api_key_env"].(string)
-	return env
 }
 
 func doctorLineFromConfig(line config.DoctorLine) doctorLine {
@@ -750,8 +733,9 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 
 	// The real startup gate (main.go startupDecision) consumes resolved keys
 	// (.env + config.json mirror gap-fill), configOK (present AND readable),
-	// and mirror keys together. The doctor must evaluate D2/D3 on the same
-	// predicates so /doctor never contradicts what the launcher actually does
+	// mirror keys, and all orchestrators' declared API-key names together. The
+	// doctor must evaluate D2/D3 on the same predicates as startup so /doctor
+	// never contradicts what the launcher actually does
 	// (fable F2/F3).
 	resolvedKeys, configOK := config.ResolveKeys(globalDir)
 	mirror, _ := config.LoadConfigReadOnly(globalDir)
@@ -759,6 +743,10 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 
 	// D1: agents running / orchestrators detected (R1).
 	orchestrators := DetectOrchestrators(lingtaiDir)
+	var declaredKeyEnvs []string
+	for _, name := range orchestrators {
+		declaredKeyEnvs = append(declaredKeyEnvs, config.ReadAgentAPIKeyEnv(filepath.Join(lingtaiDir, name)))
+	}
 	if len(orchestrators) == 0 {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d1_no_agents"),
@@ -773,7 +761,7 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 	// Content-based like the decision table (fable F7): a present-but-keyless
 	// mirror degrades exactly like an absent file, so the check must not report
 	// the surface OK while the launcher shows the degraded banner.
-	if configOK && config.HasAPIKeys(mirror.Keys) {
+	if configOK && config.HasAPIKeys(mirror.Keys, declaredKeyEnvs...) {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d2_config_ok"), OK: true,
 		})
@@ -799,11 +787,11 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 	// a supported real state. Report which store actually carries the keys as
 	// provenance so the line matches what the launcher decided.
 	switch {
-	case config.HasAPIKeys(resolvedKeys) && config.HasAPIKeys(envKeys):
+	case config.HasAPIKeys(resolvedKeys, declaredKeyEnvs...) && config.HasAPIKeys(envKeys, declaredKeyEnvs...):
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d3_env_keys_ok"), OK: true,
 		})
-	case config.HasAPIKeys(resolvedKeys):
+	case config.HasAPIKeys(resolvedKeys, declaredKeyEnvs...):
 		// Mirror-only setup: keys resolve, but .env is empty. The startup gate
 		// launches normally (resolved keys pass), so report the observable fact
 		// with provenance instead of predicting a wizard.

@@ -51,6 +51,7 @@ Classified per `tui/CONTRACT.md`:
 | M3 | **`.secrets/` fragility**: operator-supplied addon secrets deleted by config incidents | imap/feishu/whatsapp MCP declared but cannot boot after wipe | Doctor lists missing addon secrets explicitly (R1); operator re-supply |
 | M4 | **Recovery UX is binary**: TUI either works or hard-blocks into wizard | User trapped re-typing keys that already exist | Degraded launch: TUI starts with a persistent warning banner, disables only key-dependent features, doctor reachable — the defined degradation for R3 loss |
 | M5 | **Doctor coverage**: `lingtai-tui doctor` only checks update/bootstrap, not the config/env/secrets surface | Gaps like M1/M3 invisible to the existing doctor | Extend doctor with the TUI-can't-start diagnostic set (D1–D5) validating R1/R2/R3 |
+| M6 | **Credential-name mismatch**: an agent declares a valid custom `api_key_env`, but TUI startup scans only names ending `_API_KEY` | New-project wizard starts the resident, then handoff incorrectly enters recovery setup and reports a duplicate launch | Recognize the exact orchestrator-declared env-var name in both startup and doctor, while preserving the conventional suffix fallback |
 
 ## Design direction
 

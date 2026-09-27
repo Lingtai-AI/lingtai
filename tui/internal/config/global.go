@@ -494,16 +494,45 @@ func ResolveKeys(globalDir string) (keys map[string]string, configOK bool) {
 	return keys, configOK
 }
 
-// HasAPIKeys reports whether the given key map contains at least one *_API_KEY
-// value. Used by startup to decide between "recoverable degraded launch" (keys
-// exist somewhere the agents already use) and "real setup" (no keys at all).
-func HasAPIKeys(keys map[string]string) bool {
+// HasAPIKeys reports whether the given key map contains a nonempty conventional
+// *_API_KEY value or an exact name declared by an agent's api_key_env. The
+// latter matters for user-named credentials such as MINIMAX_WORK_KEY.
+func HasAPIKeys(keys map[string]string, declaredKeyEnvs ...string) bool {
+	for _, name := range declaredKeyEnvs {
+		if name != "" && keys[name] != "" {
+			return true
+		}
+	}
 	for name, val := range keys {
 		if strings.HasSuffix(name, "_API_KEY") && val != "" {
 			return true
 		}
 	}
 	return false
+}
+
+// ReadAgentAPIKeyEnv reads only the credential variable name from an agent's
+// init.json. A missing or malformed manifest returns "" and preserves the
+// conventional-key fallback in startup and doctor.
+func ReadAgentAPIKeyEnv(agentDir string) string {
+	if agentDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(agentDir, "init.json"))
+	if err != nil {
+		return ""
+	}
+	var init struct {
+		Manifest struct {
+			LLM struct {
+				APIKeyEnv string `json:"api_key_env"`
+			} `json:"llm"`
+		} `json:"manifest"`
+	}
+	if json.Unmarshal(data, &init) != nil {
+		return ""
+	}
+	return init.Manifest.LLM.APIKeyEnv
 }
 
 // writeEnvLines writes lines back to the .env file with a single
