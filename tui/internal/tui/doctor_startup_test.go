@@ -58,6 +58,58 @@ func TestCheckStartupDecision_Healthy(t *testing.T) {
 	assertLineFlag(t, lines, "telegram secrets present", true, false)
 }
 
+func TestCheckStartupDecision_CustomDeclaredKey(t *testing.T) {
+	orchDir, globalDir := startupFixture(t,
+		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"PUFFO_ATTACH_QA_DEEPSEEK_KEY"}}}`,
+		`{"keys":{"PUFFO_ATTACH_QA_DEEPSEEK_KEY":"test-only"}}`,
+		`PUFFO_ATTACH_QA_DEEPSEEK_KEY=test-only`,
+	)
+	lines := checkStartupDecision(orchDir, globalDir)
+	assertLineFlag(t, lines, "config.json present", true, false)
+	assertLineFlag(t, lines, "API keys present", true, false)
+}
+
+func TestCheckStartupDecision_KeyDeclaredByAnotherOrchestrator(t *testing.T) {
+	selectedDir, globalDir := startupFixture(t,
+		`{"manifest":{"llm":{"provider":"deepseek"}}}`,
+		`{"keys":{"CUSTOM_WORK_KEY":"test-only"}}`,
+		`CUSTOM_WORK_KEY=test-only`,
+	)
+	otherDir := filepath.Join(filepath.Dir(selectedDir), "orch2")
+	writeTestFile(t, filepath.Join(otherDir, "init.json"),
+		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"CUSTOM_WORK_KEY"}},"addons":["telegram"]}`)
+	writeTestFile(t, filepath.Join(otherDir, ".agent.json"), `{"admin":{"karma":true}}`)
+
+	// Startup accepts the key declared by orch2 even when orch1 is selected.
+	// Both Doctor surfaces must use that same network-wide credential test.
+	lines := checkStartupDecision(selectedDir, globalDir)
+	assertLineFlag(t, lines, "config.json present", true, false)
+	assertLineFlag(t, lines, "API keys present", true, false)
+	assertLineFlag(t, lines, "No addons declared", true, false)
+
+	cliLines := CheckStartupDecisionCLI(filepath.Dir(selectedDir), globalDir)
+	if !strings.Contains(strings.Join(cliLines, "\n"), "config.json present") ||
+		!strings.Contains(strings.Join(cliLines, "\n"), "API keys present") {
+		t.Fatalf("CLI doctor should accept key declared by orch2: %v", cliLines)
+	}
+}
+
+func TestCheckStartupDecision_MirrorOnlyKeyDeclaredByAnotherOrchestrator(t *testing.T) {
+	selectedDir, globalDir := startupFixture(t,
+		`{}`,
+		`{"keys":{"CUSTOM_WORK_KEY":"test-only"}}`,
+		"",
+	)
+	otherDir := filepath.Join(filepath.Dir(selectedDir), "orch2")
+	writeTestFile(t, filepath.Join(otherDir, "init.json"),
+		`{"manifest":{"llm":{"api_key_env":"CUSTOM_WORK_KEY"}}}`)
+	writeTestFile(t, filepath.Join(otherDir, ".agent.json"), `{"admin":{"karma":true}}`)
+
+	lines := checkStartupDecision(selectedDir, globalDir)
+	assertLineFlag(t, lines, "config.json present", true, false)
+	assertLineFlag(t, lines, "config.json mirror", true, false)
+}
+
 func TestCheckStartupDecision_Degraded(t *testing.T) {
 	orchDir, globalDir := startupFixture(t,
 		`{"addons": {"imap": {}}}`,
