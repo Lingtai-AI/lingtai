@@ -1,13 +1,12 @@
 ---
 name: preset-skill-op-troubleshooting-migration
 description: Bounded first-pass triage for preset problems; routes deeper runtime/update/migration questions elsewhere instead of guessing.
-version: 1.0.0
-last_changed_at: "2026-07-19T00:00:00Z"
+version: 1.0.1
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/app.go
-  - tui/internal/tui/codex_pool_store.go
   - tui/internal/preset/preset_skill_router_test.go
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
@@ -38,19 +37,20 @@ migration internals it doesn't own.
   file-write error. If the user is instead asking whether the *provider*
   actually works, that is a `/doctor` question, not a save-time one — see
   `reference/operations/availability-save-gate/SKILL.md`.
-- **"I edited the preset/pool file but the running agent didn't change."**
+- **"I edited the preset but the running agent didn't change."**
   Expected — see `reference/operations/activation-session-refresh/SKILL.md`:
   saving alone never switches a running session; an explicit refresh,
   relaunch, or new service construction is required.
-- **"codex-pool file looks wrong / refuses my edit."** See
-  `reference/codex-pool/SKILL.md` — check whether the pool is
-  model-classified (a `models` key, even `{}`) before assuming a flat edit
-  should have worked.
+- **"The codex-pool preset/provider is gone."** Expected — built-in Codex
+  account pooling was retired (its template is pruned by
+  `RefreshTemplates`). Pooling now lives in the external subs-pool proxy;
+  see `reference/subs-pool/SKILL.md` for the `custom` Responses preset
+  shape to repoint the agent at.
 
 ## Out of scope — route, don't guess
 
 - Deeper **runtime** questions (kernel adapter registration, request-scoped
-  failover behavior beyond what's cited in `reference/codex-pool/SKILL.md`,
+  failover behavior,
   live provider request/response shapes) belong to kernel-side skills or
   direct kernel source reading — do not extrapolate kernel internals from
   TUI-side evidence.

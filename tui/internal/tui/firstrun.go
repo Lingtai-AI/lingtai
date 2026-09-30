@@ -1448,8 +1448,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// login first. Checks the preset's own codex_auth_path, so a
 				// different account being missing doesn't block this one.
 				family, authValid := m.presetCredentialState(p)
-				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
-					m.message = i18n.T(m.presetCredentialHintKey(family))
+				if family == preset.CredentialFamilyCodexSingle && !authValid {
+					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -1472,8 +1472,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil
 				}
 				family, authValid := m.presetCredentialState(p)
-				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
-					m.message = i18n.T(m.presetCredentialHintKey(family))
+				if family == preset.CredentialFamilyCodexSingle && !authValid {
+					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -2537,11 +2537,11 @@ func (m FirstRunModel) View() string {
 				displayDesc = p.Description.Summary
 			}
 			family, authValid := m.presetCredentialState(p)
-			needsCredential := (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid
+			needsCredential := family == preset.CredentialFamilyCodexSingle && !authValid
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			name := nameStyle.Render(displayName)
 			if needsCredential {
-				name += " " + StyleFaint.Render(i18n.T(m.presetCredentialHintKey(family)))
+				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
 			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
@@ -4174,17 +4174,13 @@ func (m FirstRunModel) presetAtVisibleIdx(i int) (preset.Preset, bool) {
 }
 
 // presetAuthState gathers the loaded credential facts used by preset selection.
-// CodexSingle validates its bound token; CodexPool validates the applicable
-// model category; ClaudeCLI reports the external CLI session.
+// CodexSingle validates its bound token; ClaudeCLI reports the external CLI
+// session.
 func (m FirstRunModel) presetAuthState() preset.AuthState {
-	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
 	return preset.AuthState{
-		CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
-		CodexAuthDir:              m.globalDir,
-		CodexPoolEligible:         poolEligible,
-		CodexPoolEligibleModels:   poolModels,
-		CodexPoolFallbackEligible: poolFallback,
-		ClaudeCodeAuthConfigured:  m.claudeCodeAuthValid,
+		CodexOAuthConfigured:     codexOAuthConfigured(m.globalDir),
+		CodexAuthDir:             m.globalDir,
+		ClaudeCodeAuthConfigured: m.claudeCodeAuthValid,
 	}
 }
 
@@ -4204,13 +4200,6 @@ func (m FirstRunModel) presetCredentialState(p preset.Preset) (preset.Credential
 		authValid = true
 	}
 	return rr.Family, rr.ManifestValid && authValid
-}
-
-func (m FirstRunModel) presetCredentialHintKey(family preset.CredentialFamily) string {
-	if family == preset.CredentialFamilyCodexPool {
-		return "firstrun.preset_pick.codex_pool_unavailable_hint"
-	}
-	return "firstrun.preset_pick.codex_needs_oauth_hint"
 }
 
 func (m FirstRunModel) codexAuthDisplayLabel() string {

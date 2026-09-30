@@ -2,7 +2,7 @@
 name: preset-skill-minimax
 description: "Use when revising the built-in minimax TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # minimax preset revision
 
 Use this child for the named built-in minimax preset. Its current constructor
-is minimaxPreset in tui/internal/preset/preset.go:1248: it ships MiniMax-M2.7,
+is minimaxPreset in tui/internal/preset/preset.go:1220: it ships MiniMax-M2.7,
 MINIMAX_API_KEY, the CN Anthropic-compatible default, and text/tool
 capabilities. The regional rows are ProviderRegionURLs["minimax"]: CN, INTL,
 and OpenCode Go.

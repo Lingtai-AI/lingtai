@@ -1,8 +1,8 @@
 ---
 name: preset-skill-op-activation-session-refresh
 description: How a saved preset becomes the running default, first-run/setup choice semantics, propagation, and what /refresh actually switches.
-version: 1.0.1
-last_changed_at: "2026-09-09T00:00:00Z"
+version: 1.0.2
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/tui/firstrun.go
   - tui/internal/tui/app.go
@@ -13,8 +13,8 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # Activation / session refresh
 
 Evidence: `tui/internal/tui/firstrun.go:3634-3818`,
-`tui/internal/tui/firstrun.go:4527`,
-`tui/internal/tui/firstrun.go:4609`, `tui/internal/tui/app.go:980-1029`,
+`tui/internal/tui/firstrun.go:4516`,
+`tui/internal/tui/firstrun.go:4598`, `tui/internal/tui/app.go:980-1029`,
 `tui/internal/tui/app.go:1249-1351`, `tui/internal/tui/app.go:1416-1500`, and
 `tui/internal/tui/app.go:1711-1737`.
 
@@ -83,11 +83,7 @@ already succeeded.
 **Saving a preset alone does not switch a running session.** A saved or
 even newly-activated (`default`) preset only takes effect on the *next*
 launch/refresh of a given agent — an explicit `/refresh [preset]`,
-relaunch, or new service construction is required to pick it up. This
-mirrors the codex-pool selection-at-construction rule in
-`reference/codex-pool/SKILL.md` — that pool selection is one more thing
-an in-place preset/pool-file edit does not retroactively touch on an
-already-running session.
+relaunch, or new service construction is required to pick it up.
 
 ## Operations
 

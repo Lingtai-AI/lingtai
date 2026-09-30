@@ -26,11 +26,11 @@ func TestResolveKanbanLLMConfig(t *testing.T) {
 	}{
 		{
 			name: "materialized values win field by field",
-			agentRaw: llm(map[string]any{"model": "gpt-5.6-sol", "provider": "codex-pool", "base_url": "https://chatgpt.com/backend-api/codex",
+			agentRaw: llm(map[string]any{"model": "gpt-5.6-sol", "provider": "codex", "base_url": "https://chatgpt.com/backend-api/codex",
 				"service_tier": "default", "thinking": "xhigh", "api_compat": "responses", "context_limit": float64(250000)}),
 			initRaw: llm(map[string]any{"model": "stale-model", "provider": "stale-provider", "base_url": "https://stale.example/v1",
 				"service_tier": "flex", "thinking": "low", "api_compat": "openai", "streaming": true, "context_limit": float64(500000)}),
-			want: kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex-pool", BaseURL: "https://chatgpt.com/backend-api/codex", Endpoint: "@chatgpt.com",
+			want: kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex", BaseURL: "https://chatgpt.com/backend-api/codex", Endpoint: "@chatgpt.com",
 				ServiceTier: "default", Thinking: "xhigh", APICompat: "responses", Streaming: "true", ContextLimit: "250000"},
 		},
 		{
@@ -147,7 +147,7 @@ func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 		"admin":        map[string]any{"nirvana": true},
 		"llm": map[string]any{
 			"model":        "gpt-5.6-sol",
-			"provider":     "codex-pool",
+			"provider":     "codex",
 			"base_url":     "https://chatgpt.com/backend-api/codex",
 			"service_tier": "default",
 			"thinking":     "xhigh",
@@ -206,7 +206,7 @@ func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 			Stats:       fs.NetworkStats{Active: 1, Idle: 1},
 			Activity:    fs.NetworkActivity{Status: fs.NetworkStatusDaemonActive, ActiveAgents: 1, RunningDaemons: 2},
 		},
-		detailByProvider:       map[string]fs.TokenTotals{"codex-pool": {Input: 100, APICalls: 2}},
+		detailByProvider:       map[string]fs.TokenTotals{"codex": {Input: 100, APICalls: 2}},
 		detailDaemonByProvider: map[string]fs.TokenTotals{"claude-p": {Input: 50, APICalls: 1}},
 		detailCurrentSessionStats: fs.SessionTokenStats{TokenTotals: fs.TokenTotals{
 			Input: 100, Output: 20, Thinking: 10, Cached: 80, APICalls: 2,
@@ -255,7 +255,7 @@ func TestPropsPrimarySummaryIsOperationsFirst(t *testing.T) {
 		i18n.T("props.section_current_session"),
 		i18n.T("props.section_network_now"),
 		"MainAgent", "MainNick", "ACTIVE",
-		"gpt-5.6-sol · codex-pool", "default", "xhigh", "@chatgpt.com",
+		"gpt-5.6-sol · codex", "default", "xhigh", "@chatgpt.com",
 		"broken-preset", i18n.TF("props.preset_configured_count", 1),
 		"66 / 500,000 (13.2%)",
 		i18n.T("props.session_input_tokens") + ": 100",
@@ -290,7 +290,7 @@ func TestPropsSinglePanePreservesEveryLowerCategory(t *testing.T) {
 		i18n.T("props.detail_network_history_topology"),
 		"agent-identity-123", "localhost:/only-in-details", "Esperanto", "alpha+beta",
 		"7", "42", "9",
-		"gpt-5.6-sol", "codex-pool", "default", "xhigh",
+		"gpt-5.6-sol", "codex", "default", "xhigh",
 		"https://chatgpt.com/backend-api/codex", "openai", "EXAMPLE_API_KEY", "true", "500000",
 		"broken-preset", "default-preset", i18n.T("props.preset_refs_not_checked"), "bash", "nirvana: true",
 		i18n.T("props.context_usage") + ": 66 / 500,000 (13.2%)",
@@ -1444,7 +1444,7 @@ func BenchmarkPropsRenderBodyCached(b *testing.B) {
 			"agent_id": "agent-1", "address": "main", "language": "en",
 			"capabilities": []string{"bash", "read", "web"},
 		},
-		selectedLLM:    kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex-pool", Endpoint: "@chatgpt.com"},
+		selectedLLM:    kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex", Endpoint: "@chatgpt.com"},
 		selectedTokens: fs.TokenTotals{Input: 1_000_000, Output: 20_000, Cached: 900_000, APICalls: 100},
 		tokens:         fs.TokenTotals{Input: 2_000_000, Output: 40_000, Cached: 1_800_000, APICalls: 200},
 		network: fs.Network{
@@ -1458,7 +1458,7 @@ func BenchmarkPropsRenderBodyCached(b *testing.B) {
 			Stats:    fs.NetworkStats{Active: 2, Idle: 2},
 			Activity: fs.NetworkActivity{Status: fs.NetworkStatusActive, RunningDaemons: 2},
 		},
-		detailByProvider:       map[string]fs.TokenTotals{"codex-pool": {Input: 1_000_000, APICalls: 100}},
+		detailByProvider:       map[string]fs.TokenTotals{"codex": {Input: 1_000_000, APICalls: 100}},
 		detailDaemonByProvider: map[string]fs.TokenTotals{"claude-p": {Input: 500_000, APICalls: 25}},
 	}
 	m.selectedStatus.Tokens.InputTokens = 10_000

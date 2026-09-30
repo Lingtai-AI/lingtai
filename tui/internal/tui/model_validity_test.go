@@ -64,7 +64,7 @@ func TestCodexModelValidityUsesResponsesAndSelectedAccount(t *testing.T) {
 
 	globalDir := t.TempDir()
 	writeCodexProbeToken(t, filepath.Join(globalDir, "codex-auth.json"), "selected-access")
-	status, detail := probeCodexModel("codex", "gpt-test", srv.URL, globalDir, "")
+	status, detail := probeCodexModel("gpt-test", srv.URL, globalDir, "")
 	if status != probeOK || detail != "" {
 		t.Fatalf("probe = %v, %q; want OK", status, detail)
 	}
@@ -118,7 +118,7 @@ func TestCodexModelValidityRefreshesExpiredAccessTokenBeforeProbing(t *testing.T
 	path := filepath.Join(globalDir, "codex-auth.json")
 	writeCodexProbeTokenWithExpiry(t, path, "stale-access", "stale-refresh", 1) // already expired
 
-	status, detail := probeCodexModel("codex", "gpt-5.6-sol", responsesSrv.URL, globalDir, "")
+	status, detail := probeCodexModel("gpt-5.6-sol", responsesSrv.URL, globalDir, "")
 	if status != probeOK || detail != "" {
 		t.Fatalf("probe = %v, %q; want OK after refreshing the expired token", status, detail)
 	}
@@ -156,7 +156,7 @@ func TestCodexModelValidityRevokedRefreshStaysAuthError(t *testing.T) {
 	path := filepath.Join(globalDir, "codex-auth.json")
 	writeCodexProbeTokenWithExpiry(t, path, "stale-access", "revoked-refresh", 1)
 
-	status, detail := probeCodexModel("codex", "gpt-5.6-sol", responsesSrv.URL, globalDir, "")
+	status, detail := probeCodexModel("gpt-5.6-sol", responsesSrv.URL, globalDir, "")
 	if status != probeAuthError {
 		t.Fatalf("probe = %v, %q; want probeAuthError for a revoked refresh grant", status, detail)
 	}
@@ -200,7 +200,7 @@ func TestCodexModelValidityTransientRefreshFailureIsRetryableNotAuthError(t *tes
 	path := filepath.Join(globalDir, "codex-auth.json")
 	writeCodexProbeTokenWithExpiry(t, path, "stale-access", "still-good-refresh", 1)
 
-	status, detail := probeCodexModel("codex", "gpt-5.6-sol", responsesSrv.URL, globalDir, "")
+	status, detail := probeCodexModel("gpt-5.6-sol", responsesSrv.URL, globalDir, "")
 	if status != probeOverloaded {
 		t.Fatalf("probe = %v, %q; want probeOverloaded (retryable) for a transient refresh failure, not a hard auth error", status, detail)
 	}
@@ -213,56 +213,8 @@ func TestCodexModelValidityTransientRefreshFailureIsRetryableNotAuthError(t *tes
 	}
 }
 
-func TestCodexPoolModelValidityFailsClosedForIneligibleNonemptyPool(t *testing.T) {
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":"model not eligible"}`))
-	}))
-	defer srv.Close()
-
-	globalDir := t.TempDir()
-	writeCodexProbeToken(t, filepath.Join(globalDir, "codex-auth", "member.json"), "pool-access")
-	pool := fmt.Sprintf(`{"version":1,"accounts":[{"path":"codex-auth/member.json","weight":1}]}`)
-	if err := os.WriteFile(codexPoolPath(globalDir), []byte(pool), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// A valid legacy token must not become a hidden fallback when the pool is
-	// non-empty and its selected member is ineligible.
-	writeCodexProbeToken(t, filepath.Join(globalDir, "codex-auth.json"), "legacy-access")
-
-	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, globalDir, "")
-	if status != probeAuthError || !strings.Contains(detail, "no eligible Codex pool account") {
-		t.Fatalf("probe = %v, %q; want loud ineligible-pool failure", status, detail)
-	}
-	if calls != 1 {
-		t.Fatalf("Responses calls = %d, want exactly the selected pool member", calls)
-	}
-}
-
-func TestCodexPoolModelValidity_ZeroDisabledAndBlankUseLegacyProbe(t *testing.T) {
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"object":"response","output":[]}`))
-	}))
-	defer srv.Close()
-	dir := t.TempDir()
-	writeCodexProbeToken(t, filepath.Join(dir, "codex-auth.json"), "legacy")
-	raw := []byte(`{"version":1,"accounts":[{"path":"","weight":1},{"path":"codex-auth/disabled.json","weight":1,"enabled":false},{"path":"codex-auth/zero.json","weight":0}]}`)
-	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
-	if status != probeOK || detail != "" || calls != 1 {
-		t.Fatalf("probe = %v, %q, calls=%d; want legacy fallback", status, detail, calls)
-	}
-}
-
 func TestCodexModelValidityRequiresSelectedModel(t *testing.T) {
-	status, detail := probeCodexModel("codex", "", "", t.TempDir(), "")
+	status, detail := probeCodexModel("", "", t.TempDir(), "")
 	if status != probeUnknown || !strings.Contains(detail, "selected Codex model is missing") {
 		t.Fatalf("probe = %v, %q; want explicit missing-model state", status, detail)
 	}

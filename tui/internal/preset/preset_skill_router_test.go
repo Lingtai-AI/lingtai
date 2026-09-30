@@ -58,19 +58,36 @@ var wantOperations = map[string]bool{
 	"troubleshooting-migration":  true,
 }
 
+// wantExternalRecipes is the fixed set of top-level reference/<name>/ children
+// that are NOT BuiltinPresets() templates: external-endpoint recipes a user
+// configures through an ordinary saved preset (subs-pool is reached as a
+// custom OpenAI-compatible Responses endpoint). Like wantOperations, there is
+// no runtime source list for them, so this literal is the single source of
+// truth. A recipe name must never collide with a template name.
+var wantExternalRecipes = map[string]bool{
+	"subs-pool": true,
+}
+
 // TestPresetSkillRouter_BuiltinBijection keeps the source preset list, the
 // embedded direct-provider manuals, the parent router, and extracted utility
-// tree aligned. Direct providers are exactly the 13 BuiltinPresets() names —
-// nested operation children live under reference/operations/ and are
-// validated separately by TestPresetSkillRouter_OperationBijection so a
-// provider directory can never silently absorb an operation, or vice versa.
+// tree aligned. Top-level children are exactly the 12 BuiltinPresets() names
+// plus wantExternalRecipes — nested operation children live under
+// reference/operations/ and are validated separately by
+// TestPresetSkillRouter_OperationBijection so a provider directory can never
+// silently absorb an operation, or vice versa.
 func TestPresetSkillRouter_BuiltinBijection(t *testing.T) {
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
 		if want[p.Name] {
 			t.Errorf("BuiltinPresets() contains duplicate name %q", p.Name)
 		}
+		if wantExternalRecipes[p.Name] {
+			t.Errorf("BuiltinPresets() name %q collides with an external recipe child", p.Name)
+		}
 		want[p.Name] = true
+	}
+	for name := range wantExternalRecipes {
+		want[name] = true
 	}
 
 	children := map[string]bool{}
@@ -331,7 +348,6 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"nvidia",
 		"openrouter",
 		"codex",
-		"codex-pool",
 		"claude",
 		"custom",
 	}
@@ -363,48 +379,38 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	}
 }
 
-// TestPresetSkillRouter_CodexPoolContract checks the codex-pool manual holds
-// the critical pool-format/selection/manual-edit facts the #691 brief
-// requires, without asserting on prose wording beyond the load-bearing
-// technical terms.
-func TestPresetSkillRouter_CodexPoolContract(t *testing.T) {
-	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/codex-pool/SKILL.md")
+// TestPresetSkillRouter_SubsPoolContract checks the subs-pool recipe points at
+// the external project and carries the minimal custom Responses manifest.llm
+// shape, and that the retired built-in pool is not routed as a template.
+func TestPresetSkillRouter_SubsPoolContract(t *testing.T) {
+	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/subs-pool/SKILL.md")
 	if err != nil {
-		t.Fatalf("read codex-pool manual: %v", err)
+		t.Fatalf("read subs-pool manual: %v", err)
 	}
 	body := string(data)
 	for _, want := range []string{
-		"$LINGTAI_TUI_DIR/codex-auth-pool.json",
-		"~/.lingtai-tui/codex-auth-pool.json",
-		`"version": 1, "accounts"`,
-		`"version": 2, "models"`,
-		"of the `models` key is what classifies",
-		"errCodexPoolModelClassified",
-		"stores only refs and integer weights",
-		"never token",
-		"Weight 0 means the account is present but disabled",
-		"sticky within one agent wake/session",
-		"excludes `molt_count`",
-		"Selection happens at adapter/service construction",
-		"does **not** reselect an",
-		"already-running session",
-		"Configured weights are inputs, not measured shares",
-		"falls back to the legacy",
-		"Exact authorization",
-		"Timestamped backup",
-		"Exact-old-value or hash gate",
-		"atomic rename",
-		"load_codex_auth_pool",
-		"Preserve the original file on any validation failure",
-		"Never print token/auth contents or absolute auth paths",
-		"tui/internal/tui/codex_pool_store.go:11-330",
-		"login.go:171-201,285-299,603-702",
-		"auth/codex_pool.py:72-323",
-		"_register.py:424-497",
+		"https://github.com/Lingtai-AI/subs-pool",
+		`"provider": "custom"`,
+		`"api_compat": "openai"`,
+		`"wire_api": "responses"`,
+		`"base_url": "http://127.0.0.1:<port>/v1"`,
+		`"api_key_env"`,
+		"local access key",
+		"README",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("codex-pool manual missing %q", want)
+			t.Errorf("subs-pool manual missing %q", want)
 		}
+	}
+	if _, err := fs.Stat(skillsFS, "skills/lingtai-preset-skill/reference/codex-pool"); err == nil {
+		t.Error("retired reference/codex-pool child must not be embedded")
+	}
+	parentData, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
+	if err != nil {
+		t.Fatalf("read parent: %v", err)
+	}
+	if strings.Contains(string(parentData), "codex-pool") {
+		t.Error("parent router must not route the retired codex-pool template")
 	}
 }
 
@@ -449,7 +455,7 @@ func TestPresetSkillRouter_SavedAndAvailabilitySourceContracts(t *testing.T) {
 	for _, want := range []string{
 		"Save is structural-only",
 		"never makes a live provider/model network call",
-		"Codex, Codex-pool, and API-key providers like",
+		"Codex and API-key providers like",
 		"DeepSeek",
 		"not been replaced by another probe",
 		"`/doctor`",
@@ -470,7 +476,7 @@ func TestPresetSkillRouter_SavedAndAvailabilitySourceContracts(t *testing.T) {
 
 // TestPresetSkillRouter_QuotaContract checks the endpoint-capabilities
 // operation child holds the Codex OAuth quota inspection facts required by
-// the #691 brief, cross-linked from codex and codex-pool. Updated for the
+// the #691 brief, cross-linked from codex. Updated for the
 // 2026-07-19 CORRECTION-372K post-run fix: exact agent-facing app-server
 // query routing (initialize -> account/rateLimits/read with params:null,
 // plus the account/rateLimits/updated notification as a rolling
@@ -534,7 +540,7 @@ func TestPresetSkillRouter_QuotaContract(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"codex", "codex-pool"} {
+	for _, name := range []string{"codex"} {
 		child, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/"+name+"/SKILL.md")
 		if err != nil {
 			t.Fatalf("read %s manual: %v", name, err)

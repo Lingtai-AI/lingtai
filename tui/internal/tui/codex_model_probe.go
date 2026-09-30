@@ -38,11 +38,11 @@ func freshCodexAccessToken(path string, tokens CodexTokens) (string, probeStatus
 }
 
 // probeCodexModel is the eligibility probe for the ChatGPT-backed Codex
-// providers. It intentionally does not use the models catalogue: that only
+// provider. It intentionally does not use the models catalogue: that only
 // proves token reachability, not that this model/account can serve a real
-// Responses request. Pool candidates are the same token paths the kernel can
-// select, and a non-empty pool never falls back silently to the legacy token.
-func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probeStatus, string) {
+// Responses request. The candidate is the token file the preset's
+// codex_auth_path resolves to (the legacy token when unbound).
+func probeCodexModel(model, baseURL, globalDir, authRef string) (probeStatus, string) {
 	if strings.TrimSpace(model) == "" {
 		return probeUnknown, "selected Codex model is missing"
 	}
@@ -50,63 +50,16 @@ func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probe
 		return probeNoKey, "Codex credential directory is unavailable"
 	}
 
-	paths := []string{}
-	if provider == "codex-pool" || provider == "codex_pool" {
-		pool, err := loadCodexPool(globalDir)
-		if err != nil {
-			return probeUnknown, "Codex pool is unreadable"
-		}
-		if pool.Models == nil {
-			accounts := codexPoolAccountsRepresentable(pool.Accounts)
-			if len(accounts) == 0 {
-				paths = append(paths, legacyCodexAuthPath(globalDir))
-			} else {
-				for _, account := range accounts {
-					paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
-				}
-			}
-		} else {
-			accounts, present := (*pool.Models)[model]
-			if !present || len(accounts) == 0 {
-				paths = append(paths, legacyCodexAuthPath(globalDir))
-			} else if representable := codexPoolAccountsRepresentable(accounts); len(representable) == 0 {
-				paths = append(paths, legacyCodexAuthPath(globalDir))
-			} else {
-				for _, account := range representable {
-					paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
-				}
-			}
-		}
-	} else {
-		paths = append(paths, resolveCodexAuthPath(globalDir, authRef))
+	path := resolveCodexAuthPath(globalDir, authRef)
+	tokens, ok := readCodexTokenFile(path)
+	if !ok || strings.TrimSpace(tokens.AccessToken) == "" {
+		return probeAuthError, "Codex OAuth credential is missing or unusable"
 	}
-	if len(paths) == 0 {
-		return probeAuthError, fmt.Sprintf("no eligible Codex account for model %s", model)
+	accessToken, status, detail := freshCodexAccessToken(path, tokens)
+	if status != probeOK {
+		return status, detail
 	}
-
-	var lastStatus probeStatus = probeAuthError
-	var lastDetail string
-	for _, path := range paths {
-		tokens, ok := readCodexTokenFile(path)
-		if !ok || strings.TrimSpace(tokens.AccessToken) == "" {
-			lastStatus, lastDetail = probeAuthError, "Codex OAuth credential is missing or unusable"
-			continue
-		}
-		accessToken, status, detail := freshCodexAccessToken(path, tokens)
-		if status != probeOK {
-			lastStatus, lastDetail = status, detail
-			continue
-		}
-		status, detail = probeCodexResponses(path, accessToken, model, baseURL)
-		if status == probeOK {
-			return status, ""
-		}
-		lastStatus, lastDetail = status, detail
-	}
-	if provider == "codex-pool" || provider == "codex_pool" {
-		return lastStatus, fmt.Sprintf("no eligible Codex pool account served model %s: %s", model, lastDetail)
-	}
-	return lastStatus, lastDetail
+	return probeCodexResponses(path, accessToken, model, baseURL)
 }
 
 func probeCodexResponses(authPath, accessToken, model, baseURL string) (probeStatus, string) {

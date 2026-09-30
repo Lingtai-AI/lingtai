@@ -23,7 +23,7 @@ The second failure mode is what this file exists to prevent.
 ## Shared service-tier editor behavior
 
 `serviceTierOptions` (`preset_editor.go`) is the one `normal | fast` vocabulary
-used by the preset editor for every provider, including Codex Pool, API-key,
+used by the preset editor for every provider, including Codex, API-key,
 CLI-backed, and Custom built-ins. The row is always visible and cyclable. A
 missing or `normal` value displays as `normal` and omits
 `manifest.llm.service_tier` on commit; `fast` persists as the string `"fast"`.

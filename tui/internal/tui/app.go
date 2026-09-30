@@ -2365,20 +2365,15 @@ func codexOAuthConfigured(globalDir string) bool {
 
 // validateCodexAuthForAgents scans active/default preset manifests for every
 // agent under projectDir. Single-account Codex presets validate their bound
-// account; Codex pool presets reuse the kernel-mirroring pool eligibility facts.
-// Provider ownership comes only from a successfully loaded manifest, never from
-// a preset filename or path, so malformed/unreadable refs are skipped. Returns a
-// warning naming the first Codex agent without usable credentials, or "" when
-// every discovered Codex agent is eligible.
+// account. Provider ownership comes only from a successfully loaded manifest,
+// never from a preset filename or path, so malformed/unreadable refs are
+// skipped. Returns a warning naming the first Codex agent without usable
+// credentials, or "" when every discovered Codex agent is eligible.
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	entries, _ := os.ReadDir(projectDir)
-	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(globalDir)
 	auth := preset.AuthState{
-		CodexOAuthConfigured:      codexOAuthConfigured(globalDir),
-		CodexAuthDir:              globalDir,
-		CodexPoolEligible:         poolEligible,
-		CodexPoolEligibleModels:   poolModels,
-		CodexPoolFallbackEligible: poolFallback,
+		CodexOAuthConfigured: codexOAuthConfigured(globalDir),
+		CodexAuthDir:         globalDir,
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -2413,7 +2408,7 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 			if len(rr) != 1 || !rr[0].ManifestValid {
 				continue
 			}
-			if (rr[0].Family == preset.CredentialFamilyCodexSingle || rr[0].Family == preset.CredentialFamilyCodexPool) && !rr[0].HasKey {
+			if rr[0].Family == preset.CredentialFamilyCodexSingle && !rr[0].HasKey {
 				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}

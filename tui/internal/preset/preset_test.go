@@ -232,8 +232,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 13 {
-			t.Fatalf("expected 13 presets, got %d", len(presets))
+		if len(presets) != 12 {
+			t.Fatalf("expected 12 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -242,7 +242,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "codex", "claude", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -686,7 +686,6 @@ func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
 		{"nvidia", nvidiaPreset(), "nvidia/nemotron-3-ultra-550b-a55b"},
 		{"openrouter", openrouterPreset(), "z-ai/glm-5.3"},
 		{"codex", codexPreset(), "gpt-5.6-sol"},
-		{"codex-pool", codexPoolPreset(), "gpt-5.6-sol"},
 		{"claude", claudePreset(), "opus"},
 		{"custom", customPreset(), ""},
 	}
@@ -1141,8 +1140,8 @@ func TestCredentialFamilyAliases(t *testing.T) {
 	}{
 		{"codex", CredentialFamilyCodexSingle},
 		{"codex_oauth", CredentialFamilyCodexSingle},
-		{"codex-pool", CredentialFamilyCodexPool},
-		{"codex_pool", CredentialFamilyCodexPool},
+		{"codex-pool", CredentialFamilyOther},
+		{"codex_pool", CredentialFamilyOther},
 		{"claude-code", CredentialFamilyClaudeCLI},
 		{"claude_code", CredentialFamilyClaudeCLI},
 		{"claude-agent-sdk", CredentialFamilyClaudeCLI},

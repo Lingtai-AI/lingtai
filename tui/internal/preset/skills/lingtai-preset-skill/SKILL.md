@@ -1,8 +1,8 @@
 ---
 name: lingtai-preset-skill
 description: "Use when asking about built-in TUI presets or their shared operations."
-version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+version: 3.1.0
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -22,9 +22,9 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/subs-pool/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/availability-save-gate/SKILL.md
@@ -36,13 +36,14 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # Built-in preset router
 
 This router covers exactly the names returned by `BuiltinPresets()` in
-`tui/internal/preset/preset.go`. It covers TUI-owned template presets only, not
-arbitrary saved presets. Route a named-preset revision to the direct child with
-the matching name under `reference/<name>/SKILL.md`. That child owns the
+`tui/internal/preset/preset.go`, plus one external-endpoint recipe
+(`subs-pool`) that is not a template. It covers TUI-owned template presets
+only, not arbitrary saved presets. Route a named-preset revision to the direct
+child with the matching name under `reference/<name>/SKILL.md`. That child owns the
 provider's official latest-model lookup, route distinctions, exact TUI surfaces,
 vision/capability facts, and named-preset revision instructions.
 
-## Direct children: the 13 BuiltinPresets names
+## Direct children: the 12 BuiltinPresets names
 
 | Name | Direct child | Route hint |
 |---|---|---|
@@ -56,7 +57,6 @@ vision/capability facts, and named-preset revision instructions.
 | nvidia | reference/nvidia/SKILL.md | NVIDIA NIM/API Catalog gateway |
 | openrouter | reference/openrouter/SKILL.md | OpenRouter gateway |
 | codex | reference/codex/SKILL.md | ChatGPT OAuth Codex route |
-| codex-pool | reference/codex-pool/SKILL.md | pooled ChatGPT OAuth route |
 | claude | reference/claude/SKILL.md | Claude Code CLI/OAuth aliases |
 | custom | reference/custom/SKILL.md | user-supplied compatible endpoint |
 
@@ -81,13 +81,25 @@ vision/capability facts, and named-preset revision instructions.
   location: reference/openrouter/SKILL.md
 - name: preset-skill-codex
   location: reference/codex/SKILL.md
-- name: preset-skill-codex-pool
-  location: reference/codex-pool/SKILL.md
 - name: preset-skill-claude
   location: reference/claude/SKILL.md
 - name: preset-skill-custom
   location: reference/custom/SKILL.md
 ```
+
+## External endpoint recipe: not a template
+
+| Name | Child | Route hint |
+|---|---|---|
+| subs-pool | reference/subs-pool/SKILL.md | multi-account Codex pooling via the external subs-pool proxy (a `custom` Responses preset) |
+
+```yaml
+- name: preset-skill-subs-pool
+  location: reference/subs-pool/SKILL.md
+```
+
+Account pooling is not built into the TUI or kernel; route pooling questions
+to this child instead of a template.
 
 Do not merge gateway catalogs, CLI/OAuth aliases, and native provider catalogs.
 `custom` has no universal latest model: inspect its configured endpoint and

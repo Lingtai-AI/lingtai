@@ -1,8 +1,8 @@
 ---
 name: preset-skill-op-endpoint-capabilities
 description: Base URL / API-compat / provider / model / capability declaration shape versus credentials and live probes; includes proven Codex OAuth quota inspection with exact agent query routing and dated official-vs-measured context-window evidence.
-version: 1.1.0
-last_changed_at: "2026-07-19T12:00:00Z"
+version: 1.1.1
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/model_validity.go
@@ -19,7 +19,7 @@ instead of re-explaining the shape every time.
 ## Declaration fields (non-credential)
 
 - **`provider`** — the kernel adapter name (`minimax`, `zhipu`, `codex`,
-  `codex-pool`, ...). Selects which adapter class handles the request; not
+  `custom`, ...). Selects which adapter class handles the request; not
   itself a credential.
 - **`model`** — the exact model string sent to the provider. Some
   providers (`gemini`, `claude-code`) use a native alias or model id
@@ -48,9 +48,9 @@ These declaration fields answer "what will be called and how" — they are
 - **Credentials** — `api_key_env` (env-var name, not a value),
   `codex_auth_path` (which bound OAuth token file, not its contents), or
   local CLI login state (`claude-code`). See `ResolveRefsWithAuth`
-  (`tui/internal/preset/preset.go:752-836`) for how credential *validity*
+  (`tui/internal/preset/preset.go:748-829`) for how credential *validity*
   (not the declaration) is judged per-provider — keyed providers check
-  `existingKeys[envName]`, `codex`/`codex-pool` check OAuth state
+  `existingKeys[envName]`, `codex` checks OAuth state
   (per-account when `AuthState.CodexAuthDir` is set, else the global
   `CodexOAuthConfigured` bool), `claude-code` checks
   `ClaudeCodeAuthConfigured`.
@@ -119,7 +119,7 @@ An agent that needs live Codex OAuth quota/rate-limit data must:
   of it should ever be paired with the OAuth token file's contents or
   absolute path when reported back to a user.
 - The response schema carries no field for the account's identity beyond
-  what the existing `codex`/`codex-pool` display rules already allow
+  what the existing `codex` display rules already allow
   (label → email → default/slug) — do not read account identity out of
   this response; it is a rate-limit/credits payload, not an identity one.
 - `rateLimitResetCredits.credits` can be `null` (only `availableCount`
@@ -211,15 +211,15 @@ account:
   duration, and limit-id fields explicitly; a bare "remaining %" without
   its window/reset context is not enough to act on.
 - **Never expose auth paths or tokens** while displaying this — the same
-  discipline as `reference/codex-pool/SKILL.md`'s display rules (label →
-  email → default/slug, never the raw path or token).
+  discipline as the Codex credential display rules (label → email →
+  default/slug, never the raw path or token).
 
 This section documents the direct Codex source operation independently of
 any adapter convenience surface. If the running adapter exposes equivalent
 quota telemetry, verify its fields and version against this source contract;
 otherwise use the exact app-server sequence above. See
-`reference/codex/SKILL.md` and `reference/codex-pool/SKILL.md` for the
-provider-specific routing and account-safety boundaries.
+`reference/codex/SKILL.md` for the provider-specific routing and
+account-safety boundaries.
 
 ## Operations
 

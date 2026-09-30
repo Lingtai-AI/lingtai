@@ -1,8 +1,8 @@
 ---
 name: preset-skill-op-availability-save-gate
 description: Save on the preset editor performs local structural validation only — it never makes a live provider/model network call. Real availability diagnosis is owned by /doctor and actual runtime execution.
-version: 2.0.0
-last_changed_at: "2026-07-24T00:00:00Z"
+version: 2.0.1
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/model_validity.go
@@ -20,7 +20,7 @@ Evidence: `tui/internal/tui/preset_editor.go`'s `commit()`.
 `commit()` runs the preset's structural `Validate()` and, if it passes,
 saves immediately. There is no live HTTP call, no pending/checking state,
 and no per-tuple credential fingerprinting gate on Save — for any
-provider, including Codex, Codex-pool, and API-key providers like
+provider, including Codex and API-key providers like
 DeepSeek. See `reference/operations/saved-presets/SKILL.md` for what
 `Validate()` checks.
 

@@ -727,7 +727,7 @@ func validateResponses(provider string, semantics ResponsesSemantics) error {
 	if semantics.ReasoningDefault == "" || !contains(semantics.ReasoningVocabulary, semantics.ReasoningDefault) {
 		return conflictf("Responses reasoning_default must be in the declared vocabulary")
 	}
-	if provider == "codex" || provider == "codex-pool" {
+	if provider == "codex" {
 		if !sameStringSet(semantics.ReasoningVocabulary, []string{"low", "medium", "high", "xhigh"}) {
 			return conflictf("Codex reasoning vocabulary must remain low, medium, high, xhigh")
 		}

@@ -56,13 +56,6 @@ func writeSyntheticAgentInit(t *testing.T, projectDir, agentName, presetRef stri
 	}
 }
 
-func writeSyntheticPool(t *testing.T, globalDir string, doc string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(globalDir, codexPoolFileName), []byte(doc), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestValidateCodexAuthForAgentsUsesLoadedManifestNotFilename(t *testing.T) {
 	t.Setenv("LINGTAI_TUI_DIR", "")
 	globalDir, projectDir := t.TempDir(), t.TempDir()
@@ -118,63 +111,6 @@ func TestValidateCodexAuthForAgentsUsesCodexBoundAndLegacyFacts(t *testing.T) {
 				t.Fatalf("warning named agent-codex %d times, want exactly once: %q", strings.Count(got, "agent-codex"), got)
 			}
 		})
-	}
-}
-
-func TestValidateCodexAuthForAgentsPoolFallbackAndApplicableEntries(t *testing.T) {
-	t.Setenv("LINGTAI_TUI_DIR", "")
-	tests := []struct {
-		name string
-		pool string
-		warn bool
-	}{
-		{name: "pool absent", warn: false},
-		{name: "pool empty fallback", pool: `{"version":1,"accounts":[]}`, warn: false},
-		{name: "nonempty unusable", pool: `{"version":1,"accounts":[{"path":"missing.json","weight":1}]}`, warn: true},
-		{name: "disabled account", pool: `{"version":1,"accounts":[{"path":"codex-auth.json","weight":1,"enabled":false}]}`, warn: false},
-		{name: "wrong model category", pool: `{"version":2,"models":{"gpt-5.6-sol":[{"path":"missing.json","weight":1}],"other-model":[{"path":"codex-auth.json","weight":1}]}}`, warn: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			globalDir, projectDir := t.TempDir(), t.TempDir()
-			writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "legacy@example.test")
-			if tt.pool != "" {
-				writeSyntheticPool(t, globalDir, tt.pool)
-			}
-			presetRef := filepath.Join(t.TempDir(), "unrelated-preset-name.json")
-			writeSyntheticAgentPreset(t, projectDir, "pool-agent", presetRef, "codex-pool", "gpt-5.6-sol", "", false)
-			got := validateCodexAuthForAgents(globalDir, projectDir)
-			want := ""
-			if tt.warn {
-				want = i18n.TF("codex.oauth_unverified_agent", "pool-agent")
-			}
-			if got != want {
-				t.Fatalf("warning = %q, want exact warning %q", got, want)
-			}
-			if tt.warn && strings.Count(got, "pool-agent") != 1 {
-				t.Fatalf("warning named pool-agent %d times, want exactly once: %q", strings.Count(got, "pool-agent"), got)
-			}
-		})
-	}
-}
-
-func TestValidateAndPickUsableNonemptyApplicableCodexPool(t *testing.T) {
-	t.Setenv("LINGTAI_TUI_DIR", "")
-	globalDir, projectDir := t.TempDir(), t.TempDir()
-	accountPath := filepath.Join(globalDir, codexAuthSubdir, "pool-account.json")
-	writeStubCodexToken(t, accountPath, "pool@example.test")
-	writeSyntheticPool(t, globalDir, `{"version":2,"models":{"gpt-5.6-sol":[{"path":"codex-auth/pool-account.json","weight":1,"enabled":true}]}}`)
-
-	presetRef := filepath.Join(t.TempDir(), "preset-with-arbitrary-name.data")
-	writeSyntheticAgentPreset(t, projectDir, "pool-agent", presetRef, "codex-pool", "gpt-5.6-sol", "", false)
-	if got := validateCodexAuthForAgents(globalDir, projectDir); got != "" {
-		t.Fatalf("usable nonempty applicable pool produced warning: %q", got)
-	}
-
-	m := firstRunPickerModel(t, globalDir, syntheticPickerPreset("codex-pool", "gpt-5.6-sol"))
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.step != stepEditPreset || m.message != "" {
-		t.Fatalf("usable nonempty applicable pool did not advance cleanly: step=%v message=%q", m.step, m.message)
 	}
 }
 
@@ -250,54 +186,53 @@ func firstRunPickerModel(t *testing.T, globalDir string, p preset.Preset) FirstR
 	return m
 }
 
-func TestFirstRunPickerGuardsUnavailableCodexPool(t *testing.T) {
+// TestValidateCodexAuthForAgentsIgnoresRetiredCodexPoolProvider pins that the
+// retired codex-pool provider spellings are no longer a Codex credential
+// family: an agent still naming one is not reported as missing Codex OAuth
+// (pooling now lives in the external subs-pool project).
+func TestValidateCodexAuthForAgentsIgnoresRetiredCodexPoolProvider(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	for _, provider := range []string{"codex-pool", "codex_pool"} {
+		t.Run(provider, func(t *testing.T) {
+			globalDir, projectDir := t.TempDir(), t.TempDir()
+			presetRef := filepath.Join(t.TempDir(), "retired-pool-preset.json")
+			writeSyntheticAgentPreset(t, projectDir, "pool-agent", presetRef, provider, "gpt-5.6-sol", "", false)
+			if got := validateCodexAuthForAgents(globalDir, projectDir); got != "" {
+				t.Fatalf("retired %s provider produced Codex OAuth warning: %q", provider, got)
+			}
+		})
+	}
+}
+
+func TestFirstRunPickerGuardsUnauthenticatedCodex(t *testing.T) {
 	t.Setenv("LINGTAI_TUI_DIR", "")
 	i18n.SetLang("en")
 	globalDir := t.TempDir()
-	// Legacy auth is valid, but a nonempty applicable pool must still win:
-	// this member is missing, so the selected model has no usable account.
-	writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "legacy@example.test")
-	writeSyntheticPool(t, globalDir, `{"version":1,"accounts":[{"path":"missing-account.json","weight":1}]}`)
 
-	m := firstRunPickerModel(t, globalDir, syntheticPickerPreset("codex-pool", "gpt-5.6-sol"))
+	m := firstRunPickerModel(t, globalDir, syntheticPickerPreset("codex", "gpt-5.6-sol"))
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if m.step != stepPickPreset || m.cursor != 0 {
-		t.Fatalf("unavailable Codex pool selection moved: step=%v cursor=%d", m.step, m.cursor)
+		t.Fatalf("unauthenticated Codex selection moved: step=%v cursor=%d", m.step, m.cursor)
 	}
-	hint := i18n.T("firstrun.preset_pick.codex_pool_unavailable_hint")
+	hint := i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 	if m.message != hint {
 		t.Fatalf("picker message = %q, want %q", m.message, hint)
 	}
 	if !strings.Contains(m.View(), hint) {
-		t.Fatalf("picker view did not visibly mark unavailable pool; view=%s", m.View())
+		t.Fatalf("picker view did not visibly mark unauthenticated Codex; view=%s", m.View())
 	}
 }
 
-func TestFirstRunPickerAllowsCodexPoolLegacyFallbackWhenPoolAbsentOrEmpty(t *testing.T) {
+func TestFirstRunPickerAllowsAuthenticatedCodex(t *testing.T) {
 	t.Setenv("LINGTAI_TUI_DIR", "")
 	i18n.SetLang("en")
-	for _, poolDoc := range []struct {
-		name string
-		doc  string
-	}{
-		{name: "absent"},
-		{name: "empty", doc: `{"version":1,"accounts":[]}`},
-	} {
-		t.Run(poolDoc.name, func(t *testing.T) {
-			globalDir := t.TempDir()
-			writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "legacy@example.test")
-			if poolDoc.doc != "" {
-				writeSyntheticPool(t, globalDir, poolDoc.doc)
-			}
-			m := firstRunPickerModel(t, globalDir, syntheticPickerPreset("codex-pool", "gpt-5.6-sol"))
-			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			if m.step != stepEditPreset {
-				t.Fatalf("validated legacy fallback should allow selection, got step=%v message=%q", m.step, m.message)
-			}
-			if m.message != "" {
-				t.Fatalf("validated legacy fallback produced warning: %q", m.message)
-			}
-		})
+	globalDir := t.TempDir()
+	writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "legacy@example.test")
+
+	m := firstRunPickerModel(t, globalDir, syntheticPickerPreset("codex", "gpt-5.6-sol"))
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.step != stepEditPreset || m.message != "" {
+		t.Fatalf("authenticated Codex did not advance cleanly: step=%v message=%q", m.step, m.message)
 	}
 }

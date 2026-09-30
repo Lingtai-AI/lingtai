@@ -2,7 +2,7 @@
 name: preset-skill-custom
 description: "Use when revising the built-in custom TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # custom preset revision
 
 Use this child for the named built-in custom preset. customPreset in
-tui/internal/preset/preset.go:1532 is an OpenAI-compatible user-supplied
+tui/internal/preset/preset.go:1471 is an OpenAI-compatible user-supplied
 template: empty model, LLM_API_KEY, user-supplied base_url, web_search,
 skills, and vision inherited from the configured endpoint. It has no universal
 latest model and no provider-wide model or vision promise.

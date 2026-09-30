@@ -2,7 +2,7 @@
 name: preset-skill-claude
 description: "Use when revising the built-in claude TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # claude preset revision
 
 Use this child for the named built-in claude preset. claudePreset in
-tui/internal/preset/preset.go:1501 uses canonical provider claude-code and
+tui/internal/preset/preset.go:1440 uses canonical provider claude-code and
 the local Claude Code CLI's OAuth login, with model alias opus and no API-key
 env, base_url, web_search override, or LingTai vision capability. The editor
 also offers fable, sonnet, and haiku aliases.

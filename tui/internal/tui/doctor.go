@@ -1194,7 +1194,7 @@ const (
 // reads ~/.codex/auth.json from a prior `codex login`).
 func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, string) {
 	family := preset.ClassifyCredentialFamily(provider)
-	if family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool || family == preset.CredentialFamilyClaudeCLI {
+	if family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyClaudeCLI {
 		return probeOAuth, ""
 	}
 	if apiKey == "" {
