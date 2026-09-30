@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,6 +16,40 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
+
+// TestFirstRunModelForwardsCodexPublicModelsMsgToEmbeddedEditor is the real
+// embedded-editor message/command path test for the wizard host: it drives
+// the actual FirstRunModel.Update (not PresetEditorModel.Update directly) so
+// the explicit codexPublicModelsMsg forwarding case added there is exercised
+// exactly as the running program would exercise it. It also proves the
+// message is a no-op on every OTHER step, matching "never live endpoint
+// gating unit tests" — no network call, no Init(), just the message value.
+func TestFirstRunModelForwardsCodexPublicModelsMsgToEmbeddedEditor(t *testing.T) {
+	p := testCodexPresetEditorPreset(nil)
+	msg := codexPublicModelsMsg{options: []config.CodexModelOption{
+		{Slug: "gpt-6-astra", Label: "GPT-6 Astra"},
+	}}
+
+	editing := FirstRunModel{step: stepEditPreset, presetEditor: NewPresetEditorModel(p, "en", nil, "")}
+	updated, cmd := editing.Update(msg)
+	if cmd != nil {
+		t.Fatal("forwarding the refresh result must not itself emit a follow-up command")
+	}
+	if len(updated.presetEditor.codexModels) != 1 || updated.presetEditor.codexModels[0].Slug != "gpt-6-astra" {
+		t.Fatalf("presetEditor.codexModels after forwarding = %#v, want the refreshed options applied", updated.presetEditor.codexModels)
+	}
+
+	seeded := NewPresetEditorModel(p, "en", nil, "")
+	elsewhere := FirstRunModel{step: stepPickPreset, presetEditor: seeded}
+	updated, cmd = elsewhere.Update(msg)
+	if cmd != nil {
+		t.Fatal("a stray refresh result on a non-editor step must not emit a command")
+	}
+	if !reflect.DeepEqual(updated.presetEditor.codexModels, seeded.codexModels) {
+		t.Fatalf("presetEditor.codexModels off stepEditPreset = %#v, want untouched at its constructed seed %#v",
+			updated.presetEditor.codexModels, seeded.codexModels)
+	}
+}
 
 // TestSetupViewOmitsMoltPressureField guards the removal of the molt_pressure
 // configurable field from the agent setup wizard. molt_pressure is no longer a
