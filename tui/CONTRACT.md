@@ -34,9 +34,9 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/subs-pool/SKILL.md
   - tui/main.go
   - tui/main_preset_revision_test.go
   - tui/internal/config/global_test.go
@@ -174,7 +174,7 @@ appears as the degraded state below.
 ## Preset editor service tier
 
 The preset editor exposes the same service-tier row for every provider in the
-13-name `BuiltinPresets()` catalog, including Codex Pool, API-key providers,
+12-name `BuiltinPresets()` catalog, including Codex, API-key providers,
 CLI-backed Claude, and Custom. Its vocabulary is exactly `normal | fast` and
 the row is always visible, cyclable, and cursor-reachable; the TUI does not
 probe provider support or reject either choice. Lower layers may ignore an
@@ -274,9 +274,13 @@ retirement cannot remove a referenced model.
 Named built-in preset revision guidance is one direct child per
 `BuiltinPresets()` name under
 `tui/internal/preset/skills/lingtai-preset-skill/reference/<name>/SKILL.md`.
-Those 13 children own provider-specific authoritative model lookup, gateway
+Those 12 children own provider-specific authoritative model lookup, gateway
 versus CLI/OAuth/catalog distinctions, exact TUI surfaces, and the reviewed
-revision procedure. The operation axis remains the five shared children:
+revision procedure. The only other top-level child is the non-template
+external-endpoint recipe `reference/subs-pool/SKILL.md`: multi-account Codex
+pooling is not built into the TUI (there is no `codex-pool` template, provider,
+or pool file) and is reached through the external subs-pool proxy as an
+ordinary `custom` OpenAI-compatible Responses preset. The operation axis remains the five shared children:
 saved-presets, endpoint-capabilities, availability-save-gate,
 activation-session-refresh, and troubleshooting-migration. The deterministic
 production CLI adapter and pure engine remain shared at
@@ -285,7 +289,7 @@ production CLI adapter and pure engine remain shared at
 
 Requested and observed Responses service-tier vocabularies are distinct;
 ordinary `service_tier` paths are request-side, and service-tier and reasoning
-replacements must be strings. Codex/Codex-pool keep their four-level reasoning
+replacements must be strings. Codex keeps its four-level reasoning
 vocabulary. Owned and change JSON-pointer paths are disjoint by ancestry before
 dry-run/check/apply can emit a plan; apply repeats the overlap check as defense
 in depth. The splice engine unconditionally preserves unowned JSON bytes and

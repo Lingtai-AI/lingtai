@@ -2,7 +2,7 @@
 name: preset-skill-deepseek
 description: "Use when revising the built-in deepseek TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # deepseek preset revision
 
 Use this child for the named built-in deepseek preset. deepseekPreset in
-tui/internal/preset/preset.go:1321 uses provider deepseek, model
+tui/internal/preset/preset.go:1293 uses provider deepseek, model
 deepseek-v4-pro, https://api.deepseek.com, DEEPSEEK_API_KEY, OpenAI
 compatibility, web_search, and skills. It has no built-in vision capability.
 The editor also offers DeepSeek API, OpenCode Go, and Custom base_url rows.

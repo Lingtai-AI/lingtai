@@ -2,7 +2,7 @@
 name: preset-skill-openrouter
 description: "Use when revising the built-in openrouter TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # openrouter preset revision
 
 Use this child for the named built-in openrouter preset. openrouterPreset in
-tui/internal/preset/preset.go:1418 ships gateway provider openrouter, model
+tui/internal/preset/preset.go:1390 ships gateway provider openrouter, model
 z-ai/glm-5.3, provider-resolved base_url, OPENROUTER_API_KEY, web_search,
 and skills; the stock manifest has no vision capability.
 

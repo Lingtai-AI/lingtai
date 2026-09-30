@@ -2,7 +2,7 @@
 name: preset-skill-nvidia
 description: "Use when revising the built-in nvidia TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # nvidia preset revision
 
 Use this child for the named built-in nvidia preset. nvidiaPreset in
-tui/internal/preset/preset.go:1397 ships the bounded NVIDIA gateway snapshot
+tui/internal/preset/preset.go:1369 ships the bounded NVIDIA gateway snapshot
 nvidia/nemotron-3-ultra-550b-a55b, https://integrate.api.nvidia.com/v1,
 NVIDIA_API_KEY, OpenAI compatibility, web_search, and skills; it has no
 default vision capability. This is a gateway catalog, not a single NVIDIA

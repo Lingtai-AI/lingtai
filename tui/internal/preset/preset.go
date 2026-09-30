@@ -228,7 +228,7 @@ func List() ([]Preset, error) {
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
 		"kimi": 4, "grok": 5, "nvidia": 6, "openrouter": 7,
-		"codex": 8, "codex-pool": 9, "claude": 10, "custom": 11,
+		"codex": 8, "claude": 9, "custom": 10,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -683,7 +683,6 @@ var ProviderDefaultEnv = map[string]string{
 	"openrouter": "OPENROUTER_API_KEY",
 	"claude":     "",            // OAuth / CLI login
 	"codex":      "",            // OAuth
-	"codex-pool": "",            // OAuth
 	"custom":     "LLM_API_KEY", // generic placeholder, user replaces
 }
 
@@ -700,7 +699,6 @@ func BuiltinPresets() []Preset {
 		nvidiaPreset(),
 		openrouterPreset(),
 		codexPreset(),
-		codexPoolPreset(),
 		claudePreset(),
 		customPreset(),
 	}
@@ -723,8 +721,6 @@ var builtinNames = map[string]bool{
 	"openrouter":       true,
 	"codex":            true,
 	"codex_oauth":      true,
-	"codex-pool":       true,
-	"codex_pool":       true,
 	"claude":           true,
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
@@ -794,7 +790,6 @@ type CredentialFamily string
 const (
 	CredentialFamilyOther       CredentialFamily = "other"
 	CredentialFamilyCodexSingle CredentialFamily = "codex_single"
-	CredentialFamilyCodexPool   CredentialFamily = "codex_pool"
 	CredentialFamilyClaudeCLI   CredentialFamily = "claude_cli"
 )
 
@@ -804,8 +799,6 @@ func ClassifyCredentialFamily(provider string) CredentialFamily {
 	switch provider {
 	case "codex", "codex_oauth":
 		return CredentialFamilyCodexSingle
-	case "codex-pool", "codex_pool":
-		return CredentialFamilyCodexPool
 	case "claude-code", "claude_code", "claude-agent-sdk", "claude_agent_sdk":
 		return CredentialFamilyClaudeCLI
 	default:
@@ -837,9 +830,7 @@ type ResolvedRef struct {
 	// only when that env var has a value in the passed existingKeys map.
 	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
 	// declares no api_key_env), this is true only when OAuth is configured
-	// (see AuthState.CodexOAuthConfigured). For a codex-pool preset, this is
-	// true only when the caller proves a usable member in the applicable pool
-	// category, or a validated empty pool can use the legacy fallback. For a Claude preset
+	// (see AuthState.CodexOAuthConfigured). For a Claude preset
 	// (provider "claude-code"/"claude_code", which authenticates through the
 	// local Claude Code CLI login and declares no api_key_env),
 	// this is true only when the CLI reports a logged-in session (see
@@ -859,8 +850,8 @@ type ResolvedRef struct {
 }
 
 // AuthState carries machine-level credential facts the credential guard
-// cannot derive from a preset file alone. Ordinary Codex OAuth, pool
-// membership, and fallback readiness remain separate facts.
+// cannot derive from a preset file alone: Codex OAuth token state and the
+// Claude Code CLI session.
 type AuthState struct {
 	// CodexOAuthConfigured is the caller-provided fallback signal for a codex
 	// preset that declares no manifest.llm.codex_auth_path when CodexAuthDir is
@@ -876,17 +867,6 @@ type AuthState struct {
 	// credentials" and is valid when either the legacy token or any per-account
 	// token under codex-auth/ is usable. Empty falls back to CodexOAuthConfigured.
 	CodexAuthDir string
-
-	// CodexPoolEligible says that a flat pool has a usable positively weighted
-	// member, or that the validated empty pool may use the legacy fallback.
-	CodexPoolEligible bool
-
-	// CodexPoolEligibleModels is non-nil for a model-classified pool. It is
-	// keyed by exact model; absent keys are false and do not fall back to the
-	// flat fact. CodexPoolFallbackEligible covers an absent/empty applicable
-	// category when the legacy token is valid.
-	CodexPoolEligibleModels   map[string]bool
-	CodexPoolFallbackEligible bool
 
 	// ClaudeCodeAuthConfigured is true when the local Claude Code CLI
 	// (`claude`) is installed and reports a logged-in session. The
@@ -1004,7 +984,6 @@ func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthSt
 	}
 	r.Provider, _ = llm["provider"].(string)
 	r.Family = ClassifyCredentialFamily(r.Provider)
-	model, _ := llm["model"].(string)
 	apiKeyEnv, _ := llm["api_key_env"].(string)
 	codexAuthRaw, codexAuthPresent := llm["codex_auth_path"]
 	r.CodexAuthRef, _ = codexAuthRaw.(string) // "" for absent or wrong-type values
@@ -1041,13 +1020,6 @@ func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthSt
 			} else {
 				setAuth(auth.CodexOAuthConfigured)
 			}
-		}
-	case CredentialFamilyCodexPool:
-		if auth.CodexPoolEligibleModels != nil {
-			eligible, present := auth.CodexPoolEligibleModels[model]
-			setAuth(eligible || (!present && auth.CodexPoolFallbackEligible))
-		} else {
-			setAuth(auth.CodexPoolEligible)
 		}
 	case CredentialFamilyClaudeCLI:
 		setAuth(auth.ClaudeCodeAuthConfigured)
@@ -1451,39 +1423,6 @@ func codexPreset() Preset {
 				// reasoning effort by default. Carried explicitly
 				// here (not a UI-only fallback) so the running session and
 				// generated init.json actually receive xhigh.
-				"thinking": "xhigh",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": cx,
-				"vision":     cx,
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-// codexPoolPreset mirrors the standard codex preset but binds the kernel's
-// `codex-pool` provider, which load-balances across the ChatGPT accounts listed
-// in the non-secret ~/.lingtai-tui/codex-auth-pool.json pool file (weights and
-// account membership live THERE, not in this preset). It is purely how a user
-// opts into pooling; selecting it never rewrites other presets. Model, endpoint,
-// thinking level, and capabilities match codexPreset() so behavior is identical
-// apart from the provider routing to the pool.
-func codexPoolPreset() Preset {
-	cx := map[string]interface{}{"provider": "codex-pool", "api_key_env": ""}
-	return Preset{
-		Name:        "codex-pool",
-		Description: PresetDescription{Summary: "ChatGPT account pool — load-balances across your Codex accounts"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				// Same gpt-5.6-sol default (Astra remains availability-gated) and
-				// endpoint as the single-account codex preset; only the provider
-				// differs so the kernel routes through the pool. base_url stays the
-				// official Codex endpoint —
-				// the pool selects among token files, not endpoints.
-				"provider": "codex-pool", "model": "gpt-5.6-sol",
-				"api_key": nil, "api_key_env": "",
-				"base_url": "https://chatgpt.com/backend-api/codex",
 				"thinking": "xhigh",
 			},
 			"capabilities": map[string]interface{}{

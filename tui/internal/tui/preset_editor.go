@@ -165,10 +165,6 @@ var providerModels = map[string][]string{
 	// GPT-5.6 routes are variants of one generation; gpt-5.5 is retired from
 	// this latest-two curation. Saved presets are never rewritten.
 	"codex": {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
-	// codex-pool serves the same ChatGPT-OAuth models as codex — it only
-	// changes which token file each request routes through (the pool), not the
-	// model catalog. Keep the two lists identical.
-	"codex-pool": {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
 	// Claude Code uses CLI aliases, not dated API IDs — `opus`/`fable`/
 	// `sonnet`/`haiku` name concurrent tiers of one generation, so the
 	// two-generation rule has nothing to trim here. Current Claude Code
@@ -728,7 +724,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		case preset.CredentialFamilyCodexSingle:
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
 			return *m, nil
-		case preset.CredentialFamilyCodexPool, preset.CredentialFamilyClaudeCLI:
+		case preset.CredentialFamilyClaudeCLI:
 			m.saveErr = i18n.T("preset_editor.api_key_managed_externally")
 			return *m, nil
 		}
@@ -818,8 +814,7 @@ func (m PresetEditorModel) isCodexProvider() bool {
 }
 
 func isCodexThinkingProvider(provider string) bool {
-	family := preset.ClassifyCredentialFamily(provider)
-	return family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool
+	return preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyCodexSingle
 }
 
 func (m PresetEditorModel) hasCodexThinking() bool {
@@ -1171,7 +1166,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	switch f {
 	case feProvider:
 		// The subset of builtins reachable from the provider cycle, in
-		// BuiltinPresets order; kimi/gemini/codex-pool/claude are
+		// BuiltinPresets order; kimi/gemini/claude are
 		// intentionally reached only by opening their own template, so this
 		// list is deliberately shorter than BuiltinPresets() rather than out
 		// of sync with it. Anything added here must also be handled by the
@@ -1597,7 +1592,7 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 			}
 			return i18n.T("codex.oauth_not_logged_in")
 		}
-		if family == preset.CredentialFamilyCodexPool || family == preset.CredentialFamilyClaudeCLI {
+		if family == preset.CredentialFamilyClaudeCLI {
 			return i18n.T("preset_editor.api_key_managed_externally")
 		}
 		// Other providers display the existing key masked. The env-var name

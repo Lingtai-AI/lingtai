@@ -186,15 +186,15 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 
 	// GPT-6 Astra is documented but account/client rollout is not proven, so
 	// Sol remains the default-first entry. The named GPT-5.6 routes are one
-	// generation's variants; codex-pool changes account selection only.
+	// generation's variants.
 	wantCodexModels := []string{
 		"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna",
 	}
-	for _, provider := range []string{"codex", "codex-pool"} {
-		models := providerModels[provider]
-		if !reflect.DeepEqual(models, wantCodexModels) {
-			t.Fatalf("%s provider models = %#v, want %#v", provider, models, wantCodexModels)
-		}
+	if models := providerModels["codex"]; !reflect.DeepEqual(models, wantCodexModels) {
+		t.Fatalf("codex provider models = %#v, want %#v", models, wantCodexModels)
+	}
+	if _, ok := providerModels["codex-pool"]; ok {
+		t.Fatal("retired codex-pool provider must not have a model catalog")
 	}
 	for _, model := range wantCodexModels {
 		if !modelHasVision[model] {
@@ -469,7 +469,7 @@ func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 		currentKeyEnv string
 	}{
 		{name: "gemini", current: "gemini", currentKeyEnv: "GEMINI_API_KEY"},
-		{name: "codex-pool", current: "codex-pool"},
+		{name: "codex", current: "codex"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -489,33 +489,6 @@ func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestPresetEditorCodexPoolThinkingIsEditableAndPreserved(t *testing.T) {
-	p := builtinPresetForEditorTest(t, "codex-pool")
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
-
-	if !m.fieldVisible(feThinking) {
-		t.Fatal("codex-pool thinking field must be visible")
-	}
-	if !m.isCyclable(feThinking) {
-		t.Fatal("codex-pool thinking field must be cyclable")
-	}
-
-	_, unchangedCmd := m.commit()
-	unchanged := unchangedCmd().(PresetEditorCommitMsg)
-	unchangedLLM := unchanged.Preset.Manifest["llm"].(map[string]interface{})
-	if got := unchangedLLM["thinking"]; got != "xhigh" {
-		t.Fatalf("ordinary codex-pool commit changed thinking: got %#v, want xhigh", got)
-	}
-
-	m.setCodexThinking("high")
-	_, changedCmd := m.commit()
-	changed := changedCmd().(PresetEditorCommitMsg)
-	changedLLM := changed.Preset.Manifest["llm"].(map[string]interface{})
-	if got := changedLLM["thinking"]; got != "high" {
-		t.Fatalf("codex-pool thinking edit was not preserved: got %#v, want high", got)
 	}
 }
 
@@ -1131,7 +1104,7 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 func TestPresetEditorServiceTierAvailableForEveryBuiltin(t *testing.T) {
 	wantNames := []string{
 		"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok",
-		"nvidia", "openrouter", "codex", "codex-pool", "claude", "custom",
+		"nvidia", "openrouter", "codex", "claude", "custom",
 	}
 	gotNames := make([]string, 0, len(preset.BuiltinPresets()))
 	for _, p := range preset.BuiltinPresets() {
@@ -2203,7 +2176,7 @@ func TestNormalizeThinkingByProviderScope(t *testing.T) {
 		},
 		{
 			name:      "codex valid kept",
-			llm:       map[string]interface{}{"provider": "codex-pool", "thinking": "low"},
+			llm:       map[string]interface{}{"provider": "codex", "thinking": "low"},
 			wantSaved: true,
 			wantValue: "low",
 		},
@@ -2253,8 +2226,8 @@ func TestPresetEditorCredentialFamilyGates(t *testing.T) {
 	}{
 		{"codex", true, true, true},
 		{"codex_oauth", true, true, true},
-		{"codex-pool", false, true, true},
-		{"codex_pool", false, true, true},
+		{"codex-pool", false, false, true},
+		{"codex_pool", false, false, true},
 		{"claude-code", false, false, true},
 		{"claude_code", false, false, true},
 		{"claude-agent-sdk", false, false, true},
@@ -2296,8 +2269,6 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 	}{
 		{name: "codex", provider: "codex", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
 		{name: "codex oauth alias", provider: "codex_oauth", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
-		{name: "codex pool", provider: "codex-pool", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
-		{name: "codex pool alias", provider: "codex_pool", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
 		{name: "claude cli", provider: "claude-code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
 		{name: "claude cli alias", provider: "claude_code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
 		{name: "claude agent sdk", provider: "claude-agent-sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},

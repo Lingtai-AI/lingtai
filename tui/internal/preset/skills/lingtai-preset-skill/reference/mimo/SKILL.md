@@ -2,7 +2,7 @@
 name: preset-skill-mimo
 description: "Use when revising the built-in mimo TUI preset."
 version: 3.0.0
-last_changed_at: "2026-09-07T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -16,7 +16,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # mimo preset revision
 
 Use this child for the named built-in mimo preset. mimoPreset in
-tui/internal/preset/preset.go:1294 ships mimo-v2.5, XIAOMI_API_KEY, the
+tui/internal/preset/preset.go:1266 ships mimo-v2.5, XIAOMI_API_KEY, the
 OpenAI-compatible Xiaomi endpoint, and vision scoped to that model. Its
 regional rows are MiMo, OpenCode Go, and Custom.
 
