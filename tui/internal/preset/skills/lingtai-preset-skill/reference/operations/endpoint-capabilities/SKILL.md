@@ -2,7 +2,7 @@
 name: preset-skill-op-endpoint-capabilities
 description: Base URL / wire / provider / model / capability declaration shape versus credentials and live probes; includes proven Codex OAuth quota inspection with exact agent query routing and dated official-vs-measured context-window evidence.
 version: 2.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/doctor.go
@@ -23,10 +23,10 @@ instead of re-explaining the shape every time.
   itself a credential. Vendor-named providers (`custom`, `deepseek`,
   `minimax`, `openrouter`, ...) are rejected by the kernel; other vendors are
   reached through `openai`/`anthropic` with their compatible `base_url`.
-- **`model`** — the exact model string sent to the endpoint. `codex` and
-  `claude-code` use curated picker catalogs (Codex OAuth models, Claude CLI
-  aliases); `openai` and `anthropic` are free text because the endpoint is
-  arbitrary.
+- **`model`** — the exact model string sent to the endpoint. `codex` uses a
+  curated picker catalog (Codex OAuth models); `openai` and `anthropic` are
+  free text because the endpoint is arbitrary; `claude-code` carries no
+  model (Claude Code runs its own default model and effort).
 - **`base_url`** — the endpoint the adapter calls. Optional for `openai`
   (official `https://api.openai.com/v1`, SDK-style with its own version path)
   and `anthropic` (official `https://api.anthropic.com`, `/v1/...` appended);
@@ -54,14 +54,15 @@ These declaration fields answer "what will be called and how" — they are
 **distinct from**:
 
 - **Credentials** — `api_key_env` (env-var name, not a value),
-  `codex_auth_path` (which bound OAuth token file, not its contents), or
-  local CLI login state (`claude-code`). See `ResolveRefsWithAuth`
-  (`tui/internal/preset/preset.go`) for how credential *validity*
-  (not the declaration) is judged per-provider — keyed providers check
-  `existingKeys[envName]`, `codex` checks OAuth state
+  `codex_auth_path` (which bound OAuth token file, not its contents), or,
+  for `claude-code`, a `claude setup-token` token under its `api_key_env`
+  (default `CLAUDE_CODE_OAUTH_TOKEN`) with the local Claude CLI login as the
+  fallback. See `ResolveRefsWithAuth` (`tui/internal/preset/preset.go`) for
+  how credential *validity* (not the declaration) is judged per-provider —
+  keyed providers check `existingKeys[envName]`, `codex` checks OAuth state
   (per-account when `AuthState.CodexAuthDir` is set, else the global
-  `CodexOAuthConfigured` bool), `claude-code` checks
-  `ClaudeCodeAuthConfigured`.
+  `CodexOAuthConfigured` bool), `claude-code` checks its token slot first
+  and then `ClaudeCodeAuthConfigured`.
 - **Live probes** — an actual HTTP call proving the declared endpoint,
   model, and credential currently work together. This is a `/doctor` /
   runtime concept, not something Save performs — see

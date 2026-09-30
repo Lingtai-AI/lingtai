@@ -8,12 +8,18 @@ typo or a retired model.
 ## What this file is for
 
 LingTai ships four provider families (`editorProviders`: openai, anthropic,
-codex, claude-code). Only two carry a curated model catalog in
-`providerModels`: the Codex OAuth route and the Claude Code CLI aliases. The
-`openai` and `anthropic` families point at arbitrary endpoints (the official
-APIs, other vendors' compatible endpoints, or account pools), so their model
-row is free text and there is no list to keep current. Every model picker,
-display, and free-text decision calls `modelOptions(provider)`.
+codex, claude-code). Only one carries a curated model catalog in
+`providerModels`: the Codex OAuth route. The `openai` and `anthropic`
+families point at arbitrary endpoints (the official APIs, other vendors'
+compatible endpoints, or account pools), so their model row is free text and
+there is no list to keep current. `claude-code` has no model row at all: the
+template carries no model and Claude Code runs its own default model and
+effort; its editor shows only the auth row (setup-token or local Claude
+login). Every model picker, display, and free-text decision calls
+`modelOptions(provider)`.
+
+The editor shows only the chosen family's rows (`fieldVisible`); the
+four-family provider choice appears only to convert a legacy saved provider.
 
 Drift in a curated catalog causes one of two failures:
 
@@ -42,7 +48,9 @@ explicit `xhigh` default; `claude-code` has no reasoning row.
 | Provider | Canonical list | Cadence | Notes |
 |---|---|---|---|
 | `codex` | https://developers.openai.com/codex/models | Monthly | ChatGPT-OAuth only — not the standard OpenAI API list |
-| `claude-code` | the installed `claude` CLI's model-selection help | On CLI releases | CLI aliases (`opus`/`fable`/`sonnet`/`haiku`), not dated API ids |
+
+`claude-code` has no catalog: do not add one. Claude Code picks its own
+default model; the TUI never writes `model` or `thinking` for it.
 
 For codex specifically, **do not** consult `https://platform.openai.com/docs/models`. That's the standard API model list, which includes models the codex backend (`chatgpt.com/backend-api/codex/responses`) doesn't accept (e.g. `gpt-5.5-pro` exists in the standard API but 4xx's on the codex endpoint).
 
@@ -51,10 +59,11 @@ For codex specifically, **do not** consult `https://platform.openai.com/docs/mod
 **Rule 0 — latest two generations only.** `tui/CONTRACT.md` ("Model list curation") caps every family at its latest two generations. Adding a new generation is the same change that removes the third-newest. Variants inside a generation (`-mini`, the `gpt-5.6-sol/-terra/-luna` routes) are not generations and all stay. Read that section before touching the maps; the checklist below decides inclusion *within* the two generations the rule allows.
 
 Never add a catalog for `openai` or `anthropic`: their endpoint is whatever
-the user configured, so no list can be correct for everyone. When the user
-switches provider, `switchProvider` replaces a curated id the new family cannot
-serve with that family's first entry (or clears it for a free-text family);
-arbitrary user text is never rewritten.
+the user configured, so no list can be correct for everyone. When a legacy
+provider is converted, `switchProvider` replaces a curated id the new family
+cannot serve with that family's first entry (or clears it for a free-text
+family, and drops it entirely for claude-code); arbitrary user text is never
+rewritten.
 
 For each candidate model, decide inclusion against this checklist:
 

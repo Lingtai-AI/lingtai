@@ -2,7 +2,7 @@
 name: lingtai-preset-skill
 description: "Use when asking about built-in TUI presets, the four provider families, or their shared operations."
 version: 4.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -44,7 +44,7 @@ vendor-named provider, which the kernel rejects.
 | Name | Provider | Direct child | Route hint |
 |---|---|---|---|
 | codex | `codex` | reference/codex/SKILL.md | ChatGPT-account (Codex OAuth) route; the first-run default |
-| claude | `claude-code` | reference/claude/SKILL.md | local Claude Code CLI login ("claude-p") |
+| claude | `claude-code` | reference/claude/SKILL.md | Claude Code print mode ("claude-p"): local Claude login, or a `claude setup-token` token (`CLAUDE_CODE_OAUTH_TOKEN`) that takes precedence |
 | openai | `openai` | reference/openai/SKILL.md | any OpenAI-compatible endpoint, Chat Completions or Responses; also account pools such as sub2api / subs-pool |
 | anthropic | `anthropic` | reference/anthropic/SKILL.md | any Anthropic Messages-compatible endpoint |
 
@@ -59,10 +59,10 @@ vendor-named provider, which the kernel rejects.
   location: reference/anthropic/SKILL.md
 ```
 
-Do not merge the Codex OAuth catalog, the Claude CLI aliases, and an
-arbitrary endpoint's served models. `openai` and `anthropic` have no universal
-model: the model is free text and must be checked against the configured
-endpoint. The exact constructor in `preset.go` is always the first source to
+Do not merge the Codex OAuth catalog and an arbitrary endpoint's served
+models. `openai` and `anthropic` have no universal model: the model is free
+text and must be checked against the configured endpoint. `claude` carries no
+model at all — Claude Code runs its own default model and effort. The exact constructor in `preset.go` is always the first source to
 inspect; picker, capability, and credential surfaces are listed by each
 direct child.
 

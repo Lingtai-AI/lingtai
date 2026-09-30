@@ -96,13 +96,25 @@ const (
 	presetLibFocusEditor
 )
 
-type claudeCodeAccountMsg struct {
-	account string
+// presetLibraryKeysMsg carries which credential env slots hold a value, so
+// the preview can show a Claude preset's auth source. Only presence crosses
+// into the model; no secret is kept.
+type presetLibraryKeysMsg struct {
+	present map[string]bool
 }
 
-func loadClaudeCodeAccountCmd() tea.Cmd {
+func loadPresetLibraryKeysCmd(globalDir string) tea.Cmd {
 	return func() tea.Msg {
-		return claudeCodeAccountMsg{account: claudeCodeAccount()}
+		present := map[string]bool{}
+		if globalDir != "" {
+			keys, _ := config.ResolveKeys(globalDir)
+			for name, value := range keys {
+				if strings.TrimSpace(value) != "" {
+					present[name] = true
+				}
+			}
+		}
+		return presetLibraryKeysMsg{present: present}
 	}
 }
 
@@ -118,8 +130,12 @@ type PresetLibraryModel struct {
 	// active). Empty when in global-library mode. Used to render the
 	// "●" marker that distinguishes the current preset from the rest of
 	// the agent's allow-list. Compared against preset.RefFor(p).
-	activeRef     string
-	claudeAccount string
+	activeRef string
+	// keyPresent (env name → has a value) and claudeLogin drive the Claude
+	// preview's auth line; both load asynchronously from Init.
+	keyPresent       map[string]bool
+	claudeLogin      claudeCodeAuthInfo
+	claudeLoginKnown bool
 
 	focus       presetLibraryFocus
 	tierIdx     int               // selection within the tag picker (0..len(tierValues), last = "untag")
@@ -190,11 +206,34 @@ func NewPresetLibraryModelForAgent(lang, globalDir string, allowed []string, act
 	}
 }
 
-func (m PresetLibraryModel) Init() tea.Cmd { return loadClaudeCodeAccountCmd() }
+// Init loads key presence and, when the library holds a Claude preset, the
+// local Claude login status (a non-billed `claude auth status` check).
+func (m PresetLibraryModel) Init() tea.Cmd {
+	cmds := []tea.Cmd{loadPresetLibraryKeysCmd(m.globalDir)}
+	for _, p := range m.presets {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		if preset.ClaudeCodeFamily(asString(llm["provider"])) {
+			cmds = append(cmds, probeClaudeLoginCmd())
+			break
+		}
+	}
+	return tea.Batch(cmds...)
+}
 
 func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
-	if accountMsg, ok := msg.(claudeCodeAccountMsg); ok {
-		m.claudeAccount = accountMsg.account
+	switch typed := msg.(type) {
+	case presetLibraryKeysMsg:
+		m.keyPresent = typed.present
+		return m, nil
+	case claudeLoginStatusMsg:
+		m.claudeLogin = typed.Info
+		m.claudeLoginKnown = true
+		if m.focus == presetLibFocusEditor {
+			// The editor may be waiting on the same probe.
+			var cmd tea.Cmd
+			m.editor, cmd = m.editor.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	}
 
@@ -226,6 +265,10 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 									cfg.Keys[envName] = typed.APIKey
 								}
 								_ = config.SaveConfig(globalDir, cfg)
+								if m.keyPresent == nil {
+									m.keyPresent = map[string]bool{}
+								}
+								m.keyPresent[envName] = strings.TrimSpace(typed.APIKey) != ""
 							}
 						}
 					}
@@ -521,8 +564,27 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 	return box.Render(strings.Join(rows, "\n"))
 }
 
-func isClaudeCodeProvider(provider string) bool {
-	return preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyClaudeCLI
+// providerDisplayName is the family label the TUI shows: claude-code runs
+// Claude Code print mode and is shown as "claude-p"; other families show
+// their provider id.
+func providerDisplayName(provider string) string {
+	if preset.ClaudeCodeFamily(provider) {
+		return "claude-p"
+	}
+	return provider
+}
+
+// claudeAuthLine is the preview's auth value for a Claude preset: a stored
+// setup-token, else the local login, else "not configured" (or "checking"
+// until the login probe answers).
+func (m PresetLibraryModel) claudeAuthLine(llm map[string]interface{}) string {
+	env := preset.APIKeyEnvName(llm)
+	tokenPresent := m.keyPresent[env]
+	if !tokenPresent && !m.claudeLoginKnown {
+		return i18n.T("claude.auth_checking")
+	}
+	login := m.claudeLogin
+	return resolveClaudeAuth(env, tokenPresent, func() claudeCodeAuthInfo { return login }).Label()
 }
 
 func (m PresetLibraryModel) renderPreview(width, height int) string {
@@ -560,14 +622,12 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 	if llm != nil {
 		b.WriteString(sectionHead("LLM"))
 		provider := asString(llm["provider"])
-		displayProvider := provider
-		if isClaudeCodeProvider(provider) {
-			displayProvider = "claude-p"
+		b.WriteString(kv("provider", providerDisplayName(provider)))
+		if model := asString(llm["model"]); model != "" || !preset.ClaudeCodeFamily(provider) {
+			b.WriteString(kv("model", model))
 		}
-		b.WriteString(kv("provider", displayProvider))
-		b.WriteString(kv("model", asString(llm["model"])))
-		if isClaudeCodeProvider(provider) {
-			b.WriteString(kv("account", m.claudeAccount))
+		if preset.ClaudeCodeFamily(provider) {
+			b.WriteString(kv("auth", m.claudeAuthLine(llm)))
 		}
 		if v := asString(llm["base_url"]); v != "" {
 			b.WriteString(kv("base_url", v))

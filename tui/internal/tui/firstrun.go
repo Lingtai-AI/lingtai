@@ -219,9 +219,16 @@ type FirstRunModel struct {
 		label string // non-secret display label: email, per-account slug, or localized default
 	}
 	// claudeCodeAuthValid is true when the local Claude Code CLI exists
-	// and reports an authenticated session. The TUI only detects this
-	// status; it stores no Anthropic/Claude token of its own.
+	// and reports a logged-in session (non-billed `claude auth status`).
+	// A Claude preset with no stored setup-token runs on that login, so the
+	// paste-token step is skipped when this is true. claudeCodeEmail is the
+	// login's account, when reported. The probe is lazy — it runs only once
+	// a Claude preset is being set up (the embedded editor's Init, or Next on
+	// a Claude preset with no stored token) — so choosing another family
+	// never execs `claude`; claudeLoginKnown records that it has answered.
 	claudeCodeAuthValid bool
+	claudeCodeEmail     string
+	claudeLoginKnown    bool
 	codexLoggingIn      bool // true while waiting for browser callback
 	// codexReloginArmed: true after the first Enter on an already-authed
 	// Codex 凭据 row. A second Enter starts the OAuth flow (overwriting
@@ -382,26 +389,20 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 }
 
 // newFirstRunModelForPurpose is the shared constructor body for all four
-// purposes. purpose is known and applied via withPurpose BEFORE either of
-// this function's two side-effectful reads run:
-//   - config.LoadConfig(globalDir), which chmods config.json to 0600 as a
-//     migration side effect if it isn't already — purposeDraft MUST use
-//     config.LoadConfigReadOnly instead, which performs the identical
-//     read+parse+legacy-key-migration but never chmods.
-//   - refreshClaudeCodeAuth, which shells out to `claude auth status
-//     --json` — unnecessary for purposeDraft: that auth row is already
-//     hidden in the UI (see tui/internal/tui/ANATOMY.md's login.go entry,
-//     "The Claude Code auth row... is hidden for now"), so probing it
-//     during a draft session that may never commit is pure waste, not a
-//     zero-write violation by itself (it's a subprocess exec, not a
-//     filesystem write) but avoidable work the design doc's "the launcher
-//     touches nothing except explicit read-only calls" spirit argues for
-//     skipping.
+// purposes. purpose is known and applied via withPurpose BEFORE this
+// function's side-effectful read runs: config.LoadConfig(globalDir) chmods
+// config.json to 0600 as a migration side effect if it isn't already —
+// purposeDraft MUST use config.LoadConfigReadOnly instead, which performs the
+// identical read+parse+legacy-key-migration but never chmods.
 //
-// refreshCodexAuth (also called below) is NOT skipped for purposeDraft: it
-// only reads existing ~/.lingtai-tui/codex-auth*.json files (no writes, no
-// subprocess) and IS needed so the draft wizard's own Codex credential row
-// correctly reflects "already authed" state.
+// refreshCodexAuth (called below) runs for every purpose, including
+// purposeDraft: it only reads existing ~/.lingtai-tui/codex-auth*.json files
+// (no writes, no subprocess) and IS needed so the draft wizard's own Codex
+// credential row correctly reflects "already authed" state. The Claude
+// login probe (`claude auth status --json`) is deliberately NOT run here: it
+// execs the Claude CLI, which may create or touch its own ~/.claude.json, so
+// it runs lazily only once the user sets up a Claude preset
+// (ensureClaudeLoginFor / the editor's Init).
 func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir string, hasPresets bool) FirstRunModel {
 	ti := textinput.New()
 	ti.CharLimit = 64
@@ -503,18 +504,10 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	}
 	m = m.withPurpose(purpose)
 
-	// Load OAuth / CLI auth status. Codex is local-file based (a read-only
-	// check of existing ~/.lingtai-tui/codex-auth*.json files — needed even
-	// in purposeDraft so the draft wizard's own Codex row reflects
-	// "already authed" state correctly). Claude Code auth uses a
-	// subprocess exec (`claude auth status --json`) to probe the existing
-	// Claude Code CLI login — that auth row is hidden in the UI already
-	// (unsupported for now), so purposeDraft skips this probe entirely as
-	// unnecessary work during a session that may never commit.
+	// Load Codex OAuth status (a read-only check of existing
+	// ~/.lingtai-tui/codex-auth*.json files). The Claude login is probed
+	// lazily; see claudeLoginKnown.
 	m.refreshCodexAuth()
-	if purpose != purposeDraft {
-		m.refreshClaudeCodeAuth()
-	}
 
 	return m
 }
@@ -531,12 +524,11 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 // Calls newFirstRunModelForPurpose directly (NOT the public
 // NewFirstRunModel) with purposeDraft, so purpose is known from the very
 // first line of construction — before config.LoadConfigReadOnly (not
-// LoadConfig: this is what actually skips the config.json chmod) and before
-// refreshClaudeCodeAuth is skipped. Going through NewFirstRunModel first and
-// patching draftMode on afterward (the prior shape of this function) would
-// have been too late: NewFirstRunModel's body would already have run
-// LoadConfig's chmod and the unnecessary Claude Code CLI probe before this
-// function got a chance to react.
+// LoadConfig: this is what actually skips the config.json chmod). Going
+// through NewFirstRunModel first and patching draftMode on afterward (the
+// prior shape of this function) would have been too late: NewFirstRunModel's
+// body would already have run LoadConfig's chmod before this function got a
+// chance to react.
 //
 // The wizard starts at stepPickPreset, not stepWelcome: the launcher's own
 // welcome prelude (launcher.go) already collected language and theme and
@@ -851,6 +843,19 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.dirInput.SetWidth(inputWidth)
 		m.covenantInput.SetWidth(inputWidth)
 		m.commentInput.SetWidth(inputWidth)
+		return m, nil
+
+	case claudeLoginStatusMsg:
+		// The embedded editor's local-login probe answered: keep the
+		// wizard's cached Claude login fresh and hand the result on.
+		m.claudeCodeAuthValid = msg.Info.LoggedIn
+		m.claudeCodeEmail = msg.Info.Email
+		m.claudeLoginKnown = true
+		if m.step == stepEditPreset {
+			var cmd tea.Cmd
+			m.presetEditor, cmd = m.presetEditor.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 
 	case PresetEditorCommitMsg:
@@ -1654,6 +1659,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					// on the right preset.
 					m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
 					p := m.presets[m.cursor]
+					m.ensureClaudeLoginFor(p)
 					if m.presetNeedsKey(p) {
 						return m.enterPresetKeyFor(p)
 					}
@@ -2257,6 +2263,14 @@ func (m FirstRunModel) View() string {
 			if needsCredential {
 				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
 			}
+			if family == preset.CredentialFamilyClaude {
+				// Which Claude credential this preset would run on: a stored
+				// setup-token, the local login, or neither (the paste step
+				// then asks for a token). Unknown until the lazy probe ran.
+				if st, known := m.claudeAuthStatusFor(p); known {
+					name += " " + StyleFaint.Render(st.Label())
+				}
+			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
 			// Capabilities are otherwise uniform across builtins, so
@@ -2335,12 +2349,6 @@ func (m FirstRunModel) View() string {
 				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_unauthed_hint"))
 				b.WriteString(row + "\n")
 			}
-
-			// Claude Code OAuth/auth row is hidden for now — that auth path
-			// is unsupported in the current build, so we don't surface a
-			// setup affordance for it. Detection (claudeCodeAuthValid /
-			// refreshClaudeCodeAuth) still runs and feeds the claude-code
-			// credential guard; only the user-visible row is suppressed.
 
 		}
 		// Footer buttons (Back/Next) — at visibleCount+1 and +2.
@@ -2449,11 +2457,19 @@ func (m FirstRunModel) View() string {
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
 	case stepPresetKey:
-		providerName := i18n.T("setup.provider_" + m.selectedProvider)
-		if providerName == "setup.provider_"+m.selectedProvider {
-			providerName = m.selectedProvider
+		claudeKey := preset.ClaudeCodeFamily(m.selectedProvider)
+		if claudeKey {
+			// claude-code only reaches this step when the local Claude CLI is
+			// not logged in: ask for the long-lived setup-token instead.
+			b.WriteString("  " + i18n.T("firstrun.enter_claude_token") + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("claude.setup_token_hint")) + "\n\n")
+		} else {
+			providerName := i18n.T("setup.provider_" + m.selectedProvider)
+			if providerName == "setup.provider_"+m.selectedProvider {
+				providerName = m.selectedProvider
+			}
+			b.WriteString("  " + i18n.TF("firstrun.enter_provider_key", providerName) + "\n\n")
 		}
-		b.WriteString("  " + i18n.TF("firstrun.enter_provider_key", providerName) + "\n\n")
 
 		// Render a small read-only summary of the preset's LLM block so
 		// the user knows what they're entering a key for. The editor
@@ -2467,7 +2483,7 @@ func (m FirstRunModel) View() string {
 				if baseURL, _ := llm["base_url"].(string); baseURL != "" {
 					b.WriteString("  " + StyleFaint.Render(i18n.T("presets.endpoint")+":  ") + baseURL + "\n")
 				}
-				if envName, _ := llm["api_key_env"].(string); envName != "" {
+				if envName := preset.APIKeyEnvName(llm); envName != "" {
 					b.WriteString("  " + StyleFaint.Render("env:    ") + envName + "\n")
 				}
 			}
@@ -2475,7 +2491,11 @@ func (m FirstRunModel) View() string {
 		}
 
 		// Single textinput. The editor configured everything else.
-		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
+		keyLabel := i18n.T("setup.api_key_label")
+		if claudeKey {
+			keyLabel = i18n.T("firstrun.claude_token_label")
+		}
+		b.WriteString("  " + keyLabel + " " + m.presetKeyInput.View() + "\n\n")
 
 		if m.message != "" {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(m.message) + "\n\n")
@@ -2782,12 +2802,16 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 	m.step = stepPresetKey
 	m.keyFieldIdx = 0 // textarea focused on entry
 	m.presetKeyInput.Reset()
+	m.presetKeyInput.Placeholder = "paste API key here"
+	if preset.ClaudeCodeFamily(provider) {
+		m.presetKeyInput.Placeholder = "paste the claude setup-token here"
+	}
 	m.presetKeyInput.Focus()
 	// Prefill from the preset's declared api_key_env name. Provider
 	// alone is not the right key — a single provider can have multiple
 	// presets, each with its own env var (e.g. MINIMAX_PERSONAL_KEY vs
 	// MINIMAX_WORK_KEY).
-	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
+	if envName := presetKeyEnv(p); envName != "" {
 		if existing := m.existingKeys[envName]; existing != "" {
 			m.presetKeyInput.SetValue(existing)
 		}
@@ -2795,20 +2819,50 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 	return *m, textinput.Blink
 }
 
-// currentPresetKeyEnv returns the focused preset's manifest.llm.
-// api_key_env, or "" when none is set (codex OAuth, locally hosted,
-// or a malformed preset). Used by the paste-key flow as the env var
-// name to write under in ~/.lingtai-tui/.env.
+// currentPresetKeyEnv returns the env var the focused preset's secret is
+// stored under (presetKeyEnv), or "" when it has none (codex OAuth, a
+// keyless custom preset, or a malformed preset). Used by the paste-key flow
+// as the env var name to write under in ~/.lingtai-tui/.env.
 func (m FirstRunModel) currentPresetKeyEnv() string {
 	if m.cursor < 0 || m.cursor >= len(m.presets) {
 		return ""
 	}
-	p := m.presets[m.cursor]
-	if preset.ClassifyCredentialFamily(m.getPresetProvider(p)) != preset.CredentialFamilyOther {
+	return presetKeyEnv(m.presets[m.cursor])
+}
+
+// presetKeyEnv is preset.APIKeyEnvName for a whole preset: the declared
+// api_key_env, CLAUDE_CODE_OAUTH_TOKEN for a claude-code preset that
+// declares none, and "" for Codex OAuth.
+func presetKeyEnv(p preset.Preset) string {
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
 		return ""
 	}
-	envName, _ := llmStringField(p, "api_key_env")
-	return envName
+	return preset.APIKeyEnvName(llm)
+}
+
+// claudeAuthStatusFor resolves which credential a Claude preset runs on from
+// the wizard's loaded keys and its cached local-login probe. known is false
+// while no token is stored and the lazy login probe has not answered.
+func (m FirstRunModel) claudeAuthStatusFor(p preset.Preset) (status claudeAuthStatus, known bool) {
+	env := presetKeyEnv(p)
+	tokenPresent := env != "" && m.existingKeys[env] != ""
+	if !tokenPresent && !m.claudeLoginKnown {
+		return claudeAuthStatus{Env: env}, false
+	}
+	info := claudeCodeAuthInfo{LoggedIn: m.claudeCodeAuthValid, Email: m.claudeCodeEmail}
+	return resolveClaudeAuth(env, tokenPresent, func() claudeCodeAuthInfo { return info }), true
+}
+
+// ensureClaudeLoginFor runs the lazy local-login probe (once) when p is a
+// Claude preset whose credential is still unknown.
+func (m *FirstRunModel) ensureClaudeLoginFor(p preset.Preset) {
+	if preset.ClassifyCredentialFamily(m.getPresetProvider(p)) != preset.CredentialFamilyClaude {
+		return
+	}
+	if _, known := m.claudeAuthStatusFor(p); !known {
+		m.refreshClaudeCodeAuth()
+	}
 }
 
 // llmStringField returns a string-typed field from a preset's
@@ -2825,9 +2879,10 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 
 // stampAutoEnvVar returns a copy of p with manifest.llm.api_key_env
 // populated when it's empty. Uses preset.AutoEnvVarName to pick a
-// gap-filling slot in existingKeys (PROVIDER[_REGION]_N_API_KEY).
+// gap-filling slot in existingKeys (PROVIDER_N_API_KEY); a claude-code
+// preset always gets the shared CLAUDE_CODE_OAUTH_TOKEN slot.
 // When the preset already has an api_key_env (built-ins ship with
-// MINIMAX_API_KEY etc.), the existing value is left untouched —
+// OPENAI_API_KEY etc.), the existing value is left untouched —
 // we never auto-rewrite to avoid breaking established setups.
 //
 // Codex is excluded — it uses ChatGPT OAuth (codex-auth.json), not
@@ -2837,7 +2892,7 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 // _codex factory to ignore.
 func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Preset {
 	provider, _ := llmStringField(p, "provider")
-	if preset.ClassifyCredentialFamily(provider) != preset.CredentialFamilyOther {
+	if preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyCodexSingle {
 		return p
 	}
 	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
@@ -3382,8 +3437,8 @@ func (m FirstRunModel) presetAtVisibleIdx(i int) (preset.Preset, bool) {
 }
 
 // presetAuthState gathers the loaded credential facts used by preset selection.
-// CodexSingle validates its bound token; ClaudeCLI reports the external CLI
-// session.
+// CodexSingle validates its bound token; a Claude preset without a stored
+// setup-token falls back to the local CLI login.
 func (m FirstRunModel) presetAuthState() preset.AuthState {
 	return preset.AuthState{
 		CodexOAuthConfigured:     codexOAuthConfigured(m.globalDir),
@@ -3447,11 +3502,14 @@ func (m *FirstRunModel) refreshCodexAuth() {
 	m.codexAuth.label = codexAccountName(codexAccount{Email: tokens.Email, Legacy: true})
 }
 
-// refreshClaudeCodeAuth checks whether Claude Code is installed and logged in.
-// It is intentionally detection-only: LingTai stores no Claude credential and
-// asks users to manage that session through `claude auth login`.
+// refreshClaudeCodeAuth checks whether Claude Code is installed and logged in
+// (non-billed `claude auth status`). When it is, a Claude preset needs no
+// setup-token; otherwise the paste step asks for one.
 func (m *FirstRunModel) refreshClaudeCodeAuth() {
-	m.claudeCodeAuthValid = claudeCodeAuthConfigured()
+	info := claudeLoginProbe()
+	m.claudeCodeAuthValid = info.LoggedIn
+	m.claudeCodeEmail = info.Email
+	m.claudeLoginKnown = true
 }
 
 // needsKey returns true if the env var holding this preset's API key
@@ -3464,13 +3522,24 @@ func (m *FirstRunModel) refreshClaudeCodeAuth() {
 // authentication separately. Codex specifically is hard-gated: it
 // uses ChatGPT-OAuth, never paste-key, regardless of api_key_env
 // (a stale/auto-stamped value must not route the user to stepPresetKey).
+//
+// A Claude preset needs a pasted setup-token only when none is stored AND
+// the local Claude CLI is not logged in.
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
-	family := preset.ClassifyCredentialFamily(m.getPresetProvider(p))
-	if family != preset.CredentialFamilyOther {
+	switch preset.ClassifyCredentialFamily(m.getPresetProvider(p)) {
+	case preset.CredentialFamilyCodexSingle:
 		return false
+	case preset.CredentialFamilyClaude:
+		st, known := m.claudeAuthStatusFor(p)
+		if !known {
+			// Callers normally run ensureClaudeLoginFor first; without a
+			// cached answer, ask the CLI directly.
+			return !claudeCodeAuthConfigured()
+		}
+		return st.Source == claudeAuthNone
 	}
-	envName, ok := llmStringField(p, "api_key_env")
-	if !ok || envName == "" {
+	envName := presetKeyEnv(p)
+	if envName == "" {
 		return false
 	}
 	val, hasKey := m.existingKeys[envName]
@@ -3774,7 +3843,7 @@ func (m FirstRunModel) enterReviewStep(recipeName string) (FirstRunModel, tea.Cm
 		m.draft.DraftAPIKeyEnv = ""
 		m.draft.DraftAPIKey = secretString("")
 		if m.draft.DraftPreset != nil {
-			if envName, _ := llmStringField(*m.draft.DraftPreset, "api_key_env"); envName != "" {
+			if envName := presetKeyEnv(*m.draft.DraftPreset); envName != "" {
 				if key, ok := m.draftPendingAPIKeys[envName]; ok && !key.Empty() {
 					m.draft.DraftAPIKeyEnv = envName
 					m.draft.DraftAPIKey = key

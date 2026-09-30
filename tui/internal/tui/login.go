@@ -46,8 +46,9 @@ type loginEntry struct {
 	Detail   string // error detail
 	IsOAuth  bool
 	// Family is the provider family ("openai" / "anthropic") an API-key
-	// entry is probed as, taken from the first preset that uses its env var.
-	// Empty when no openai/anthropic preset uses the key.
+	// entry is probed as, taken from the first preset that uses its env var,
+	// or "claude-code" for a Claude setup-token (presence only, never
+	// probed). Empty when no such preset uses the key.
 	Family string
 	// BaseURL is the endpoint probed for this entry. For an API-key entry an
 	// empty value means the family's official endpoint.
@@ -127,6 +128,14 @@ type LoginModel struct {
 	// default error red. Set when reporting a completed set-active apply; reset
 	// implicitly whenever a new message is assigned through the error paths.
 	messageOK bool
+	// Claude auth line: shown when the active agent or a saved preset is
+	// claude-code, or a Claude setup-token is stored. claudeEnv is the token
+	// slot the active (else default) Claude preset reads; the local login is
+	// probed asynchronously (non-billed `claude auth status`).
+	claudeRelevant   bool
+	claudeEnv        string
+	claudeLogin      claudeCodeAuthInfo
+	claudeLoginKnown bool
 }
 
 // NewSetupCredentialsModel opens the credential manager as a /setup subpage.
@@ -204,19 +213,28 @@ func maskKey(key string) string {
 // Config.Keys is keyed by env-var name, so the endpoint comes from the presets
 // that declare that name as manifest.llm.api_key_env: the first openai- or
 // anthropic-family preset in List order (saved presets first, then templates)
-// wins. ok is false when no such preset exists; the credentials page then
-// shows the key as stored-but-unverified rather than guessing an endpoint.
+// wins. A Claude setup-token slot (a claude-code preset's slot, or the
+// default CLAUDE_CODE_OAUTH_TOKEN) reports family "claude-code" with no
+// endpoint: it is shown by presence only. ok is false when no such preset
+// exists; the credentials page then shows the key as stored-but-unverified
+// rather than guessing an endpoint.
 func apiKeyProbeTarget(envName string, presets []preset.Preset) (family, baseURL string, ok bool) {
 	for _, p := range presets {
 		llm, _ := p.Manifest["llm"].(map[string]interface{})
-		if llm == nil || asString(llm["api_key_env"]) != envName {
+		if llm == nil || preset.APIKeyEnvName(llm) != envName {
 			continue
 		}
 		provider := asString(llm["provider"])
+		if preset.ClaudeCodeFamily(provider) {
+			return preset.ProviderClaudeCode, "", true
+		}
 		if provider != preset.ProviderOpenAI && provider != preset.ProviderAnthropic {
 			continue
 		}
 		return provider, asString(llm["base_url"]), true
+	}
+	if envName == preset.ClaudeCodeOAuthTokenEnv {
+		return preset.ProviderClaudeCode, "", true
 	}
 	return "", "", false
 }
@@ -235,9 +253,16 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 	}
 
 	// 1. Read orchestrator's active provider/model.
+	m.claudeEnv = preset.ClaudeCodeOAuthTokenEnv
 	if active, err := readLLMConfig(orchDir); err == nil {
 		m.activePreset = active.Provider
 		m.activeModel = active.Model
+		if preset.ClaudeCodeFamily(active.Provider) {
+			m.claudeRelevant = true
+			if active.APIKeyEnv != "" {
+				m.claudeEnv = active.APIKeyEnv
+			}
+		}
 	}
 
 	// 2. Enumerate every stored Codex OAuth account — the legacy
@@ -267,6 +292,9 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 			continue
 		}
 		family, base, _ := apiKeyProbeTarget(envName, presets)
+		if family == preset.ProviderClaudeCode {
+			m.claudeRelevant = true
+		}
 		m.entries = append(m.entries, loginEntry{
 			Provider: envName,
 			Display:  maskKey(key),
@@ -276,6 +304,13 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 			BaseURL:  base,
 			Key:      key,
 		})
+	}
+	for _, p := range presets {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		if !preset.IsTemplate(p) && preset.ClaudeCodeFamily(asString(llm["provider"])) {
+			m.claudeRelevant = true
+			break
+		}
 	}
 
 	// 4. Prepare textarea for key re-entry.
@@ -327,6 +362,11 @@ func checkHealth(e loginEntry) loginHealthMsg {
 		url = strings.TrimRight(e.BaseURL, "/") + "/codex/models?client_version=1.0.0"
 		headers = map[string]string{"Authorization": "Bearer " + e.Key}
 	} else {
+		if e.Family == preset.ProviderClaudeCode {
+			// A Claude setup-token is shown by presence only: verifying it
+			// would spend a model call.
+			return mk(loginUnverified, i18n.T("login.claude_token_stored"))
+		}
 		if e.Family == "" {
 			return mk(loginUnverified, "not used by an openai/anthropic preset")
 		}
@@ -376,7 +416,28 @@ func (m LoginModel) Init() tea.Cmd {
 			return checkHealth(entry)
 		})
 	}
+	if m.claudeRelevant {
+		cmds = append(cmds, probeClaudeLoginCmd())
+	}
 	return tea.Batch(cmds...)
+}
+
+// claudeStatus resolves the Claude auth line from the stored entries (token
+// precedence) and the async login probe. known is false while no token is
+// stored and the probe has not answered yet.
+func (m LoginModel) claudeStatus() (status claudeAuthStatus, known bool) {
+	tokenPresent := false
+	for _, e := range m.entries {
+		if !e.IsOAuth && e.Provider == m.claudeEnv && e.Key != "" {
+			tokenPresent = true
+			break
+		}
+	}
+	if !tokenPresent && !m.claudeLoginKnown {
+		return claudeAuthStatus{Env: m.claudeEnv}, false
+	}
+	login := m.claudeLogin
+	return resolveClaudeAuth(m.claudeEnv, tokenPresent, func() claudeCodeAuthInfo { return login }), true
 }
 
 func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
@@ -385,6 +446,10 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case claudeLoginStatusMsg:
+		m.claudeLogin = msg.Info
+		m.claudeLoginKnown = true
 
 	case loginHealthMsg:
 		for idx := range m.entries {
@@ -1076,6 +1141,20 @@ func (m LoginModel) View() string {
 		}
 	}
 
+	// Claude auth line: which credential a Claude agent runs on (presence
+	// only, no model call).
+	if m.claudeRelevant {
+		label := i18n.T("claude.auth_checking")
+		status, known := m.claudeStatus()
+		if known {
+			label = status.Label()
+		}
+		b.WriteString("\n  " + i18n.T("login.claude_line") + " " + label + "\n")
+		if known && status.Source == claudeAuthNone {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("login.claude_setup_token_hint")) + "\n")
+		}
+	}
+
 	// Virtual Codex OAuth row — always shown so a Codex login is always
 	// reachable. It ADDS a new account: with no account it reads "Add Codex
 	// OAuth"; with one or more it reads "Add another Codex account". To
@@ -1095,7 +1174,12 @@ func (m LoginModel) View() string {
 
 	// Key re-entry area.
 	if m.reenteringKey && m.cursor >= 0 && m.cursor < len(m.entries) {
-		b.WriteString("\n  Enter new API key for " + m.entries[m.cursor].Provider + ":\n")
+		if m.entries[m.cursor].Family == preset.ProviderClaudeCode {
+			b.WriteString("\n  " + i18n.TF("login.claude_token_reentry", m.entries[m.cursor].Provider) + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("claude.setup_token_hint")) + "\n")
+		} else {
+			b.WriteString("\n  Enter new API key for " + m.entries[m.cursor].Provider + ":\n")
+		}
 		b.WriteString("  " + m.keyInput.View() + "\n")
 		b.WriteString("  " + StyleFaint.Render("[Enter] save  [Esc] cancel") + "\n")
 	}

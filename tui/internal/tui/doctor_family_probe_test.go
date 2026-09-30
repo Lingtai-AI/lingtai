@@ -3,6 +3,8 @@ package tui
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -54,11 +56,88 @@ func fakeFamilyEndpoint(t *testing.T, modelsStatus int) (*httptest.Server, func(
 }
 
 func TestProbeLLMLoginFamiliesNeedNoNetwork(t *testing.T) {
-	for _, provider := range []string{"codex", "claude-code"} {
-		status, _ := probeLLM(llmConfig{Provider: provider, Model: "m", BaseURL: "http://127.0.0.1:1"})
-		if status != probeOAuth {
-			t.Fatalf("probeLLM(%s) = %v, want probeOAuth", provider, status)
+	status, _ := probeLLM(llmConfig{Provider: "codex", Model: "m", BaseURL: "http://127.0.0.1:1"})
+	if status != probeOAuth {
+		t.Fatalf("probeLLM(codex) = %v, want probeOAuth", status)
+	}
+}
+
+// claude-code is judged by presence only — never a network or model call: a
+// stored setup-token wins without consulting the CLI, else the local login
+// (the stubbed non-billed `claude auth status`), else neither with the env
+// name for the setup-token hint.
+func TestProbeLLMClaudeCodeReportsActiveAuthPath(t *testing.T) {
+	srv, seen := fakeFamilyEndpoint(t, http.StatusOK)
+
+	calls := stubClaudeLogin(t, claudeCodeAuthInfo{LoggedIn: true, Email: "user@example.com"})
+	status, detail := probeLLM(llmConfig{Provider: "claude-code", APIKey: "sk-ant-oat-token", APIKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN", BaseURL: srv.URL})
+	if status != probeClaudeToken || detail != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("token: probeLLM = %v %q, want probeClaudeToken CLAUDE_CODE_OAUTH_TOKEN", status, detail)
+	}
+	if *calls != 0 {
+		t.Fatalf("token present must not consult the CLI; probe calls = %d", *calls)
+	}
+
+	status, detail = probeLLM(llmConfig{Provider: "claude-code", APIKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN", BaseURL: srv.URL})
+	if status != probeClaudeLogin || detail != "user@example.com" {
+		t.Fatalf("login: probeLLM = %v %q, want probeClaudeLogin with account", status, detail)
+	}
+
+	stubClaudeLogin(t, claudeCodeAuthInfo{})
+	status, detail = probeLLM(llmConfig{Provider: "claude-code", BaseURL: srv.URL})
+	if status != probeClaudeNoAuth || detail != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("neither: probeLLM = %v %q, want probeClaudeNoAuth with the default token env", status, detail)
+	}
+	if got := seen(); len(got) != 0 {
+		t.Fatalf("claude-code probe made network requests: %#v", got)
+	}
+}
+
+// readLLMConfig resolves a claude-code agent's token from its api_key_env —
+// or from CLAUDE_CODE_OAUTH_TOKEN when a legacy preset declares none — and
+// runDoctor turns a missing credential into the setup-token hint.
+func TestDoctorClaudeCodeTokenPresenceAndHint(t *testing.T) {
+	stubClaudeLogin(t, claudeCodeAuthInfo{})
+	orch := t.TempDir()
+	envFile := filepath.Join(t.TempDir(), ".env")
+	writeInit := func(apiKeyEnv string) {
+		t.Helper()
+		init := `{"env_file": "` + envFile + `", "manifest": {"llm": {"provider": "claude-code", "api_key_env": "` + apiKeyEnv + `"}}}`
+		if err := os.WriteFile(filepath.Join(orch, "init.json"), []byte(init), 0o600); err != nil {
+			t.Fatal(err)
 		}
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
+
+	writeInit("")
+	if err := os.WriteFile(envFile, []byte("OTHER=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := readLLMConfig(orch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKeyEnv != "CLAUDE_CODE_OAUTH_TOKEN" || cfg.APIKey != "" {
+		t.Fatalf("legacy claude config = env %q key-present %v, want default env and no key", cfg.APIKeyEnv, cfg.APIKey != "")
+	}
+	if status, _ := probeLLM(cfg); status != probeClaudeNoAuth {
+		t.Fatalf("no token, no login: status = %v, want probeClaudeNoAuth", status)
+	}
+	res := runDoctorLLMLinesForTest(cfg)
+	if !strings.Contains(res, "claude setup-token") {
+		t.Fatalf("doctor lines missing the setup-token hint:\n%s", res)
+	}
+
+	if err := os.WriteFile(envFile, []byte("CLAUDE_CODE_OAUTH_TOKEN=placeholder-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = readLLMConfig(orch)
+	if status, detail := probeLLM(cfg); status != probeClaudeToken || detail != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("stored token: status = %v %q, want probeClaudeToken", status, detail)
+	}
+	if res := runDoctorLLMLinesForTest(cfg); strings.Contains(res, "placeholder-token") {
+		t.Fatalf("doctor output leaked the token:\n%s", res)
 	}
 }
 
@@ -159,4 +238,14 @@ func TestFamilyModelsRequestDefaultsToOfficialEndpoints(t *testing.T) {
 	if url != "http://127.0.0.1:8080/v1/models" {
 		t.Fatalf("custom openai base request = %q, want trailing slash trimmed", url)
 	}
+}
+
+// runDoctorLLMLinesForTest renders the /doctor LLM lines for cfg as text.
+func runDoctorLLMLinesForTest(cfg llmConfig) string {
+	status, detail := probeLLM(cfg)
+	var b strings.Builder
+	for _, line := range llmProbeLines(status, detail, cfg.Provider, cfg.Model, "") {
+		b.WriteString(line.Text + "\n")
+	}
+	return b.String()
 }

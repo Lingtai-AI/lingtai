@@ -36,7 +36,11 @@
       //   "anthropic"   any Anthropic-compatible (Messages API) endpoint
       //                 (official Anthropic when base_url is omitted)
       //   "codex"       Codex / ChatGPT OAuth (one account)
-      //   "claude-code" the local Claude Code CLI login
+      //   "claude-code" Claude Code print mode (`claude -p`): a
+      //                 `claude setup-token` OAuth token via api_key_env
+      //                 (CLAUDE_CODE_OAUTH_TOKEN) when set, else the local
+      //                 Claude login; no model/thinking (Claude Code's own
+      //                 defaults)
       // Other vendors and subscriptions: point "openai"/"anthropic" at that
       // vendor's compatible base_url, or at an external pool (sub2api /
       // subs-pool). Removed provider names (deepseek, zhipu/glm, mimo,
@@ -64,11 +68,11 @@
       // full-history replay; never previous_response_id).
       //
       // Standard parameters (sent verbatim, no per-vendor mapping):
-      //   "thinking": none/minimal/low/medium/high/xhigh/max — every
-      //     provider. openai sends it as reasoning.effort (Responses) /
+      //   "thinking": none/minimal/low/medium/high/xhigh/max — openai,
+      //     anthropic, codex. openai sends it as reasoning.effort (Responses) /
       //     reasoning_effort (Chat Completions) and omits it when unset;
       //     codex defaults to xhigh; anthropic maps it to a thinking budget;
-      //     claude-code maps it to --effort.
+      //     claude-code does not use it (Claude Code's default effort).
       //   "service_tier": "fast" (sent as priority) or auto/default/flex/
       //     priority — openai and codex only; any other value fails
       //     validation.

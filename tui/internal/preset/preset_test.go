@@ -325,13 +325,15 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 	codexRef := writePresetFile(t, dir, "codex", "codex", "")
 	legacyCodexDir := t.TempDir()
 	legacyCodexRef := writeCodexPresetWithAuthPath(t, legacyCodexDir, "codex", "")
-	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "")
+	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "CLAUDE_CODE_OAUTH_TOKEN")
+	claudeLegacyRef := writePresetFile(t, dir, "claude-legacy", "claude-code", "")
 	claudeUnderscoreRef := writePresetFile(t, dir, "claude_agent_sdk", "claude_agent_sdk", "")
 	customRef := writePresetFile(t, dir, "openai-nokey", "openai", "")
 	keyedRef := writePresetFile(t, dir, "openai-keyed", "openai", "FOO_API_KEY")
 	missingRef := filepath.Join(dir, "nope.json")
 
 	keysWith := map[string]string{"FOO_API_KEY": "placeholder-value"}
+	keysClaude := map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "placeholder-token"}
 	keysEmpty := map[string]string{}
 
 	cases := []struct {
@@ -350,8 +352,13 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 		// directions as explicit legacy-compat rows.
 		{"codex legacy global bool false without dir", legacyCodexRef, nil, AuthState{CodexOAuthConfigured: false}, true, false},
 		{"codex legacy global bool true without dir", legacyCodexRef, nil, AuthState{CodexOAuthConfigured: true}, true, true},
-		{"claude-code no CLI auth", claudeRef, keysEmpty, AuthState{}, true, false},
-		{"claude-code with CLI auth", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
+		// claude-code: a stored setup-token wins; otherwise the local CLI
+		// login decides; neither leaves the preset without a credential.
+		{"claude-code no token no CLI login", claudeRef, keysEmpty, AuthState{}, true, false},
+		{"claude-code setup-token without CLI login", claudeRef, keysClaude, AuthState{}, true, true},
+		{"claude-code CLI login without token", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
+		{"claude-code token and CLI login", claudeRef, keysClaude, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
+		{"claude-code legacy empty slot reads default token", claudeLegacyRef, keysClaude, AuthState{}, true, true},
 		{"claude_agent_sdk alias with CLI auth", claudeUnderscoreRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
 		{"claude-code ignores codex OAuth", claudeRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, false},
 		{"keyless API-key family is invalid", customRef, keysEmpty, AuthState{}, true, false},
@@ -714,7 +721,8 @@ func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
 		wantModel string
 	}{
 		{"codex", codexPreset(), "gpt-5.6-sol"},
-		{"claude", claudePreset(), "opus"},
+		// claude-code carries no model: Claude Code runs its own default.
+		{"claude", claudePreset(), ""},
 		// The two bring-your-own-endpoint families have no universal model.
 		{"openai", openaiPreset(), ""},
 		{"anthropic", anthropicPreset(), ""},
@@ -740,7 +748,7 @@ func TestBuiltinPresetsAreTheFourProviderFamilies(t *testing.T) {
 		name, provider, apiKeyEnv string
 	}{
 		{"codex", ProviderCodex, ""},
-		{"claude", ProviderClaudeCode, ""},
+		{"claude", ProviderClaudeCode, "CLAUDE_CODE_OAUTH_TOKEN"},
 		{"openai", ProviderOpenAI, "OPENAI_API_KEY"},
 		{"anthropic", ProviderAnthropic, "ANTHROPIC_API_KEY"},
 	}
@@ -805,6 +813,8 @@ func TestFamilyTemplatesEndpointFields(t *testing.T) {
 		if got := DefaultBaseURL(provider); got != "" {
 			t.Fatalf("DefaultBaseURL(%q) = %q, want empty", provider, got)
 		}
+	}
+	for _, provider := range []string{ProviderCodex, "custom", ""} {
 		if got := DefaultAPIKeyEnv(provider); got != "" {
 			t.Fatalf("DefaultAPIKeyEnv(%q) = %q, want empty", provider, got)
 		}
@@ -867,16 +877,24 @@ func TestClaudePresetShape(t *testing.T) {
 	if got := llm["provider"]; got != "claude-code" {
 		t.Errorf("llm.provider = %v, want claude-code", got)
 	}
-	// Default to the CLI alias, never a dated API model id.
-	if got := llm["model"]; got != "opus" {
-		t.Errorf("llm.model = %v, want opus", got)
+	// No model and no thinking: Claude Code picks its own default model and
+	// effort, so the template carries neither key.
+	for _, key := range []string{"model", "thinking", "base_url"} {
+		if v, ok := llm[key]; ok {
+			t.Errorf("llm.%s = %#v, want absent", key, v)
+		}
 	}
-	// Authenticates via the local Claude CLI: no api_key, no api_key_env.
+	// The local Claude login works as-is; a `claude setup-token` token, when
+	// stored, lives in the shared CLAUDE_CODE_OAUTH_TOKEN slot.
 	if got, ok := llm["api_key"]; !ok || got != nil {
 		t.Errorf("llm.api_key = %v (present=%v), want nil", got, ok)
 	}
-	if got := llm["api_key_env"]; got != "" {
-		t.Errorf("llm.api_key_env = %v, want empty string", got)
+	if got := llm["api_key_env"]; got != ClaudeCodeOAuthTokenEnv {
+		t.Errorf("llm.api_key_env = %v, want %s", got, ClaudeCodeOAuthTokenEnv)
+	}
+	// The model-less template is still a valid preset.
+	if errs := p.Validate(); len(errs) != 0 {
+		t.Errorf("claude template Validate() = %v, want no violations", errs)
 	}
 	// Conservative capabilities: keep LingTai skills, do NOT wire
 	// web_search/vision through this provider.
@@ -1046,6 +1064,14 @@ func TestAutoEnvVarName(t *testing.T) {
 			preset: Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{}}},
 			want:   "",
 		},
+		{
+			// A setup-token belongs to the Claude account, so every Claude
+			// preset shares one slot — never CLAUDE-CODE_1_API_KEY.
+			name:     "claude-code → shared setup-token slot, not numbered",
+			preset:   pp("claude-code", ""),
+			existing: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "t"},
+			want:     "CLAUDE_CODE_OAUTH_TOKEN",
+		},
 	}
 
 	for _, c := range cases {
@@ -1121,10 +1147,10 @@ func TestCredentialFamilyAliases(t *testing.T) {
 		{"codex_oauth", CredentialFamilyCodexSingle},
 		{"codex-pool", CredentialFamilyOther},
 		{"codex_pool", CredentialFamilyOther},
-		{"claude-code", CredentialFamilyClaudeCLI},
-		{"claude_code", CredentialFamilyClaudeCLI},
-		{"claude-agent-sdk", CredentialFamilyClaudeCLI},
-		{"claude_agent_sdk", CredentialFamilyClaudeCLI},
+		{"claude-code", CredentialFamilyClaude},
+		{"claude_code", CredentialFamilyClaude},
+		{"claude-agent-sdk", CredentialFamilyClaude},
+		{"claude_agent_sdk", CredentialFamilyClaude},
 		{"codex.json", CredentialFamilyOther},
 		{"custom", CredentialFamilyOther},
 	}
@@ -1197,6 +1223,53 @@ func TestValidateAcceptsEmptyBaseURLForEveryFamily(t *testing.T) {
 			if errs := p.Validate(); len(errs) != 0 {
 				t.Errorf("%s with base_url %#v = %v, want no violations", provider, baseURL, errs)
 			}
+		}
+	}
+}
+
+// TestValidateModelOptionalOnlyForClaudeCode: claude-code runs Claude Code's
+// own default model, so an absent model is valid there and nowhere else.
+func TestValidateModelOptionalOnlyForClaudeCode(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		wantErr  bool
+	}{
+		{ProviderClaudeCode, false},
+		{ProviderOpenAI, true},
+		{ProviderAnthropic, true},
+		{ProviderCodex, true},
+	} {
+		p := Preset{
+			Name:        "p",
+			Description: PresetDescription{Summary: "test preset"},
+			Manifest:    map[string]interface{}{"llm": map[string]interface{}{"provider": tc.provider}},
+		}
+		gotErr := false
+		for _, err := range p.Validate() {
+			if err.Error() == "manifest.llm.model must be non-empty" {
+				gotErr = true
+			}
+		}
+		if gotErr != tc.wantErr {
+			t.Errorf("%s without model: model error = %v, want %v", tc.provider, gotErr, tc.wantErr)
+		}
+	}
+}
+
+func TestAPIKeyEnvName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		llm  map[string]interface{}
+		want string
+	}{
+		{"declared slot wins", map[string]interface{}{"provider": "openai", "api_key_env": "OPENAI_1_API_KEY"}, "OPENAI_1_API_KEY"},
+		{"keyless openai stays empty", map[string]interface{}{"provider": "openai"}, ""},
+		{"claude declared slot", map[string]interface{}{"provider": "claude-code", "api_key_env": "CLAUDE_WORK_TOKEN"}, "CLAUDE_WORK_TOKEN"},
+		{"claude legacy empty slot → default", map[string]interface{}{"provider": "claude-code", "api_key_env": ""}, ClaudeCodeOAuthTokenEnv},
+		{"codex never uses an env slot", map[string]interface{}{"provider": "codex", "api_key_env": "STALE_KEY"}, ""},
+	} {
+		if got := APIKeyEnvName(tc.llm); got != tc.want {
+			t.Errorf("%s: APIKeyEnvName = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

@@ -480,7 +480,30 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 
 	// Phase 3: live API check
 	status, detail := probeLLM(cfg)
+	lines = append(lines, llmProbeLines(status, detail, provider, model, lastErr)...)
 
+	// Phase 4: delegate per-agent local state diagnostics to the kernel
+	// intrinsic lingtai-doctor script. This keeps the TUI focused on framing
+	// and runtime bootstrap while the kernel-owned skill carries reusable
+	// agent/MCP/log/notification checks.
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_agent"), Section: true})
+	lines = append(lines, runKernelDoctorIntrinsic(orchDir, globalDir)...)
+
+	llmReport := doctorreport.LLMConfig{
+		Provider:      provider,
+		Model:         model,
+		BaseHost:      baseHostForReport(baseURL),
+		APIKeyEnv:     config.ReadAgentAPIKeyEnv(orchDir),
+		APIKeyPresent: apiKey != "",
+	}
+	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
+}
+
+// llmProbeLines renders one probeLLM result as doctor lines (the status line
+// plus any hint). Split out of runDoctor so each status's wording is
+// testable without running the forced runtime update.
+func llmProbeLines(status probeStatus, detail, provider, model, lastErr string) []doctorLine {
+	var lines []doctorLine
 	switch status {
 	case probeOK:
 		lines = append(lines, doctorLine{
@@ -537,6 +560,23 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_oauth"), Hint: true,
 		})
+	case probeClaudeToken:
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.claude_token", detail), OK: true,
+		})
+	case probeClaudeLogin:
+		text := i18n.T("doctor.claude_login")
+		if detail != "" {
+			text = i18n.TF("doctor.claude_login_account", detail)
+		}
+		lines = append(lines, doctorLine{Text: text, OK: true})
+	case probeClaudeNoAuth:
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.claude_no_auth", detail),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.suggest_claude_setup_token", detail), Hint: true,
+		})
 	case probeUnsupportedProvider:
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.llm_unsupported_provider", provider),
@@ -559,22 +599,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 			Text: i18n.T("doctor.suggest_refresh"), Hint: true,
 		})
 	}
-
-	// Phase 4: delegate per-agent local state diagnostics to the kernel
-	// intrinsic lingtai-doctor script. This keeps the TUI focused on framing
-	// and runtime bootstrap while the kernel-owned skill carries reusable
-	// agent/MCP/log/notification checks.
-	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_agent"), Section: true})
-	lines = append(lines, runKernelDoctorIntrinsic(orchDir, globalDir)...)
-
-	llmReport := doctorreport.LLMConfig{
-		Provider:      provider,
-		Model:         model,
-		BaseHost:      baseHostForReport(baseURL),
-		APIKeyEnv:     config.ReadAgentAPIKeyEnv(orchDir),
-		APIKeyPresent: apiKey != "",
-	}
-	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
+	return lines
 }
 
 // buildDoctorDraft captures the finished diagnostic as a report draft. It
@@ -1073,8 +1098,12 @@ type llmConfig struct {
 	Provider string
 	Model    string
 	APIKey   string
-	BaseURL  string
-	WireAPI  string
+	// APIKeyEnv is the env var APIKey was resolved from (preset.APIKeyEnvName:
+	// the declared api_key_env, or CLAUDE_CODE_OAUTH_TOKEN for a claude-code
+	// preset that declares none).
+	APIKeyEnv string
+	BaseURL   string
+	WireAPI   string
 }
 
 // readLLMConfig pulls the agent's LLM configuration from init.json, resolving
@@ -1108,12 +1137,10 @@ func readLLMConfig(orchDir string) (llmConfig, error) {
 	cfg.BaseURL, _ = llm["base_url"].(string)
 	cfg.WireAPI, _ = llm["wire_api"].(string)
 
-	if cfg.APIKey == "" {
-		apiKeyEnv, _ := llm["api_key_env"].(string)
-		if apiKeyEnv != "" {
-			envFile, _ := raw["env_file"].(string)
-			cfg.APIKey = lookupEnvKey(envFile, orchDir, apiKeyEnv)
-		}
+	cfg.APIKeyEnv = preset.APIKeyEnvName(llm)
+	if cfg.APIKey == "" && cfg.APIKeyEnv != "" {
+		envFile, _ := raw["env_file"].(string)
+		cfg.APIKey = lookupEnvKey(envFile, orchDir, cfg.APIKeyEnv)
 	}
 
 	return cfg, nil
@@ -1182,11 +1209,20 @@ const (
 	// minimal messages call as a second-stage probe.
 	probeEmptyResponse
 	// probeOAuth: provider uses OAuth/session-based auth (codex via a
-	// ChatGPT subscription, or the local Claude Code CLI login), not an API
-	// key. The doctor cannot probe these from this process — the runtime owns
-	// the credential. Surface as a Warn-level note rather than the bogus
-	// "API key not set" alarm that probeNoKey would produce.
+	// ChatGPT subscription), not an API key. The doctor cannot probe it from
+	// this process — the runtime owns the credential. Surface as a Warn-level
+	// note rather than the bogus "API key not set" alarm that probeNoKey
+	// would produce.
 	probeOAuth
+	// probeClaudeToken / probeClaudeLogin / probeClaudeNoAuth report which
+	// credential a claude-code agent runs on, by presence only and without a
+	// model call: a stored `claude setup-token` token (it takes precedence),
+	// else the local Claude CLI login (`claude auth status`), else neither.
+	// The detail is the token env var (token / none) or the login's account
+	// email (login).
+	probeClaudeToken
+	probeClaudeLogin
+	probeClaudeNoAuth
 	// probeUnsupportedProvider: manifest.llm.provider is not one of the four
 	// provider families (openai, anthropic, codex, claude-code). The kernel
 	// rejects such a preset, so there is nothing meaningful to probe; the
@@ -1197,8 +1233,12 @@ const (
 
 // probeLLM checks the agent's LLM endpoint by provider family:
 //
-//   - codex / claude-code: OAuth or CLI login owned by the runtime — reported
-//     as probeOAuth without a network call.
+//   - codex: OAuth owned by the runtime — reported as probeOAuth without a
+//     network call.
+//   - claude-code: presence only, no network and no model call — a stored
+//     setup-token (probeClaudeToken) wins, else the local Claude login
+//     (probeClaudeLogin, via the non-billed `claude auth status`), else
+//     probeClaudeNoAuth.
 //   - openai: GET {base}/models with a Bearer key (base defaults to the
 //     official https://api.openai.com/v1), then one max_tokens=1 Chat
 //     Completions call to catch 200-but-empty gateways. A Responses-wire
@@ -1209,9 +1249,21 @@ const (
 //     Messages call.
 //   - anything else: probeUnsupportedProvider — the kernel rejects it.
 func probeLLM(cfg llmConfig) (probeStatus, string) {
-	family := preset.ClassifyCredentialFamily(cfg.Provider)
-	if family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyClaudeCLI {
+	switch preset.ClassifyCredentialFamily(cfg.Provider) {
+	case preset.CredentialFamilyCodexSingle:
 		return probeOAuth, ""
+	case preset.CredentialFamilyClaude:
+		env := cfg.APIKeyEnv
+		if env == "" {
+			env = preset.ClaudeCodeOAuthTokenEnv
+		}
+		if cfg.APIKey != "" {
+			return probeClaudeToken, env
+		}
+		if info := claudeLoginProbe(); info.LoggedIn {
+			return probeClaudeLogin, info.Email
+		}
+		return probeClaudeNoAuth, env
 	}
 	if cfg.Provider != preset.ProviderOpenAI && cfg.Provider != preset.ProviderAnthropic {
 		return probeUnsupportedProvider, cfg.Provider
