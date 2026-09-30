@@ -71,7 +71,7 @@ const (
 // codexTokenURL is the live OAuth token endpoint. It is a var (not the
 // codexTokenURLDefault const directly) solely so tests can redirect
 // refreshCodexTokens at a local httptest server (see
-// setCodexTokenURLForTest in model_validity_test.go); production code never
+// setCodexTokenURLForTest in oauth_refresh_test.go); production code never
 // reassigns it.
 var codexTokenURL = codexTokenURLDefault
 

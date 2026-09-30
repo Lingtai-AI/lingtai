@@ -52,7 +52,6 @@ const (
 	feModel
 	feServiceTier
 	feThinking
-	feAPICompat
 	feWireAPI
 	feResponsesTransport
 	feBaseURL
@@ -71,7 +70,7 @@ const (
 // capabilityRows), not as form rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
+	feProvider, feModel, feServiceTier, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 	feSave,
 }
 
@@ -90,241 +89,91 @@ const (
 	emExitPrompt                    // three-way exit on Esc: save / discard / cancel
 )
 
-// providerModels maps a provider name to the canonical native/default-route
-// model lineup the editor cycles through with ←/→ on the model row. Exact
-// route catalogs that differ from this default live in routeModelOverrides
-// below; providers and routes without a matching catalog remain free text.
-//
-// Keep this in sync with each provider's official model list. When a
-// new flagship ships, add it (and remove deprecated entries — agents
-// will hit 4xx if they pick a retired model).
+// editorProviders is the provider cycle on the editor's provider row: the four
+// provider families the kernel accepts. Every other vendor is reached through
+// openai or anthropic pointed at that vendor's compatible endpoint.
+var editorProviders = []string{
+	preset.ProviderOpenAI,
+	preset.ProviderAnthropic,
+	preset.ProviderCodex,
+	preset.ProviderClaudeCode,
+}
+
+// providerModels maps a provider to the curated model lineup the editor cycles
+// through with ←/→ on the model row. Only the two subscription routes carry a
+// catalog; the openai and anthropic families point at arbitrary endpoints, so
+// their model is free text.
 //
 // CURATION RULE (tui/CONTRACT.md, "Model list curation"): every family
 // listed here ships only its LATEST TWO GENERATIONS. A third-newest
 // generation is removed in the same change that adds a new one. Variants
-// within one generation (-highspeed, -pro, -mini, -sol/-terra/-luna) are not
-// separate generations and all stay. See tui/internal/tui/SKILL.md for the
-// per-provider source list and the rest of the inclusion checklist.
+// within one generation (-sol/-terra/-luna) are not separate generations and
+// all stay. See tui/internal/tui/SKILL.md for the source list and the rest of
+// the inclusion checklist.
 var providerModels = map[string][]string{
-	// MiniMax native CN: the latest two documented native text generations,
-	// newest first. OpenCode Go keeps its pre-PR catalog in the exact route
-	// override below; INTL remains free text until parity is proven.
-	"minimax": {
-		"MiniMax-M2.7", "MiniMax-M2.7-highspeed",
-		"MiniMax-M2.5", "MiniMax-M2.5-highspeed",
-	},
-	// Zhipu — two mutually exclusive id sets in one cycle, because the model
-	// row is not coupled to the selected base_url row (known debt):
-	//   * UPPERCASE: the native CN/INTL catalog names.
-	//   * lowercase: the same generations as OpenCode Go serves them; an
-	//     uppercase id there is rejected with "Model GLM-5.2 is not supported".
-	// Latest two generations only, both spellings: GLM-5.2 and GLM-5.1.
-	// GLM-5-Turbo/GLM-4.7/GLM-4.5-Air are older generations and dropped;
-	// there is no `glm-5`, so no lowercase alias exists for one.
-	"zhipu": {
-		// native CN/INTL
-		"GLM-5.2", "GLM-5.1",
-		// OpenCode Go
-		"glm-5.2", "glm-5.1",
-	},
-	// Kimi has no provider-global entry: its exact native Coding Plan route
-	// gets a picker from routeModelOverrides, while OpenCode Go and Custom stay
-	// free text so their distinct spellings and user values remain editable.
-	//
-	// MiMo native: V2.5 and its text-only Pro variant. Deprecated V2 entries
-	// are retained only in the protected pre-PR OpenCode Go override below.
-	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro"},
-	"deepseek": {"deepseek-v4-pro", "deepseek-v4-flash"},
-	// Grok (xAI) via OpenCode Go — the Go /models list serves grok-4.5 and
-	// nothing older that we have verified.
-	"grok": {"grok-4.5"},
-	// NVIDIA uses a bounded snapshot of stable model IDs verified as served by
-	// the configured route. It is not a universal NVIDIA generation ladder;
-	// keep the default flagship first and update the snapshot only from fresh
-	// route evidence.
-	"nvidia": {
-		"nvidia/nemotron-3-ultra-550b-a55b",
-		"nvidia/nemotron-3-super-120b-a12b",
-		"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-		"deepseek-ai/deepseek-v4-pro-0813",
-		"deepseek-ai/deepseek-v4-flash-0731",
-		"moonshotai/kimi-k3",
-		"minimaxai/minimax-m3",
-		"mistralai/mistral-nemotron",
-		"openai/gpt-oss-20b",
-		"nvidia/llama-3.1-nemotron-ultra-253b-v1",
-	},
 	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
 	// Keep gpt-5.6-sol first to match the TUI default; the other named GPT-5.6
-	// routes remain selectable when the endpoint/account
-	// enables them. See SKILL.md next to this file for the canonical source list
-	// and why each model is included or excluded (e.g. pro-only variants can 4xx).
+	// routes remain selectable when the endpoint/account enables them. See
+	// SKILL.md next to this file for the canonical source list and why each
+	// model is included or excluded (e.g. pro-only variants can 4xx).
 	//
 	// GPT-6 Astra is documented but not proven available on every authenticated
-	// OAuth route, so keep the proven gpt-5.6-sol default first. The named
-	// GPT-5.6 routes are variants of one generation; gpt-5.5 is retired from
-	// this latest-two curation. Saved presets are never rewritten.
-	"codex": {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
+	// OAuth route, so keep the proven gpt-5.6-sol default first. gpt-5.5 is
+	// retired from this latest-two curation. Saved presets are never rewritten.
+	preset.ProviderCodex: {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
 	// Claude Code uses CLI aliases, not dated API IDs — `opus`/`fable`/
 	// `sonnet`/`haiku` name concurrent tiers of one generation, so the
 	// two-generation rule has nothing to trim here. Current Claude Code
-	// resolves fable to claude-fable-5-1. Keep the old provider spellings only
-	// so user-saved presets remain editable after the built-in moves to
-	// canonical provider "claude-code".
-	"claude-code":      {"opus", "fable", "sonnet", "haiku"},
-	"claude_code":      {"opus", "fable", "sonnet", "haiku"},
-	"claude-agent-sdk": {"opus", "fable", "sonnet", "haiku"},
-	"claude_agent_sdk": {"opus", "fable", "sonnet", "haiku"},
-}
-
-// routeModelOverrides contains the few exact route catalogs needed to keep
-// native curation separate from the protected OpenCode Go behavior. A
-// provider with an override returns no catalog for an unlisted route, which
-// deliberately leaves that route free text.
-var routeModelOverrides = map[string]map[string][]string{
-	"minimax": {
-		preset.ProviderRegionURLs["minimax"][0].URL: {"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"},
-		preset.ProviderRegionURLs["minimax"][2].URL: {"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
-	},
-	"mimo": {
-		preset.ProviderRegionURLs["mimo"][0].URL: {"mimo-v2.5", "mimo-v2.5-pro"},
-		preset.ProviderRegionURLs["mimo"][1].URL: {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"},
-	},
-	"kimi": {
-		preset.ProviderRegionURLs["kimi"][0].URL: {"k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"},
-	},
+	// resolves fable to claude-fable-5-1.
+	preset.ProviderClaudeCode: {"opus", "fable", "sonnet", "haiku"},
 }
 
 // modelOptions is the single catalog lookup used by every model picker
-// surface. Providers without route overrides use their canonical map; a
-// provider with overrides returns only the exact route entry.
-func modelOptions(provider, baseURL string) []string {
-	if routes, ok := routeModelOverrides[provider]; ok {
-		return routes[baseURL]
-	}
+// surface. A provider without a curated catalog returns nil (free text).
+func modelOptions(provider string) []string {
 	return providerModels[provider]
 }
 
-// reconcileModelForRoute keeps a known curated model valid when the user moves
-// between exact routes without overwriting arbitrary free text. A protected Go
-// picker receives its existing first entry when a model curated only for a
-// different route cannot run there. Kimi's Go route deliberately remains free
-// text, so a known native Kimi id is cleared and the existing non-empty-model
-// save validation requires the user to enter an explicit Go id.
-func reconcileModelForRoute(provider, baseURL, model string) string {
-	contains := func(models []string, candidate string) bool {
-		for _, option := range models {
-			if option == candidate {
+// isCuratedModel reports whether model is one of any provider's curated
+// catalog ids. A curated id belongs to its own route (a Codex OAuth model or
+// a Claude CLI alias), so it is cleared when the user switches to a
+// free-text provider family instead of being sent to an endpoint that does
+// not serve it.
+func isCuratedModel(model string) bool {
+	for _, models := range providerModels {
+		for _, candidate := range models {
+			if candidate == model {
 				return true
 			}
 		}
-		return false
 	}
-
-	destination := modelOptions(provider, baseURL)
-	if contains(destination, model) {
-		return model
-	}
-	routes, ok := routeModelOverrides[provider]
-	if !ok {
-		return model
-	}
-	known := false
-	for _, models := range routes {
-		if contains(models, model) {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return model
-	}
-	if len(destination) > 0 {
-		return destination[0]
-	}
-	if provider == "kimi" {
-		for _, region := range preset.ProviderRegionURLs[provider] {
-			if region.Label == "OpenCode Go" && region.URL == baseURL {
-				return ""
-			}
-		}
-	}
-	return model
+	return false
 }
 
-// serviceTierOptions is shared by every provider row. The TUI intentionally
-// does not decide whether the lower layer supports either tier.
+// serviceTierOptions is the normal/fast vocabulary for the providers that
+// accept a service tier (openai and codex; fast is sent as priority). The TUI
+// does not decide whether a given endpoint honors it.
 var serviceTierOptions = []string{"normal", "fast"}
 
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 
-// customResponsesThinkingOptions is the reasoning-effort ladder every
-// non-Codex thinking-capable provider offers: the kernel's canonical
-// THINKING_LEVELS tuple (lingtai/kernel/config.py) plus a leading
-// "default" pseudo-option. "default" is NOT a payload value — the kernel
-// treats an omitted manifest.llm.thinking as its own default, so selecting
-// it deletes the key. Anthropic maps these levels to a thinking budget;
-// OpenAI-compatible providers pass them through as Responses
-// reasoning.effort.
-var customResponsesThinkingOptions = []string{"default", "none", "minimal", "low", "medium", "high", "xhigh"}
+// levelThinkingOptions is the reasoning-effort ladder the openai and
+// anthropic families offer: the kernel's canonical THINKING_LEVELS tuple
+// (lingtai/kernel/config.py) plus a leading "default" pseudo-option.
+// "default" is NOT a payload value — the kernel treats an omitted
+// manifest.llm.thinking as its own default, so selecting it deletes the key.
+// Anthropic maps these levels to a thinking budget; the openai family passes
+// them through as reasoning effort on either wire.
+var levelThinkingOptions = []string{"default", "none", "minimal", "low", "medium", "high", "xhigh"}
 
-var wireAPIOptions = []string{"auto", "chat_completions", "responses"}
+// wireAPIOptions are the openai-family wire formats. Chat Completions is the
+// default and is written explicitly so the manifest does not depend on a
+// kernel-side default.
+var wireAPIOptions = []string{preset.WireAPIChatCompletions, preset.WireAPIResponses}
 
 var responsesTransportOptions = []string{"http", "websocket"}
 
 const presetEditorFieldLabelWidth = 18
-
-// modelHasVision documents which cataloged models actually accept image
-// input. The editor no longer uses this to gate or auto-toggle the vision
-// capability — vision is always included in the manifest like every other
-// capability — so this map is reference data for tests only, kept because
-// per-model vision support is still a real fact worth asserting against
-// regressions in providerModels/the model catalog above.
-//
-// One entry per id in providerModels — a shipped native/default-route model
-// with no entry here reads as text-only via Go's zero value, which is an
-// omission, not a declaration. Route-only overrides intentionally do not add
-// global capability claims: OpenCode Go modality is not inferred from native
-// route metadata. Ids retired by the two-generation curation rule are removed
-// from both maps together (tui/internal/tui/SKILL.md, "When you remove a
-// retired model").
-var modelHasVision = map[string]bool{
-	// MiniMax native CN's reviewed Anthropic text route rejects image/document
-	// input, so the curated native IDs are explicitly text-only. The protected
-	// OpenCode Go IDs have no inherited native modality claim.
-	"MiniMax-M2.7":           false,
-	"MiniMax-M2.7-highspeed": false,
-	"MiniMax-M2.5":           false,
-	"MiniMax-M2.5-highspeed": false,
-	// Zhipu coding-plan LLMs are text-only, in both the uppercase native
-	// spelling and the lowercase OpenCode Go spelling of the same model.
-	// Vision uses the separate GLM-4.6V model through the optional,
-	// manually registered official MCP server.
-	"GLM-5.2": false,
-	"GLM-5.1": false,
-	"glm-5.2": false,
-	"glm-5.1": false,
-	// MiMo: only native mimo-v2.5 has verified LingTai-side vision. The
-	// native Pro sibling is text-only; the protected Go list is not granted
-	// any additional modality claim.
-	"mimo-v2.5":     true,
-	"mimo-v2.5-pro": false,
-	// DeepSeek: text-only across the board.
-	"deepseek-v4-pro":   false,
-	"deepseek-v4-flash": false,
-	// Grok via OpenCode Go: the endpoint's image-input mapping for grok-4.5
-	// is unverified, so this is a declared false, not an unknown. A model
-	// name is never evidence of a wired vision route.
-	"grok-4.5": false,
-	// Codex (ChatGPT OAuth): official model documentation records image input
-	// for the named routes, but this metadata does not assert account-specific
-	// OAuth availability. Astra therefore remains picker-only until that gate
-	// is satisfied for a given account.
-	"gpt-6-astra":   true,
-	"gpt-5.6-sol":   true,
-	"gpt-5.6-terra": true,
-	"gpt-5.6-luna":  true,
-}
 
 // PresetEditorModel is a single-page preset editor. Hosted by the
 // firstrun/setup wizard and the library screen via embedding.
@@ -382,17 +231,6 @@ type PresetEditorModel struct {
 	existingKeys map[string]string
 	apiKey       string
 	apiKeySet    bool
-
-	// regionEnvBeforeAdopt remembers the api_key_env the preset carried
-	// just before a base_url cycle landed on a region row that declares
-	// its own credential (OpenCode Go -> OPENCODE_GO_API_KEY). Cycling
-	// back off that row restores it, so adopting a region credential is
-	// a reversible move rather than a one-way door: the zhipu/minimax
-	// CN/INTL rows declare no Env of their own, so without this memo one
-	// extra → press would wrap to CN while still resolving through
-	// OPENCODE_GO_API_KEY and destroy the user's ZHIPU_INTL_1_API_KEY.
-	// Empty means "nothing to restore" (fall back to ProviderDefaultEnv).
-	regionEnvBeforeAdopt string
 
 	// Status
 	saveErr string
@@ -688,29 +526,10 @@ func (m PresetEditorModel) updateExitPrompt(msg tea.KeyMsg) (PresetEditorModel, 
 func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
-	case feName, feSummary, feGains, feLoses:
-		m.input.SetValue(m.fieldString(f))
-		m.input.CursorEnd()
-		m.input.Focus()
-		m.mode = emInline
-	case feBaseURL:
-		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op
-		// only while the current value is one of the known non-empty region
-		// URLs. The Custom option (empty-URL sentinel) and any free-typed URL
-		// open free-text inline edit instead. The selection rule is shared with
-		// cycleFocused and baseURLRadioStrip via selectedRegionIndex.
-		//
-		// selectedRegionIndex returns -1 for an off-list value on a provider
-		// with no Custom row; that opens inline edit too, which is the only
-		// way to correct such a value from the editor.
-		provider := asString(m.llmMap()["provider"])
-		current := asString(m.llmMap()["base_url"])
-		regions, hasRegions := preset.ProviderRegionURLs[provider]
-		if hasRegions && len(regions) > 0 {
-			if idx := selectedRegionIndex(regions, current); idx >= 0 && regions[idx].URL != "" {
-				return *m, nil
-			}
-		}
+	case feName, feSummary, feGains, feLoses, feBaseURL:
+		// base_url is plain free text for every family: empty means the
+		// family's official endpoint (openai/anthropic) or the provider's
+		// own route (codex/claude-code).
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
 		m.input.Focus()
@@ -738,8 +557,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.mode = emInline
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
-		baseURL := asString(m.llmMap()["base_url"])
-		if models := modelOptions(provider, baseURL); len(models) > 0 {
+		if models := modelOptions(provider); len(models) > 0 {
 			m.cycleFocused(+1)
 		} else {
 			m.input.SetValue(m.fieldString(f))
@@ -748,7 +566,9 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.mode = emInline
 		}
 	case feServiceTier:
-		m.cycleFocused(+1)
+		if m.hasServiceTier() {
+			m.cycleFocused(+1)
+		}
 	case feThinking:
 		if m.hasThinking() {
 			m.cycleFocused(+1)
@@ -756,7 +576,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feProvider, feAPICompat, feWireAPI, feResponsesTransport:
+	case feProvider, feWireAPI, feResponsesTransport:
 		// Enums — Enter cycles forward (same as Right). Lets the user
 		// stay on the keyboard's "advance" key.
 		m.cycleFocused(+1)
@@ -833,32 +653,17 @@ func isThinkingLevel(v string) bool {
 }
 
 // llmHasLevelThinking reports whether an llm block takes the canonical
-// THINKING_LEVELS ladder — every thinking-capable provider except the Codex
-// family, which keeps its own ladder and its own xhigh default.
-//
-// Scope: Anthropic (the adapter turns the level into an extended-thinking
-// budget) and every OpenAI-compatible provider (api_compat=openai), whose
-// level rides through as Responses reasoning.effort. wire_api does NOT gate
-// this: the field is accepted regardless of which OpenAI wire the preset
-// selects. Providers with a native non-OpenAI adapter and no api_compat
-// declaration — gemini, claude-code, minimax — stay out of scope.
+// THINKING_LEVELS ladder: the openai family (the level rides through as
+// reasoning effort on either wire — wire_api does not gate it) and the
+// anthropic family (the adapter turns the level into an extended-thinking
+// budget). Codex keeps its own ladder and xhigh default; claude-code has a
+// CLI-specific effort vocabulary the editor does not expose.
 func llmHasLevelThinking(llm map[string]interface{}) bool {
 	if llm == nil {
 		return false
 	}
-	provider := asString(llm["provider"])
-	if isCodexThinkingProvider(provider) {
-		return false // Codex owns its ladder; see codexThinkingOptions.
-	}
-	switch provider {
-	case "anthropic", "openai":
-		return true
-	}
-	// api_compat is the explicit declaration of which wire protocol (and so
-	// which kernel adapter) the provider speaks; both adapters behind it
-	// honor a configured thinking level.
-	switch asString(llm["api_compat"]) {
-	case "openai", "anthropic":
+	switch asString(llm["provider"]) {
+	case preset.ProviderOpenAI, preset.ProviderAnthropic:
 		return true
 	}
 	return false
@@ -872,23 +677,31 @@ func (m PresetEditorModel) hasThinking() bool {
 	return m.hasCodexThinking() || m.hasLevelThinking()
 }
 
-// isCustomOpenAI reports whether the working preset is in the narrow scope
-// where the OpenAI wire-format selector (wire_api) applies: the custom
-// provider with api_compat=openai. Built-in OpenAI, Anthropic/Gemini custom
-// compat, Codex, and all other providers never surface the wire_api field.
-func (m PresetEditorModel) isCustomOpenAI() bool {
-	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
-	return asString(llm["provider"]) == "custom" &&
-		asString(llm["api_compat"]) == "openai"
+// llmHasServiceTier reports whether an llm block accepts service_tier
+// (normal/fast, where fast is sent as priority): the openai family and the
+// Codex family. Other providers never surface or keep the field.
+func llmHasServiceTier(llm map[string]interface{}) bool {
+	provider := asString(llm["provider"])
+	return provider == preset.ProviderOpenAI ||
+		preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyCodexSingle
 }
 
-// isCustomOpenAIResponses is the narrow custom-provider scope built on the
-// only Kernel path that supports the Responses adapter: custom + OpenAI
-// compatibility + explicit Responses. It gates the transport selector. The
-// reasoning-effort selector is NOT gated on it — see llmHasLevelThinking,
-// which accepts every OpenAI-compatible provider on any wire.
-func (m PresetEditorModel) isCustomOpenAIResponses() bool {
-	return m.isCustomOpenAI() && m.fieldString(feWireAPI) == "responses"
+func (m PresetEditorModel) hasServiceTier() bool {
+	return llmHasServiceTier(m.llmMap())
+}
+
+// isOpenAIFamily reports whether the working preset is the openai provider
+// family — the only scope where the wire-format selector (wire_api) applies.
+func (m PresetEditorModel) isOpenAIFamily() bool {
+	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
+	return asString(llm["provider"]) == preset.ProviderOpenAI
+}
+
+// isOpenAIResponses is the openai family on the Responses wire. It gates the
+// transport selector (HTTP default, or WebSocket). The reasoning-effort
+// selector is NOT gated on it — see llmHasLevelThinking.
+func (m PresetEditorModel) isOpenAIResponses() bool {
+	return m.isOpenAIFamily() && m.fieldString(feWireAPI) == preset.WireAPIResponses
 }
 
 // codexAccountRefs returns the selectable codex_auth_path values for the
@@ -1033,7 +846,7 @@ func (m PresetEditorModel) thinkingOptions() []string {
 		return codexThinkingOptions
 	}
 	if m.hasLevelThinking() {
-		return customResponsesThinkingOptions
+		return levelThinkingOptions
 	}
 	return nil
 }
@@ -1053,22 +866,18 @@ func (m *PresetEditorModel) setThinking(effort string) {
 	llm["thinking"] = effort
 }
 
+// normalizeServiceTier keeps service_tier only where it applies (openai and
+// codex) and only as "fast"; "normal" is the omission sentinel, and any other
+// value — or any value on another provider — is dropped.
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
 		return
 	}
-	tier := asString(llm["service_tier"])
-	if tier == "fast" {
+	if llmHasServiceTier(llm) && asString(llm["service_tier"]) == "fast" {
 		return
 	}
-	// Normal is the editor's omission sentinel for every provider. Preserve
-	// other legacy values on non-Codex manifests unless the user cycles the
-	// row, retaining the pre-existing non-Codex save compatibility; Codex's
-	// existing normalization continues to discard unknown values.
-	if tier == "normal" || preset.ClassifyCredentialFamily(asString(llm["provider"])) == preset.CredentialFamilyCodexSingle {
-		delete(llm, "service_tier")
-	}
+	delete(llm, "service_tier")
 }
 
 func normalizeThinking(manifest map[string]interface{}) {
@@ -1101,34 +910,33 @@ func normalizeThinking(manifest map[string]interface{}) {
 	delete(llm, "thinking")
 }
 
-// normalizeWireAPI strips llm.wire_api whenever the preset leaves the narrow
-// custom+openai scope where the OpenAI wire-format selector applies. Inside
-// that scope, an explicit "auto" (the absence default) is omitted to keep the
-// committed manifest minimal — absent and "auto" are semantically identical.
+// normalizeWireAPI keeps llm.wire_api only on the openai family, where it is
+// always written explicitly: "responses" stays, and anything else (absent, a
+// legacy "auto", or an unknown value) becomes the chat_completions default.
+// Every other provider drops the field.
 func normalizeWireAPI(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
 		return
 	}
-	if asString(llm["provider"]) == "custom" && asString(llm["api_compat"]) == "openai" {
-		if asString(llm["wire_api"]) == "auto" {
-			delete(llm, "wire_api")
-		}
+	if asString(llm["provider"]) != preset.ProviderOpenAI {
+		delete(llm, "wire_api")
 		return
 	}
-	delete(llm, "wire_api")
+	if asString(llm["wire_api"]) != preset.WireAPIResponses {
+		llm["wire_api"] = preset.WireAPIChatCompletions
+	}
 }
 
 // normalizeResponsesTransport keeps HTTP as the omission/default and removes
-// stale transport values outside custom OpenAI-compatible Responses.
+// stale transport values outside the openai family's Responses wire.
 func normalizeResponsesTransport(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
 		return
 	}
-	if asString(llm["provider"]) == "custom" &&
-		asString(llm["api_compat"]) == "openai" &&
-		asString(llm["wire_api"]) == "responses" {
+	if asString(llm["provider"]) == preset.ProviderOpenAI &&
+		asString(llm["wire_api"]) == preset.WireAPIResponses {
 		if asString(llm["responses_transport"]) != "websocket" {
 			delete(llm, "responses_transport")
 		}
@@ -1138,6 +946,9 @@ func normalizeResponsesTransport(manifest map[string]interface{}) {
 }
 
 func normalizeLLMForCommit(manifest map[string]interface{}) {
+	if llm, ok := manifest["llm"].(map[string]interface{}); ok {
+		preset.StripRetiredLLMFields(llm)
+	}
 	normalizeServiceTier(manifest)
 	normalizeThinking(manifest)
 	normalizeWireAPI(manifest)
@@ -1165,182 +976,32 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
 	case feProvider:
-		// The subset of builtins reachable from the provider cycle, in
-		// BuiltinPresets order; kimi/gemini/claude are
-		// intentionally reached only by opening their own template, so this
-		// list is deliberately shorter than BuiltinPresets() rather than out
-		// of sync with it. Anything added here must also be handled by the
-		// model/base_url/api_key_env resets below.
-		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "grok", "nvidia", "openrouter", "codex", "custom"}
 		oldProvider := m.fieldString(f)
-		newProvider := cycleString(opts, oldProvider, dir)
-		m.llmMap()["provider"] = newProvider
-		normalizeWireAPI(m.working.Manifest)
-		normalizeResponsesTransport(m.working.Manifest)
+		newProvider := cycleString(editorProviders, oldProvider, dir)
+		if !containsString(editorProviders, oldProvider) {
+			// A legacy saved provider (e.g. "custom") is not in the cycle:
+			// enter it at its edge — first family going right, last going
+			// left — so → converts it to openai.
+			newProvider = editorProviders[0]
+			if dir < 0 {
+				newProvider = editorProviders[len(editorProviders)-1]
+			}
+		}
 		if newProvider != oldProvider {
-			delete(m.llmMap(), "thinking")
+			m.switchProvider(oldProvider, newProvider)
 		}
-		normalizeThinking(m.working.Manifest)
-		// Reset model to the new provider's first canonical entry when the
-		// current model isn't valid for the new provider. Without this, a
-		// minimax→zhipu switch leaves "MiniMax-M2.7" in model
-		// and validation passes silently while the kernel later 4xxs.
-		baseURL := ""
-		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
-			baseURL = regions[0].URL
-		}
-		if models := modelOptions(newProvider, baseURL); len(models) > 0 {
-			currentModel := asString(m.llmMap()["model"])
-			modelStillValid := false
-			for _, mdl := range models {
-				if mdl == currentModel {
-					modelStillValid = true
-					break
-				}
-			}
-			if !modelStillValid {
-				m.llmMap()["model"] = models[0]
-			}
-		}
-		// Reset base_url and the credential env-var slot to the new
-		// provider's defaults when switching to a provider with known
-		// regional endpoints. base_url adopts the first region (the
-		// default); api_key_env is reset from ProviderDefaultEnv so a slot
-		// adopted from a previous base_url cycle (e.g. OpenCode Go ->
-		// OPENCODE_GO_API_KEY) cannot follow the user into the next
-		// provider: a zhipu preset resolving through OPENCODE_GO_API_KEY
-		// reports "no key" for someone who has ZHIPU_API_KEY set, or sends
-		// the wrong key to bigmodel.cn.
-		//
-		// The api_key_env reset is unconditional and normally comes from the
-		// provider map, NOT from regions[0].Env: zhipu/minimax region rows
-		// declare no Env precisely so a CN<->INTL base_url cycle preserves
-		// the region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY)
-		// instead of overwriting it with a region-agnostic one. Providers
-		// absent from ProviderDefaultEnv (none today; map is exhaustive)
-		// keep their current api_key_env. The memoized pre-adoption slot goes
-		// with it: it was taken from the previous provider's region cycle and
-		// must not be restorable onto this one.
-		//
-		// The one exception: when the landing row (regions[0], which base_url
-		// adopts just above) declares its own Env, that declaration wins.
-		// Only grok differs from its default — its row IS OpenCode Go, so
-		// taking ProviderDefaultEnv["grok"] = GROK_API_KEY here would leave
-		// the preset pointed at https://opencode.ai/zen/go/v1 holding a
-		// credential slot that endpoint does not use, and the user would have
-		// to paste their OpenCode Go key into a second slot. The slot must
-		// match the row you land on.
-		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
-			m.llmMap()["base_url"] = regions[0].URL
-		}
-		if env, ok := preset.ProviderDefaultEnv[newProvider]; ok {
-			want := env
-			if regions := preset.ProviderRegionURLs[newProvider]; len(regions) > 0 && regions[0].Env != "" {
-				want = regions[0].Env
-			}
-			m.llmMap()["api_key_env"] = want
-		}
-		m.regionEnvBeforeAdopt = ""
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
-		baseURL := asString(m.llmMap()["base_url"])
-		if models := modelOptions(provider, baseURL); len(models) > 0 {
+		if models := modelOptions(provider); len(models) > 0 {
 			next := cycleString(models, m.fieldString(f), dir)
 			m.llmMap()["model"] = next
 		}
-	case feBaseURL:
-		provider := asString(m.llmMap()["provider"])
-		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
-			idx := selectedRegionIndex(regions, m.fieldString(f))
-			var next, prev preset.RegionURL
-			if idx >= 0 {
-				prev = regions[idx]
-			}
-			if idx < 0 {
-				// Off-list value on a provider with no Custom row: nothing is
-				// selected, so enter the list at its edge the way cycleString
-				// does — first option going right, last going left.
-				if dir < 0 {
-					next = regions[len(regions)-1]
-				} else {
-					next = regions[0]
-				}
-			} else {
-				next = regions[(idx+dir+len(regions))%len(regions)]
-			}
-			if next.URL == "" {
-				// Moving onto the Custom free-text sentinel: clear the value
-				// so Enter opens a blank inline edit. This branch is only
-				// reachable from a known region option; an off-list typed URL
-				// resolves to the Custom row, so cycling away from it goes
-				// straight to a real region and never clears the typed value
-				// as a side effect.
-				//
-				// api_key_env is deliberately NOT touched here (pinned by
-				// TestPresetEditorDeepseekRegionCycleRoundTrip): the user is
-				// about to type their own endpoint and keeps whatever slot
-				// that endpoint actually uses. Cycling on to a real region
-				// row re-applies that row's rule.
-				m.llmMap()["base_url"] = ""
-				break
-			}
-			currentModel := asString(m.llmMap()["model"])
-			m.llmMap()["model"] = reconcileModelForRoute(provider, next.URL, currentModel)
-			m.llmMap()["base_url"] = next.URL
-			// Region options can carry an implied credential env-var (e.g.
-			// DeepSeek API -> DEEPSEEK_API_KEY, OpenCode Go ->
-			// OPENCODE_GO_API_KEY); adopt it when the selected option declares
-			// one. The Custom option declares none, so landing on it leaves
-			// api_key_env untouched and the user keeps whatever credential
-			// slot their endpoint actually uses.
-			//
-			// The adoption must be REVERSIBLE. deepseek self-heals on the way
-			// out (its DeepSeek API row declares DEEPSEEK_API_KEY), but the
-			// zhipu/minimax CN/INTL rows deliberately declare no Env, so
-			// wrapping past OpenCode Go back to CN would otherwise leave the
-			// preset pointing at bigmodel.cn while resolving through
-			// OPENCODE_GO_API_KEY — silently destroying the user's
-			// ZHIPU_INTL_1_API_KEY. Memoize the slot on the way in and put it
-			// back on the way out.
-			//
-			// The restore is keyed on the STATE, not on the previously
-			// selected row: an off-list base_url yields no selected row at all
-			// (selectedRegionIndex == -1 on zhipu/minimax), and a preset that
-			// pairs such a URL with OPENCODE_GO_API_KEY must still be healed on
-			// the way onto CN rather than ride the adopted slot along.
-			switch {
-			case next.Env != "":
-				cur := asString(m.llmMap()["api_key_env"])
-				if prev.Env == "" && !regionDeclaredEnv(provider, cur) {
-					m.regionEnvBeforeAdopt = cur
-				}
-				m.llmMap()["api_key_env"] = next.Env
-			default: // next.Env == ""
-				if cur := asString(m.llmMap()["api_key_env"]); regionDeclaredEnv(provider, cur) {
-					restore := m.regionEnvBeforeAdopt
-					if restore == "" {
-						restore = preset.ProviderDefaultEnv[provider]
-					}
-					m.llmMap()["api_key_env"] = restore
-					m.regionEnvBeforeAdopt = ""
-				}
-			}
-		}
-	case feAPICompat:
-		opts := []string{"", "openai", "anthropic"}
-		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
-		normalizeWireAPI(m.working.Manifest)
-		normalizeResponsesTransport(m.working.Manifest)
-		normalizeThinking(m.working.Manifest)
 	case feWireAPI:
-		next := cycleString(wireAPIOptions, m.fieldString(f), dir)
-		if next == "auto" {
-			delete(m.llmMap(), "wire_api")
-		} else {
-			m.llmMap()["wire_api"] = next
+		if !m.isOpenAIFamily() {
+			return
 		}
+		m.llmMap()["wire_api"] = cycleString(wireAPIOptions, m.fieldString(f), dir)
 		normalizeResponsesTransport(m.working.Manifest)
-		normalizeThinking(m.working.Manifest)
 	case feResponsesTransport:
 		next := cycleString(responsesTransportOptions, m.fieldString(f), dir)
 		if next == "websocket" {
@@ -1349,7 +1010,9 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			delete(m.llmMap(), "responses_transport")
 		}
 	case feServiceTier:
-		m.setServiceTier(cycleString(serviceTierOptions, m.serviceTier(), dir))
+		if m.hasServiceTier() {
+			m.setServiceTier(cycleString(serviceTierOptions, m.serviceTier(), dir))
+		}
 	case feThinking:
 		if m.hasThinking() {
 			m.setThinking(cycleString(m.thinkingOptions(), m.thinkingValue(), dir))
@@ -1373,6 +1036,85 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	}
 }
 
+// switchProvider moves the working preset from one provider to another
+// without leaking route-specific state across:
+//
+//   - codex adopts its template's /codex route; claude-code drops base_url.
+//     Both clear api_key_env (OAuth / CLI login, no key slot).
+//   - openai/anthropic coming from codex or claude-code start from the
+//     official endpoint (base_url nil) and the family's default key slot.
+//   - openai/anthropic coming from each other (or from a legacy saved
+//     provider being converted) keep the user's base_url and credential slot;
+//     only the previous family's default slot name is swapped for the new
+//     family's default, so OPENAI_API_KEY never follows a preset to anthropic.
+//   - a curated model the new provider cannot serve is replaced by the first
+//     catalog entry, or cleared for a free-text family (Save then requires an
+//     explicit model); a user-typed model is kept.
+//   - thinking restarts from the new family's default, and fields only one
+//     family understands (wire_api, responses_transport, service_tier,
+//     codex_auth_path) are normalized away.
+func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
+	llm := m.llmMap()
+	llm["provider"] = newProvider
+
+	oldRouteOwned := preset.ClassifyCredentialFamily(oldProvider) != preset.CredentialFamilyOther
+	switch preset.ClassifyCredentialFamily(newProvider) {
+	case preset.CredentialFamilyCodexSingle:
+		llm["base_url"] = familyTemplateLLM(newProvider)["base_url"]
+		llm["api_key_env"] = ""
+	case preset.CredentialFamilyClaudeCLI:
+		delete(llm, "base_url")
+		llm["api_key_env"] = ""
+	default:
+		env := asString(llm["api_key_env"])
+		if oldRouteOwned {
+			llm["base_url"] = nil
+			env = ""
+		}
+		if env == "" || env == preset.DefaultAPIKeyEnv(oldProvider) {
+			env = preset.DefaultAPIKeyEnv(newProvider)
+		}
+		llm["api_key_env"] = env
+	}
+
+	currentModel := asString(llm["model"])
+	if models := modelOptions(newProvider); len(models) > 0 {
+		keep := false
+		for _, mdl := range models {
+			if mdl == currentModel {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			llm["model"] = models[0]
+		}
+	} else if isCuratedModel(currentModel) {
+		llm["model"] = ""
+	}
+
+	delete(llm, "thinking")
+	if preset.ClassifyCredentialFamily(newProvider) != preset.CredentialFamilyCodexSingle {
+		delete(llm, "codex_auth_path")
+	}
+	normalizeServiceTier(m.working.Manifest)
+	normalizeThinking(m.working.Manifest)
+	normalizeWireAPI(m.working.Manifest)
+	normalizeResponsesTransport(m.working.Manifest)
+}
+
+// familyTemplateLLM returns the manifest.llm block of the built-in template
+// for provider, or an empty map when no template declares that provider.
+func familyTemplateLLM(provider string) map[string]interface{} {
+	for _, p := range preset.BuiltinPresets() {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		if asString(llm["provider"]) == provider {
+			return llm
+		}
+	}
+	return map[string]interface{}{}
+}
+
 func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	if errs := m.working.Validate(); len(errs) > 0 {
 		m.saveErr = localizedPresetValidationError(errs[0])
@@ -1381,7 +1123,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	m.saveErr = ""
 	// Templates (built-ins) are starting points: the user picks one,
 	// edits it, and saves. The save always materializes a *new* file
-	// under an auto-generated name like `mimo-1` so the template stays
+	// under an auto-generated name like `openai-1` so the template stays
 	// pristine and the user gets a saved preset they own.
 	//
 	// If the user explicitly renamed the preset in the editor (Name
@@ -1407,25 +1149,10 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		// Clear the inherited api_key_env so the host's stampAutoEnvVar
 		// allocates a fresh slot (PROVIDER_N_API_KEY) under the new name.
 		// Without this, the user's pasted key would overwrite the
-		// template's shared slot (e.g. MIMO_API_KEY), polluting any
+		// template's shared slot (e.g. OPENAI_API_KEY), polluting any
 		// other preset that references it.
-		//
-		// Exception: a CROSS-PROVIDER account a region row declares
-		// (OpenCode Go -> OPENCODE_GO_API_KEY) — the whole point of picking
-		// that base_url option is to resolve through that one credential.
-		// Dropping it here would make stampAutoEnvVar mint an unrelated
-		// PROVIDER_N slot, so a user who already configured OpenCode Go on
-		// deepseek would have to paste the same key again for zhipu. Keep it.
-		//
-		// The provider's OWN default slot is not such a case even when a
-		// region row declares it (DeepSeek API -> DEEPSEEK_API_KEY): that is
-		// the template's shared slot in the same sense as MIMO_API_KEY above,
-		// so it is dropped like any other and stampAutoEnvVar mints
-		// DEEPSEEK_1_API_KEY.
 		if llm, ok := committed.Manifest["llm"].(map[string]interface{}); ok {
-			if !usesRegionDeclaredEnv(llm) {
-				delete(llm, "api_key_env")
-			}
+			delete(llm, "api_key_env")
 		}
 	}
 	normalizeLLMForCommit(committed.Manifest)
@@ -1559,15 +1286,13 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		return m.serviceTier()
 	case feThinking:
 		return m.thinkingValue()
-	case feAPICompat:
-		s, _ := llm["api_compat"].(string)
-		return s
 	case feWireAPI:
-		s, _ := llm["wire_api"].(string)
-		if s == "" {
-			return "auto"
+		// Absent, legacy "auto", or unknown values all mean the Chat
+		// Completions default (normalizeWireAPI writes it explicitly).
+		if s, _ := llm["wire_api"].(string); s == preset.WireAPIResponses {
+			return s
 		}
-		return s
+		return preset.WireAPIChatCompletions
 	case feResponsesTransport:
 		if s, _ := llm["responses_transport"].(string); s == "websocket" {
 			return s
@@ -1742,7 +1467,6 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	if m.fieldVisible(feThinking) {
 		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.thinkingValue(), width-4)))
 	}
-	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
 	if m.fieldVisible(feWireAPI) {
 		rows = append(rows, row(feWireAPI, m.row(feWireAPI, lbl("wire_api"), m.fieldString(feWireAPI), width-4)))
 	}
@@ -1793,6 +1517,9 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	if m.mode == emInline && focused {
 		return marker + keyStyle.Render(key) + m.input.View()
 	}
+	if f == feProvider {
+		return marker + keyStyle.Render(key) + m.providerRadioStrip(focused, valStyle)
+	}
 	if f == feModel {
 		if strip := m.modelRadioStrip(focused, valStyle); strip != "" {
 			return marker + keyStyle.Render(key) + strip
@@ -1814,9 +1541,13 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	if f == feResponsesTransport {
 		return marker + keyStyle.Render(key) + m.responsesTransportRadioStrip(focused, valStyle)
 	}
-	if f == feBaseURL {
-		if strip := m.baseURLRadioStrip(focused, valStyle); strip != "" {
-			return marker + keyStyle.Render(key) + strip
+	if f == feBaseURL && value == "" {
+		// Empty base_url on an API-key family means the official endpoint;
+		// say so instead of rendering a bare dash.
+		if def := preset.DefaultBaseURL(asString(m.llmMap()["provider"])); def != "" {
+			hint := fmt.Sprintf(i18n.T("preset_editor.base_url_official_default"), def)
+			hint = truncate(hint, width-lipgloss.Width(marker)-presetEditorFieldLabelWidth)
+			return marker + keyStyle.Render(key) + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint)
 		}
 	}
 	if value == "" {
@@ -1859,27 +1590,11 @@ func (m PresetEditorModel) capabilitiesGuidanceRow(width int) string {
 // model lineup. Returns "" when there's no picker — caller falls back to the
 // standard single-value render.
 func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	provider := asString(m.llmMap()["provider"])
-	baseURL := asString(m.llmMap()["base_url"])
-	models := modelOptions(provider, baseURL)
+	models := modelOptions(asString(m.llmMap()["provider"]))
 	if len(models) == 0 {
 		return ""
 	}
-	current := asString(m.llmMap()["model"])
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	parts := make([]string, 0, len(models))
-	for _, mdl := range models {
-		if mdl == current {
-			if focused {
-				parts = append(parts, valStyle.Render("● "+mdl))
-			} else {
-				parts = append(parts, "● "+mdl)
-			}
-		} else {
-			parts = append(parts, subtle.Render("○ "+mdl))
-		}
-	}
-	return strings.Join(parts, "  ")
+	return radioStrip(models, asString(m.llmMap()["model"]), focused, valStyle)
 }
 
 func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss.Style) string {
@@ -1927,86 +1642,45 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 	return strings.Join(parts, separator)
 }
 
-// baseURLRadioStrip renders the base_url field as a horizontal radio
-// strip showing region labels (e.g. "● CN  ○ INTL") when the current
-// provider has regional endpoints. Returns "" when there's no region
-// list — caller falls back to the standard single-value render.
-// A region with an empty URL is the free-text "Custom" sentinel: it is
-// selected whenever the current base_url is empty or doesn't match any
-// known non-empty region URL, and the typed endpoint is appended after
-// the strip so it stays visible (the strip path hides the raw value).
-// A provider with no Custom row and an off-list base_url has nothing to
-// select: every dot renders hollow and the raw value is appended, so the
-// strip never claims an endpoint the preset does not point at.
-func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	provider := asString(m.llmMap()["provider"])
-	regions, ok := preset.ProviderRegionURLs[provider]
-	if !ok || len(regions) == 0 {
-		return ""
-	}
-	current := asString(m.llmMap()["base_url"])
+// radioStrip renders options as a horizontal radio strip (● selected,
+// ○ unselected). A current value that is not one of the options leaves every
+// dot hollow and is appended after the strip so the row never claims a value
+// the preset does not hold.
+func radioStrip(options []string, current string, focused bool, valStyle lipgloss.Style) string {
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	selected := selectedRegionIndex(regions, current)
-	parts := make([]string, 0, len(regions))
-	for i, r := range regions {
-		if i == selected {
-			if focused {
-				parts = append(parts, valStyle.Render("● "+r.Label))
-			} else {
-				parts = append(parts, "● "+r.Label)
-			}
-		} else {
-			parts = append(parts, subtle.Render("○ "+r.Label))
+	parts := make([]string, 0, len(options)+1)
+	for _, option := range options {
+		switch {
+		case option == current && focused:
+			parts = append(parts, valStyle.Render("● "+option))
+		case option == current:
+			parts = append(parts, "● "+option)
+		default:
+			parts = append(parts, subtle.Render("○ "+option))
 		}
 	}
-	strip := strings.Join(parts, "  ")
-	// Custom, an unknown typed URL, or an off-list value on a provider with no
-	// Custom row (selected < 0) shows the actual endpoint after the strip so
-	// the user always sees exactly what will be saved.
-	if (selected < 0 || regions[selected].URL == "") && current != "" {
-		strip += "  " + subtle.Render(current)
-	}
-	return strip
-}
-
-// wireAPIRadioStrip renders all three wire choices so Custom OpenAI users can see the selector rather than only the current raw manifest value.
-func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	current := m.fieldString(feWireAPI)
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	parts := make([]string, 0, len(wireAPIOptions))
-	for _, option := range wireAPIOptions {
-		label := option
-		if option == current {
-			if focused {
-				parts = append(parts, valStyle.Render("● "+label))
-			} else {
-				parts = append(parts, "● "+label)
-			}
-		} else {
-			parts = append(parts, subtle.Render("○ "+label))
-		}
+	if current != "" && !containsString(options, current) {
+		parts = append(parts, subtle.Render(current))
 	}
 	return strings.Join(parts, "  ")
+}
+
+// providerRadioStrip shows the four provider families side by side so the
+// user can see every choice the ←/→ cycle offers. A legacy saved provider
+// (not one of the four) is shown after the strip with no dot selected.
+func (m PresetEditorModel) providerRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	return radioStrip(editorProviders, m.fieldString(feProvider), focused, valStyle)
+}
+
+// wireAPIRadioStrip renders both openai-family wire choices.
+func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	return radioStrip(wireAPIOptions, m.fieldString(feWireAPI), focused, valStyle)
 }
 
 // responsesTransportRadioStrip shows the default HTTP path and explicit
 // WebSocket v2 opt-in side by side.
 func (m PresetEditorModel) responsesTransportRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	current := m.fieldString(feResponsesTransport)
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	parts := make([]string, 0, len(responsesTransportOptions))
-	for _, option := range responsesTransportOptions {
-		if option == current {
-			if focused {
-				parts = append(parts, valStyle.Render("● "+option))
-			} else {
-				parts = append(parts, "● "+option)
-			}
-		} else {
-			parts = append(parts, subtle.Render("○ "+option))
-		}
-	}
-	return strings.Join(parts, "  ")
+	return radioStrip(responsesTransportOptions, m.fieldString(feResponsesTransport), focused, valStyle)
 }
 
 // isCyclable reports whether a field accepts ←/→ to step through enum
@@ -2014,28 +1688,22 @@ func (m PresetEditorModel) responsesTransportRadioStrip(focused bool, valStyle l
 // a known model lineup; uncurated routes remain inline-edit-only.
 func (m PresetEditorModel) isCyclable(f editorField) bool {
 	switch f {
-	case feProvider, feAPICompat, feTier:
+	case feProvider, feTier:
 		return true
 	case feServiceTier:
-		return true
+		return m.hasServiceTier()
 	case feThinking:
 		return m.hasThinking()
 	case feWireAPI:
-		return m.isCustomOpenAI()
+		return m.isOpenAIFamily()
 	case feResponsesTransport:
-		return m.isCustomOpenAIResponses()
+		return m.isOpenAIResponses()
 	case feAPIKey:
 		// For codex, the "API key" row is an account selector: ←/→ binds the
 		// preset to a different Codex OAuth account when more than one exists.
 		return m.isCodexProvider() && len(m.codexAccountRefs()) > 1
 	case feModel:
-		provider := asString(m.llmMap()["provider"])
-		baseURL := asString(m.llmMap()["base_url"])
-		return len(modelOptions(provider, baseURL)) > 0
-	case feBaseURL:
-		provider := asString(m.llmMap()["provider"])
-		_, hasRegions := preset.ProviderRegionURLs[provider]
-		return hasRegions
+		return len(modelOptions(asString(m.llmMap()["provider"]))) > 0
 	}
 	return false
 }
@@ -2147,13 +1815,13 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
 	case feServiceTier:
-		return true
+		return m.hasServiceTier()
 	case feThinking:
 		return m.hasThinking()
 	case feWireAPI:
-		return m.isCustomOpenAI()
+		return m.isOpenAIFamily()
 	case feResponsesTransport:
-		return m.isCustomOpenAIResponses()
+		return m.isOpenAIResponses()
 	default:
 		return true
 	}
@@ -2348,77 +2016,14 @@ func maskAPIKey(key string) string {
 	return "••••••••" + key[len(key)-4:]
 }
 
-// usesRegionDeclaredEnv reports whether llm's current api_key_env is a
-// CROSS-PROVIDER shared credential its current base_url's region row declares
-// (today only OpenCode Go -> OPENCODE_GO_API_KEY). Picking such a row means
-// "resolve through that one account", so commit() must not strip the slot from
-// an edited built-in and mint an unrelated PROVIDER_N one.
-//
-// The provider's own ProviderDefaultEnv is deliberately excluded even when a
-// region row declares it (deepseek's DeepSeek API row declares
-// DEEPSEEK_API_KEY): that is the template's shared slot, exactly what
-// per-preset numbering exists to replace, so keeping it would let a second
-// deepseek preset overwrite the first one's key. A free-typed URL, an Env-less
-// region row (zhipu/minimax CN/INTL), or a mismatched slot all return false.
-func usesRegionDeclaredEnv(llm map[string]interface{}) bool {
-	env := asString(llm["api_key_env"])
-	baseURL := asString(llm["base_url"])
-	if env == "" || baseURL == "" {
-		return false
-	}
-	provider := asString(llm["provider"])
-	for _, r := range preset.ProviderRegionURLs[provider] {
-		if r.URL == baseURL && r.Env != "" {
-			return r.Env == env && r.Env != preset.ProviderDefaultEnv[provider]
-		}
-	}
-	return false
-}
-
-// regionDeclaredEnv reports whether env is a credential slot ANY region row of
-// provider declares, regardless of which row is currently selected. This is the
-// state-shaped question cycleFocused asks when landing on an Env-less row: a
-// preset resolving through a row-declared slot while pointing somewhere that
-// row does not cover is the thing the restore exists to undo, and keying the
-// restore on the state rather than on the previously selected row also covers
-// selectedRegionIndex == -1 (an off-list base_url on a provider with no Custom
-// row).
-func regionDeclaredEnv(provider string, env string) bool {
-	if env == "" {
-		return false
-	}
-	for _, r := range preset.ProviderRegionURLs[provider] {
-		if r.Env == env {
+// containsString reports whether v is one of opts.
+func containsString(opts []string, v string) bool {
+	for _, o := range opts {
+		if o == v {
 			return true
 		}
 	}
 	return false
-}
-
-// selectedRegionIndex resolves which ProviderRegionURLs option is selected
-// for the given current base_url. A value matching a known non-empty URL
-// selects that option; the empty-URL Custom sentinel absorbs an empty or
-// free-typed value.
-//
-// Returns -1 — "no region selected" — when the value matches nothing and the
-// provider has no Custom row (zhipu, minimax). Callers MUST handle that case
-// rather than index with it: falling back to index 0 would render a solid
-// dot on CN for a preset that points somewhere else entirely, stating
-// positively something that is false. All consumers (openInline,
-// baseURLRadioStrip, cycleFocused) share this rule so the strip's
-// highlighted dot, the Enter no-op, and the cycle always agree.
-func selectedRegionIndex(regions []preset.RegionURL, current string) int {
-	for i, r := range regions {
-		if r.URL != "" && r.URL == current {
-			return i
-		}
-	}
-	for i, r := range regions {
-		if r.URL == "" {
-			return i
-		}
-	}
-	return -1
 }
 
 // cycleString rotates `cur` through `opts` by `dir` steps. Unknown

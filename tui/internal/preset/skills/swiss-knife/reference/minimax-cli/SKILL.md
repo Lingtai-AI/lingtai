@@ -6,9 +6,9 @@ description: >
   correct TUI-managed MiniMax preset/key slot without leaking secrets, match
   mainland vs international regions, and route image/video/music/TTS generation
   or one-shot shell vision.
-version: 2.1.0
+version: 2.2.0
 tags: [manual, cli, minimax, mmx, image, video, music, speech, tts, vision, media-generation]
-last_changed_at: "2026-07-18T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -53,7 +53,11 @@ mmx doctor --help || true
 
 Resolution order:
 
-1. Find MiniMax presets and their declared key slot.
+1. Find MiniMax presets and their declared key slot. LingTai has no
+   `minimax` provider any more: a MiniMax preset is an `anthropic` (or
+   `openai`) preset whose `base_url` points at a MiniMax host
+   (`api.minimaxi.com` for CN, `api.minimax.io` for INTL). Older saved presets
+   may still say `provider: minimax`.
 2. Match the slot to `~/.lingtai-tui/.env` without printing the key value.
 3. Export the selected value as `MINIMAX_API_KEY` for `mmx`.
 4. Match the region/base URL to the preset; do not guess a host.
@@ -116,10 +120,12 @@ for path in paths:
     except Exception:
         continue
     llm = doc.get("manifest", {}).get("llm", {}) or {}
-    if (llm.get("provider") or "").lower() != "minimax":
+    base = llm.get("base_url") or ""
+    legacy = (llm.get("provider") or "").lower() == "minimax"
+    if not legacy and "minimaxi.com" not in base and "minimax.io" not in base:
         continue
-    slot = llm.get("api_key_env") or "MINIMAX_API_KEY"  # legacy/built-in fallback
-    base = llm.get("base_url") or "(default CLI region)"
+    slot = llm.get("api_key_env") or "MINIMAX_API_KEY"  # legacy fallback
+    base = base or "(default CLI region)"
     region = "CN" if "minimaxi.com" in base else "INTL" if "minimax.io" in base else "unknown"
     rel = os.path.relpath(path, os.path.expanduser("~/.lingtai-tui"))
     print(f"{rel:55s} slot={slot:32s} region={region:7s} base_url={base}")
@@ -136,7 +142,7 @@ export MINIMAX_API_KEY="$(grep -E "^${SLOT}=" ~/.lingtai-tui/.env | head -1 | cu
 [ -n "$MINIMAX_API_KEY" ] || echo "missing $SLOT in ~/.lingtai-tui/.env"
 ```
 
-If multiple MiniMax presets exist and the user did not specify which account/region to use, ask. If no MiniMax preset exists, ask the user to save one through the TUI preset library; the TUI will populate the appropriate slot in `~/.lingtai-tui/.env`.
+If multiple MiniMax presets exist and the user did not specify which account/region to use, ask. If no MiniMax preset exists, ask the user to save one through the TUI preset library — the `anthropic` template with `base_url` set to MiniMax's Anthropic-compatible endpoint (for example `https://api.minimaxi.com/anthropic`) and their MiniMax key pasted; the TUI will populate the appropriate slot in `~/.lingtai-tui/.env`.
 
 Token-plan keys often have prefix `sk-cp-...`; pay-as-you-go keys (`sk-...` without `cp`) may also work but are billed per call. Treat both as secrets.
 
@@ -213,7 +219,7 @@ If a user asks for image understanding and you already have the built-in `vision
 | Symptom | Likely cause / action |
 |---|---|
 | `mmx: command not found` | Install `mmx-cli`; verify npm's global bin directory is on `PATH` |
-| No MiniMax preset found | Ask the user to save a MiniMax preset through the TUI preset library |
+| No MiniMax preset found | Ask the user to save an `anthropic` preset with a MiniMax `base_url` through the TUI preset library |
 | Slot printed by preset scan but missing from `.env` | Preset/key state is incomplete; ask the user to re-save the preset or add the key through the TUI |
 | `2049 invalid api key` | Region/key mismatch or wrong slot; re-check selected preset base URL and slot |
 | `2056 usage limit exceeded` | Quota/plan exhausted; stop and report plainly |

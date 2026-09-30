@@ -27,22 +27,22 @@ func TestResolveKanbanLLMConfig(t *testing.T) {
 		{
 			name: "materialized values win field by field",
 			agentRaw: llm(map[string]any{"model": "gpt-5.6-sol", "provider": "codex", "base_url": "https://chatgpt.com/backend-api/codex",
-				"service_tier": "default", "thinking": "xhigh", "api_compat": "responses", "context_limit": float64(250000)}),
+				"service_tier": "default", "thinking": "xhigh", "wire_api": "responses", "context_limit": float64(250000)}),
 			initRaw: llm(map[string]any{"model": "stale-model", "provider": "stale-provider", "base_url": "https://stale.example/v1",
-				"service_tier": "flex", "thinking": "low", "api_compat": "openai", "streaming": true, "context_limit": float64(500000)}),
+				"service_tier": "flex", "thinking": "low", "wire_api": "openai", "streaming": true, "context_limit": float64(500000)}),
 			want: kanbanLLMConfig{Model: "gpt-5.6-sol", Provider: "codex", BaseURL: "https://chatgpt.com/backend-api/codex", Endpoint: "@chatgpt.com",
-				ServiceTier: "default", Thinking: "xhigh", APICompat: "responses", Streaming: "true", ContextLimit: "250000"},
+				ServiceTier: "default", Thinking: "xhigh", WireAPI: "responses", Streaming: "true", ContextLimit: "250000"},
 		},
 		{
 			name:    "explicit init fallback",
-			initRaw: llm(map[string]any{"model": "legacy-model", "provider": "legacy-provider", "base_url": "https://legacy.example/v1", "service_tier": "priority", "thinking": "medium", "api_compat": "openai", "context_limit": float64(500000)}),
-			want:    kanbanLLMConfig{Model: "legacy-model", Provider: "legacy-provider", BaseURL: "https://legacy.example/v1", Endpoint: "@legacy.example", ServiceTier: "priority", Thinking: "medium", APICompat: "openai", ContextLimit: "500000"},
+			initRaw: llm(map[string]any{"model": "legacy-model", "provider": "legacy-provider", "base_url": "https://legacy.example/v1", "service_tier": "priority", "thinking": "medium", "wire_api": "openai", "context_limit": float64(500000)}),
+			want:    kanbanLLMConfig{Model: "legacy-model", Provider: "legacy-provider", BaseURL: "https://legacy.example/v1", Endpoint: "@legacy.example", ServiceTier: "priority", Thinking: "medium", WireAPI: "openai", ContextLimit: "500000"},
 		},
 		{name: "missing fields stay absent", initRaw: llm(map[string]any{"model": "only-model"}), want: kanbanLLMConfig{Model: "only-model"}},
 		{
 			name:     "malformed published fields omit instead of reviving stale values",
-			agentRaw: llm(map[string]any{"service_tier": 42, "thinking": "bad\nvalue", "base_url": "not a URL", "api_compat": 42, "context_limit": "bad"}),
-			initRaw:  llm(map[string]any{"model": "fallback-model", "service_tier": "priority", "thinking": "low", "base_url": "https://fallback.example/v1", "api_compat": "openai", "context_limit": float64(500000)}),
+			agentRaw: llm(map[string]any{"service_tier": 42, "thinking": "bad\nvalue", "base_url": "not a URL", "wire_api": 42, "context_limit": "bad"}),
+			initRaw:  llm(map[string]any{"model": "fallback-model", "service_tier": "priority", "thinking": "low", "base_url": "https://fallback.example/v1", "wire_api": "openai", "context_limit": float64(500000)}),
 			want:     kanbanLLMConfig{Model: "fallback-model"},
 		},
 	}
@@ -156,7 +156,7 @@ func newKanbanHierarchyFixture(t *testing.T) PropsModel {
 	writeJSON(t, filepath.Join(agentDir, ".agent.json"), agent)
 	init := map[string]any{"manifest": map[string]any{
 		"llm": map[string]any{
-			"api_compat":    "openai",
+			"wire_api":      "openai",
 			"api_key_env":   "EXAMPLE_API_KEY",
 			"streaming":     true,
 			"context_limit": 500000,

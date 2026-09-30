@@ -47,7 +47,7 @@ func TestGenerateInitJSON_WritesContextLimit(t *testing.T) {
 		}
 
 		// Default flows through to the manifest as 500000.
-		if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+		if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		// JSON numbers decode as float64.
@@ -58,7 +58,7 @@ func TestGenerateInitJSON_WritesContextLimit(t *testing.T) {
 		// Explicit override is preserved, not reset to the default.
 		opts := DefaultAgentOpts()
 		opts.ContextLimit = 1000000
-		if err := GenerateInitJSONWithOpts(DefaultPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
+		if err := GenerateInitJSONWithOpts(codexPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		if v, ok := readManifest("bob")["context_limit"].(float64); !ok || int(v) != 1000000 {

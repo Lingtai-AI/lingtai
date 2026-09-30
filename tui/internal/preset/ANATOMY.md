@@ -27,19 +27,10 @@ related_files:
   - tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md
   - tui/internal/preset/skills/lingtai-update/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/minimax/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/zhipu/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/mimo/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/deepseek/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/gemini/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/grok/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/subs-pool/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/openai/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/anthropic/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/availability-save-gate/SKILL.md
@@ -219,26 +210,28 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `Preset` struct | `tui/internal/preset/preset.go:61` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
-| `PresetSource` | `tui/internal/preset/preset.go:75` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
-| `PresetDescription` | `tui/internal/preset/preset.go:99` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
+| `Preset` struct | `tui/internal/preset/preset.go:60` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
+| `PresetSource` | `tui/internal/preset/preset.go:74` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
+| `PresetDescription` | `tui/internal/preset/preset.go:98` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
 | `CanonicalizeCapabilities` | `tui/internal/preset/capability_alias.go:24` | bounded in-memory `bash` -> `shell` helper for explicit preset/editor/write flows; conflicting configurations fail closed |
 | `NormalizeLegacyCapabilities` | `tui/internal/preset/capability_alias.go:47` | applies the bounded helper to a preset before explicit TUI output |
 | `DecodeJSONUseNumber` | `tui/internal/preset/json_number.go:10-27` | exact-number, single-document decoder for explicit TUI read-modify-write paths; not a startup reader or migration |
-| `Load(name)` | `tui/internal/preset/preset.go:257` | saved/ first, then templates/; sets `Source` |
-| `List()` | `tui/internal/preset/preset.go:210` | saved (alphabetical) + templates (canonical order); each carries `Source` |
+| `Load(name)` | `tui/internal/preset/preset.go:278` | saved/ first, then templates/; sets `Source` |
+| `List()` | `tui/internal/preset/preset.go:216` | saved (alphabetical) + templates in `BuiltinPresets()` order; each carries `Source` |
 | `ScanCategory()` / `ScanEmbeddedCategory()` | `tui/internal/preset/recipes.go:102-128` | disk-backed recipe discovery and read-only compiled metadata fallback |
 | `ReadEmbeddedRecipeFile()` | `tui/internal/preset/recipes.go:130-142` | reads compiled recipe content without materializing a path |
-| `Save(p)` | `tui/internal/preset/preset.go:373` | ALWAYS to `saved/`; never templates |
-| `RefreshTemplates()` | `tui/internal/preset/preset.go:437` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
-| `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1556` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
-| `BuiltinPresets()` | `tui/internal/preset/preset.go:690` | minimax, zhipu, mimo, deepseek, gemini, kimi, grok, nvidia, openrouter, codex, claude, custom |
-| `skills/lingtai-preset-skill/` | `tui/internal/preset/skills/lingtai-preset-skill/SKILL.md:1` | thin dual-axis router: 12 direct named-preset revision children (one per `BuiltinPresets()` name, `reference/<preset>/SKILL.md`), one non-template external-endpoint recipe (`reference/subs-pool/SKILL.md`: the external subs-pool Codex account pool reached as a `custom` Responses preset), plus 5 unchanged nested operation children for cross-cutting lifecycle mechanics (`reference/operations/<op>/SKILL.md`). The shared deterministic CLI/engine is documented by the router and implemented in `headless/preset_revision.go` plus `revision.go`, not as an operation child. |
+| `Save(p)` | `tui/internal/preset/preset.go:447` | ALWAYS to `saved/`; never templates |
+| `RefreshTemplates()` | `tui/internal/preset/preset.go:515` | rewrites `templates/` from `BuiltinPresets()`, prunes retired (e.g. the former per-vendor templates) |
+| `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1232` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
+| `BuiltinPresets()` | `tui/internal/preset/preset.go:605` | one template per provider family the kernel accepts: codex (first-run default), claude (`claude-code`), openai (OpenAI-compatible), anthropic (Anthropic-compatible). No per-vendor templates. |
+| Provider-family constants | `tui/internal/preset/preset.go:549-603` | `ProviderOpenAI`/`ProviderAnthropic`/`ProviderCodex`/`ProviderClaudeCode`, official `OpenAIDefaultBaseURL`/`AnthropicDefaultBaseURL`, `WireAPIChatCompletions`/`WireAPIResponses`, and `DefaultAPIKeyEnv`/`DefaultBaseURL` shared by the editor, /doctor, and the credentials page |
+| `StripRetiredLLMFields` | `tui/internal/preset/preset.go:1509` | drops retired `manifest.llm` keys (`api_compat`) from editor commits and generated `init.json` |
+| `skills/lingtai-preset-skill/` | `tui/internal/preset/skills/lingtai-preset-skill/SKILL.md:1` | thin dual-axis router: 4 direct family children (one per `BuiltinPresets()` name, `reference/<preset>/SKILL.md`; the `openai` child also owns the sub2api / subs-pool account-pool recipe as an `openai` Responses preset), plus 5 unchanged nested operation children for cross-cutting lifecycle mechanics (`reference/operations/<op>/SKILL.md`). The shared deterministic CLI/engine is documented by the router and implemented in `headless/preset_revision.go` plus `revision.go`, not as an operation child. |
 | `PlanRevision` / `ApplyRevision` | `tui/internal/preset/revision.go:270,397` | pure typed manifest/evidence/route/model/Responses validation, including closed direct/provider-child route bindings, model-scoped capability evidence, and requested/observed value vocabularies; verifies the deterministic expected-old plan and declared post-image hash, then applies by byte splicing so unowned JSON ordering and semantics survive. `headless.RunPresetRevision` is the explicit CLI adapter. |
-| `IsTemplate(p)` | `tui/internal/preset/preset.go:540` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
-| `RefFor(p)` | `tui/internal/preset/preset.go:549` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
+| `IsTemplate(p)` | `tui/internal/preset/preset.go:632` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
+| `RefFor(p)` | `tui/internal/preset/preset.go:641` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for canonical provider `claude-code`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
-| `Validate()` | `tui/internal/preset/preset.go:324` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
+| `Validate()` | `tui/internal/preset/preset.go:366` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty; `base_url` optional for every family |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, recipe_assets, skills |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` / `CopyEmbeddedBundle` | `tui/internal/preset/recipe_apply.go:59,122` | copies disk or compiled `.recipe/` (replace) plus recipe siblings into a project |
@@ -260,7 +253,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 13 direct named-preset revision children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 4 direct family children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State

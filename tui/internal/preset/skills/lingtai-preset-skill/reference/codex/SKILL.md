@@ -1,7 +1,7 @@
 ---
 name: preset-skill-codex
 description: "Use when revising the built-in codex TUI preset."
-version: 3.0.0
+version: 4.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
@@ -15,11 +15,15 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # codex preset revision
 
-Use this child for the named built-in codex preset. codexPreset in
-tui/internal/preset/preset.go:1411 ships provider codex, gpt-5.6-sol,
-https://chatgpt.com/backend-api/codex, ChatGPT OAuth with an empty
-api_key_env, thinking xhigh, web_search, and provider-native vision. It is
-not the standard OpenAI API preset.
+Use this child for the named built-in codex preset — the first-run default
+template. codexPreset in tui/internal/preset/preset.go ships provider codex,
+gpt-5.6-sol, https://chatgpt.com/backend-api/codex, ChatGPT OAuth with an
+empty api_key_env, thinking xhigh, web_search on DuckDuckGo, and vision
+inheriting the agent's own (Codex) provider. It is not the OpenAI API
+preset: an OpenAI API key or an OpenAI-compatible endpoint uses the `openai`
+family (`reference/openai/SKILL.md`), and several ChatGPT accounts behind one
+endpoint use an external pool such as sub2api / subs-pool through that same
+`openai` family.
 
 ## Template-specific settings
 
@@ -34,11 +38,12 @@ Never inspect or print OAuth token contents.
 ## TUI surfaces to revise
 
 Start at codexPreset in tui/internal/preset/preset.go. Revise
-providerModels["codex"], matching modelHasVision entries, codexThinkingOptions,
-and the model/capability rows in tui/internal/tui/preset_editor.go when the
-Codex catalog, vision, or reasoning choices change. Preserve the /codex
-base_url suffix, empty api_key_env, OAuth identity, and explicit xhigh default.
-Follow the Codex-specific checklist in tui/internal/tui/SKILL.md and the
+providerModels["codex"], codexThinkingOptions, and the model row in
+tui/internal/tui/preset_editor.go when the Codex catalog or reasoning choices
+change; the service tier row offers normal/fast (fast is sent as priority).
+Preserve the /codex base_url suffix, empty api_key_env, OAuth identity
+(codex_auth_path account binding), and explicit xhigh default. Follow the
+Codex-specific checklist in tui/internal/tui/SKILL.md and the
 latest-two-generation rule in tui/CONTRACT.md.
 
 The picker is gpt-5.6-sol, gpt-6-astra, gpt-5.6-terra, and gpt-5.6-luna;
@@ -57,9 +62,9 @@ Prepare an evidence-bound manifest and explicit input, then run
 lingtai-tui presets revise --manifest PATH --input PATH --mode dry-run|check|apply
 [--output-dir PATH]. Review the JSON plan, use dry-run/check before apply, and
 apply only to a new explicit output directory. revision.go validates hashes,
-route bindings, and evidence and preserves unowned bytes. This amendment does
-update the picker and vision metadata while keeping the constructor/default at
-gpt-5.6-sol behind the exact-route availability gate.
+route bindings, and evidence and preserves unowned bytes. The
+constructor/default stays at gpt-5.6-sol behind the exact-route availability
+gate.
 
 Maintenance: If the relevant TUI preset/page is revised, check whether this sub-skill also needs revision and, if so, include it in the same PR.
 

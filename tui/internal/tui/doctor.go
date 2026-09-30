@@ -464,7 +464,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 2: read init.json to get LLM config
-	provider, model, apiKey, baseURL, apiCompat, err := readLLMConfig(orchDir)
+	cfg, err := readLLMConfig(orchDir)
 	if err != nil {
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.config_error", err),
@@ -476,21 +476,10 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		// reflects what the user saw; LLM metadata is simply absent.
 		return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, doctorreport.LLMConfig{})}
 	}
-
-	// Phase 2.5: check base_url for providers that require it
-	if baseURL == "" {
-		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
-			lines = append(lines, doctorLine{
-				Text: i18n.TF("doctor.llm_no_base_url", provider),
-			})
-			lines = append(lines, doctorLine{
-				Text: i18n.T("doctor.suggest_base_url"), Hint: true,
-			})
-		}
-	}
+	provider, model, apiKey, baseURL := cfg.Provider, cfg.Model, cfg.APIKey, cfg.BaseURL
 
 	// Phase 3: live API check
-	status, detail := probeLLM(provider, model, apiKey, baseURL, apiCompat)
+	status, detail := probeLLM(cfg)
 
 	switch status {
 	case probeOK:
@@ -548,6 +537,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_oauth"), Hint: true,
 		})
+	case probeUnsupportedProvider:
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.llm_unsupported_provider", provider),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.suggest_provider_family"), Hint: true,
+		})
 	case probeEmptyResponse:
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.llm_empty_response", detail),
@@ -575,7 +571,6 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		Provider:      provider,
 		Model:         model,
 		BaseHost:      baseHostForReport(baseURL),
-		APICompat:     apiCompat,
 		APIKeyEnv:     config.ReadAgentAPIKeyEnv(orchDir),
 		APIKeyPresent: apiKey != "",
 	}
@@ -1071,51 +1066,57 @@ func findLastAPIError(orchDir string) string {
 
 // --- Init.json / env resolution ---
 
-// readLLMConfig pulls the agent's LLM configuration from init.json. The
-// apiCompat return value carries manifest.llm.api_compat ("", "openai",
-// or "anthropic") — required by probeLLM to pick the right auth scheme
-// when provider="custom" points at a third-party gateway. Without this,
-// any anthropic-compatible custom endpoint (e.g. JoyCode's local proxy
-// on 127.0.0.1:34891) gets probed with `Authorization: Bearer <key>`,
-// silently falls into the 404 path that's mapped to probeOK, and masks
-// the real connectivity state.
-func readLLMConfig(orchDir string) (provider, model, apiKey, baseURL, apiCompat string, err error) {
+// llmConfig is the subset of an agent's manifest.llm the doctor and the
+// credentials page need to probe its endpoint. APIKey is the resolved key
+// value — never logged or rendered.
+type llmConfig struct {
+	Provider string
+	Model    string
+	APIKey   string
+	BaseURL  string
+	WireAPI  string
+}
+
+// readLLMConfig pulls the agent's LLM configuration from init.json, resolving
+// api_key_env through the process environment and the agent's env_file.
+func readLLMConfig(orchDir string) (llmConfig, error) {
+	var cfg llmConfig
 	initPath := filepath.Join(orchDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("cannot read init.json")
+		return cfg, fmt.Errorf("cannot read init.json")
 	}
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", "", "", "", "", fmt.Errorf("invalid init.json")
+		return cfg, fmt.Errorf("invalid init.json")
 	}
 
 	manifest, _ := raw["manifest"].(map[string]interface{})
 	if manifest == nil {
-		return "", "", "", "", "", fmt.Errorf("no manifest in init.json")
+		return cfg, fmt.Errorf("no manifest in init.json")
 	}
 
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
-		return "", "", "", "", "", fmt.Errorf("no manifest.llm in init.json")
+		return cfg, fmt.Errorf("no manifest.llm in init.json")
 	}
 
-	provider, _ = llm["provider"].(string)
-	model, _ = llm["model"].(string)
-	apiKey, _ = llm["api_key"].(string)
-	baseURL, _ = llm["base_url"].(string)
-	apiCompat, _ = llm["api_compat"].(string)
+	cfg.Provider, _ = llm["provider"].(string)
+	cfg.Model, _ = llm["model"].(string)
+	cfg.APIKey, _ = llm["api_key"].(string)
+	cfg.BaseURL, _ = llm["base_url"].(string)
+	cfg.WireAPI, _ = llm["wire_api"].(string)
 
-	if apiKey == "" {
+	if cfg.APIKey == "" {
 		apiKeyEnv, _ := llm["api_key_env"].(string)
 		if apiKeyEnv != "" {
 			envFile, _ := raw["env_file"].(string)
-			apiKey = lookupEnvKey(envFile, orchDir, apiKeyEnv)
+			cfg.APIKey = lookupEnvKey(envFile, orchDir, apiKeyEnv)
 		}
 	}
 
-	return provider, model, apiKey, baseURL, apiCompat, nil
+	return cfg, nil
 }
 
 // lookupEnvKey resolves an environment variable name, checking os.Environ first,
@@ -1180,31 +1181,46 @@ const (
 	// charity branch), or may return a benign 200 — so we run a real
 	// minimal messages call as a second-stage probe.
 	probeEmptyResponse
-	// probeOAuth: provider uses OAuth/session-based auth (e.g. codex /
-	// codex_oauth via ChatGPT subscription), not an API key. The doctor
-	// cannot probe these from this process — the CLI subprocess owns the
-	// credential. Surface as a Warn-level note rather than the bogus
+	// probeOAuth: provider uses OAuth/session-based auth (codex via a
+	// ChatGPT subscription, or the local Claude Code CLI login), not an API
+	// key. The doctor cannot probe these from this process — the runtime owns
+	// the credential. Surface as a Warn-level note rather than the bogus
 	// "API key not set" alarm that probeNoKey would produce.
 	probeOAuth
+	// probeUnsupportedProvider: manifest.llm.provider is not one of the four
+	// provider families (openai, anthropic, codex, claude-code). The kernel
+	// rejects such a preset, so there is nothing meaningful to probe; the
+	// user must move the preset to a family (other vendors are reached
+	// through openai/anthropic pointed at their compatible endpoint).
+	probeUnsupportedProvider
 )
 
-// oauthProviders enumerates LLM providers whose credentials live outside
-// the LingTai config (no api_key / api_key_env). The doctor cannot probe
-// these directly; the spawned CLI handles its own auth (e.g. `codex`
-// reads ~/.codex/auth.json from a prior `codex login`).
-func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, string) {
-	family := preset.ClassifyCredentialFamily(provider)
+// probeLLM checks the agent's LLM endpoint by provider family:
+//
+//   - codex / claude-code: OAuth or CLI login owned by the runtime — reported
+//     as probeOAuth without a network call.
+//   - openai: GET {base}/models with a Bearer key (base defaults to the
+//     official https://api.openai.com/v1), then one max_tokens=1 Chat
+//     Completions call to catch 200-but-empty gateways. A Responses-wire
+//     preset skips that second stage: a Responses-only endpoint (e.g. an
+//     account pool) need not serve Chat Completions.
+//   - anthropic: GET {base}/v1/models with x-api-key + anthropic-version
+//     (base defaults to https://api.anthropic.com), then one max_tokens=1
+//     Messages call.
+//   - anything else: probeUnsupportedProvider — the kernel rejects it.
+func probeLLM(cfg llmConfig) (probeStatus, string) {
+	family := preset.ClassifyCredentialFamily(cfg.Provider)
 	if family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyClaudeCLI {
 		return probeOAuth, ""
 	}
-	if apiKey == "" {
+	if cfg.Provider != preset.ProviderOpenAI && cfg.Provider != preset.ProviderAnthropic {
+		return probeUnsupportedProvider, cfg.Provider
+	}
+	if cfg.APIKey == "" {
 		return probeNoKey, ""
 	}
 
-	url, headers := providerProbeConfig(provider, apiKey, baseURL, apiCompat)
-	if url == "" {
-		return probeUnknown, "unknown provider: " + provider
-	}
+	url, headers := familyModelsRequest(cfg.Provider, cfg.BaseURL, cfg.APIKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
@@ -1218,7 +1234,7 @@ func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, 
 	resp, err := client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
-		if strings.Contains(errMsg, apiKey) {
+		if strings.Contains(errMsg, cfg.APIKey) {
 			errMsg = "connection failed"
 		}
 		return probeNetworkError, errMsg
@@ -1227,14 +1243,11 @@ func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, 
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	body := string(bodyBytes)
 
-	var gotStatus probeStatus
-	var gotDetail string
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		gotStatus, gotDetail = probeOK, ""
 	case resp.StatusCode == 404 || resp.StatusCode == 405:
-		// /v1/models not supported but server responded — connectivity and auth OK
-		gotStatus, gotDetail = probeOK, ""
+		// The models listing is not supported but the server responded —
+		// connectivity is OK; the second stage below still checks a real call.
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	case resp.StatusCode == 429:
@@ -1245,69 +1258,45 @@ func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, 
 		return probeUnknown, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	}
 
-	// Stage 2: real-call second-stage probe. The /v1/models check above
-	// tells us only that the host is reachable and credentials were not
-	// rejected outright. It cannot tell us whether the actual generation
-	// path (POST /v1/messages or POST /v1/chat/completions) forwards
-	// requests to a working upstream model — and that is exactly what
-	// fails for reverse-proxy gateways (e.g. JoyCode at 127.0.0.1:34891,
-	// or acui.shop / opencode.ai zen routes) when they reply HTTP 200
-	// with an empty envelope. So when the wire protocol is identifiable
-	// we send one max_tokens=1 generation and inspect the envelope. Cost
-	// is negligible (<$0.0001 on every commercial provider) and the
-	// diagnostic value is high — without this the doctor's first-stage
-	// probeOK silently masks the very failure mode the user is here to
-	// debug.
-	if gotStatus == probeOK {
-		switch classifyWire(provider, apiCompat) {
-		case wireAnthropic:
-			if msgStatus, msgDetail := probeAnthropicMessages(model, apiKey, baseURL); msgStatus != probeOK {
-				return msgStatus, msgDetail
-			}
-		case wireOpenAI:
-			if msgStatus, msgDetail := probeOpenAICompletions(model, apiKey, baseURL); msgStatus != probeOK {
-				return msgStatus, msgDetail
-			}
+	// Stage 2: real-call second-stage probe. The models check above tells us
+	// only that the host is reachable and credentials were not rejected
+	// outright. It cannot tell us whether the generation path forwards
+	// requests to a working upstream model — exactly what fails for
+	// reverse-proxy gateways that reply HTTP 200 with an empty envelope. One
+	// max_tokens=1 generation costs a negligible amount and catches that.
+	switch cfg.Provider {
+	case preset.ProviderAnthropic:
+		return probeAnthropicMessages(cfg.Model, cfg.APIKey, cfg.BaseURL)
+	case preset.ProviderOpenAI:
+		if cfg.WireAPI == preset.WireAPIResponses {
+			return probeOK, ""
 		}
+		return probeOpenAICompletions(cfg.Model, cfg.APIKey, cfg.BaseURL)
 	}
-	return gotStatus, gotDetail
+	return probeOK, ""
 }
 
-// wireProtocol classifies a provider/api_compat pair into the wire
-// protocol used for the actual generation call. The classification is
-// what determines which second-stage envelope-inspection probe runs.
-type wireProtocol int
-
-const (
-	wireUnknown wireProtocol = iota
-	wireAnthropic
-	wireOpenAI
-)
-
-func classifyWire(provider, apiCompat string) wireProtocol {
-	switch provider {
-	case "anthropic", "minimax":
-		return wireAnthropic
-	case "openai", "openrouter", "deepseek", "kimi", "mimo", "zhipu", "codex", "nvidia":
-		return wireOpenAI
-	case "custom":
-		switch apiCompat {
-		case "anthropic":
-			return wireAnthropic
-		case "openai":
-			return wireOpenAI
-		default:
-			return wireUnknown
+// familyModelsRequest returns the GET URL and auth headers that list models
+// on an API-key provider family's endpoint. baseURL falls back to the
+// family's official endpoint when empty. It is shared by /doctor and the
+// credentials page so both probe a family the same way.
+//
+//   - openai:    {base}/models, Authorization: Bearer <key>
+//     (base is SDK-style and already includes /v1)
+//   - anthropic: {base}/v1/models, x-api-key + anthropic-version
+func familyModelsRequest(provider, baseURL, apiKey string) (string, map[string]string) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = preset.DefaultBaseURL(provider)
+	}
+	if provider == preset.ProviderAnthropic {
+		return base + "/v1/models", map[string]string{
+			"x-api-key":         apiKey,
+			"anthropic-version": "2023-06-01",
 		}
-	default:
-		switch apiCompat {
-		case "anthropic":
-			return wireAnthropic
-		case "openai":
-			return wireOpenAI
-		default:
-			return wireUnknown
-		}
+	}
+	return base + "/models", map[string]string{
+		"Authorization": "Bearer " + apiKey,
 	}
 }
 
@@ -1323,7 +1312,7 @@ func classifyWire(provider, apiCompat string) wireProtocol {
 func probeAnthropicMessages(model, apiKey, baseURL string) (probeStatus, string) {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
-		base = "https://api.anthropic.com"
+		base = preset.AnthropicDefaultBaseURL
 	}
 	url := base + "/v1/messages"
 
@@ -1425,24 +1414,18 @@ func probeAnthropicMessages(model, apiKey, baseURL string) (probeStatus, string)
 
 // probeOpenAICompletions is the OpenAI-protocol counterpart of
 // probeAnthropicMessages. It POSTs a single max_tokens=1 chat completion
-// to base_url + /v1/chat/completions (or just /chat/completions when the
-// base_url already ends in /v1) and inspects choices[].message.content
+// to {base_url}/chat/completions — the same SDK-style join the runtime uses,
+// so base_url carries its own /v1 — and inspects choices[].message.content
 // plus usage.completion_tokens. Returns probeEmptyResponse when the
 // response is HTTP 200 but the envelope is empty — the canonical failure
-// signature of OpenAI-compatible reverse proxies (acui.shop and the
-// opencode.ai zen routes are the motivating cases) that 200-but-nop the
+// signature of OpenAI-compatible reverse proxies that 200-but-nop the
 // generation. See probeAnthropicMessages for the broader rationale.
 func probeOpenAICompletions(model, apiKey, baseURL string) (probeStatus, string) {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
-		base = "https://api.openai.com/v1"
+		base = preset.OpenAIDefaultBaseURL
 	}
-	// Smart endpoint join: many OpenAI-compatible base_urls already end in
-	// /v1, others don't. Don't double-stack.
 	url := base + "/chat/completions"
-	if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
-		url = base + "/v1/chat/completions"
-	}
 
 	probeModel := model
 	if probeModel == "" {
@@ -1535,89 +1518,6 @@ func probeOpenAICompletions(model, apiKey, baseURL string) (probeStatus, string)
 		)
 	}
 	return probeOK, ""
-}
-
-// providerProbeConfig returns the URL and headers for a GET /v1/models
-// (or provider-equivalent) probe. apiCompat carries manifest.llm.api_compat
-// and is consulted whenever a provider entry is itself protocol-agnostic
-// (i.e. "custom" or unknown providers backed by a user-supplied baseURL):
-// the auth scheme then follows the wire protocol the user declared, not
-// a hardcoded default.
-//
-// Without this, anthropic-compatible third-party gateways — JoyCode's
-// local proxy at 127.0.0.1:34891 being a representative case — get hit
-// with `Authorization: Bearer <key>`, fall through to a 404 on /v1/models
-// (which the probe charitably maps to OK), and the user sees a green
-// /doctor while the actual agent fails to talk to the gateway.
-func providerProbeConfig(provider, apiKey, baseURL, apiCompat string) (string, map[string]string) {
-	switch provider {
-	case "anthropic":
-		base := "https://api.anthropic.com"
-		if baseURL != "" {
-			base = strings.TrimRight(baseURL, "/")
-		}
-		return base + "/v1/models", map[string]string{
-			"x-api-key":         apiKey,
-			"anthropic-version": "2023-06-01",
-		}
-	case "openai":
-		base := "https://api.openai.com"
-		if baseURL != "" {
-			base = strings.TrimRight(baseURL, "/")
-		}
-		return base + "/v1/models", map[string]string{
-			"Authorization": "Bearer " + apiKey,
-		}
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta/models", map[string]string{
-			"x-goog-api-key": apiKey,
-		}
-	case "minimax":
-		base := "https://api.minimax.io/anthropic"
-		if baseURL != "" {
-			base = strings.TrimRight(baseURL, "/")
-		}
-		return base + "/v1/models", map[string]string{
-			"x-api-key":         apiKey,
-			"anthropic-version": "2023-06-01",
-		}
-	case "zhipu":
-		base := "https://open.bigmodel.cn/api/coding/paas/v4"
-		if baseURL != "" {
-			base = strings.TrimRight(baseURL, "/")
-		}
-		return base + "/models", map[string]string{
-			"Authorization": "Bearer " + apiKey,
-		}
-	case "custom":
-		if baseURL == "" {
-			return "", nil
-		}
-		base := strings.TrimRight(baseURL, "/")
-		if apiCompat == "anthropic" {
-			return base + "/v1/models", map[string]string{
-				"x-api-key":         apiKey,
-				"anthropic-version": "2023-06-01",
-			}
-		}
-		return base + "/v1/models", map[string]string{
-			"Authorization": "Bearer " + apiKey,
-		}
-	default:
-		if baseURL != "" {
-			base := strings.TrimRight(baseURL, "/")
-			if apiCompat == "anthropic" {
-				return base + "/v1/models", map[string]string{
-					"x-api-key":         apiKey,
-					"anthropic-version": "2023-06-01",
-				}
-			}
-			return base + "/v1/models", map[string]string{
-				"Authorization": "Bearer " + apiKey,
-			}
-		}
-		return "", nil
-	}
 }
 
 // --- Kernel health checks ---

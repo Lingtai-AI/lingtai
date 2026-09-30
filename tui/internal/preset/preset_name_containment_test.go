@@ -54,7 +54,7 @@ func TestValidateSafeName_AcceptsNormalNames(t *testing.T) {
 func TestSave_RejectsUnsafeNamesAndWritesNothingOutside(t *testing.T) {
 	withTempPresets(t, func() {
 		for _, name := range unsafeNames {
-			p := DefaultPreset()
+			p := codexPreset()
 			p.Name = name
 			if err := Save(p); err == nil {
 				t.Errorf("Save(name=%q) = nil, want error", name)
@@ -74,7 +74,7 @@ func TestSave_RejectsUnsafeNamesAndWritesNothingOutside(t *testing.T) {
 
 func TestSave_AcceptsNormalName(t *testing.T) {
 	withTempPresets(t, func() {
-		p := DefaultPreset()
+		p := codexPreset()
 		p.Name = "my-saved-preset"
 		if err := Save(p); err != nil {
 			t.Fatalf("Save(normal name) error: %v", err)
@@ -118,7 +118,7 @@ func TestGenerateInitJSONWithOpts_RejectsUnsafeDirName(t *testing.T) {
 		}
 		globalDir := filepath.Join(tmp, "global")
 
-		err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", name, lingtaiDir, globalDir, DefaultAgentOpts())
+		err := GenerateInitJSONWithOpts(codexPreset(), "alice", name, lingtaiDir, globalDir, DefaultAgentOpts())
 		if err == nil {
 			t.Errorf("GenerateInitJSONWithOpts(dirName=%q) = nil, want error", name)
 		}
@@ -145,7 +145,7 @@ func TestGenerateInitJSONWithOpts_AcceptsNormalDirName(t *testing.T) {
 	}
 	globalDir := filepath.Join(tmp, "global")
 
-	if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts(normal dirName) error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(lingtaiDir, "alice", "init.json")); err != nil {

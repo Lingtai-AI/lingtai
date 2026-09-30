@@ -48,8 +48,8 @@ func TestRunPresets_WithTemplates_ListsAll(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(result.Presets) < 8 {
-		t.Errorf("expected >= 8 presets, got %d", len(result.Presets))
+	if len(result.Presets) != len(preset.BuiltinPresets()) {
+		t.Errorf("expected %d template presets, got %d", len(preset.BuiltinPresets()), len(result.Presets))
 	}
 	for _, p := range result.Presets {
 		if p.Source != "template" {

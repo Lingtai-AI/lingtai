@@ -73,14 +73,6 @@ type bootstrapDoneMsg struct{}
 // bootstrapErrMsg signals that background setup failed.
 type bootstrapErrMsg struct{ err string }
 
-// capCheckDoneMsg delivers the parsed check-caps result.
-type capCheckDoneMsg struct {
-	infos map[string]capInfo
-}
-
-// capCheckErrMsg signals that check-caps failed.
-type capCheckErrMsg struct{ err string }
-
 // bootstrapProgressMsg reports a setup progress step (i18n key).
 type bootstrapProgressMsg struct{ key string }
 
@@ -96,11 +88,9 @@ type firstRunStep int
 
 const (
 	stepWelcome firstRunStep = iota
-	stepAPIKey
 	stepPickPreset
 	stepEditPreset
 	stepPresetKey
-	stepCapabilities
 	stepAgentPresets // pick default + multi-toggle allowed
 	stepAgentNameDir
 	stepReview    // draftMode only — final "Start project" confirmation before staging/commit
@@ -113,51 +103,24 @@ const (
 // preset editor's model row. See preset_editor.go's providerModels map
 // and the SKILL.md next to it for the maintained model list.)
 
-// capInfo holds provider metadata for a single capability (from check-caps).
-type capInfo struct {
-	Providers []string `json:"providers"`
-	Default   *string  `json:"default"`
-}
-
-// stepProgress returns the 1-based index and total for progress display.
-// stepCapabilities was removed from the flow in the 2026-04 redesign —
-// capabilities live in the preset (edited via the preset editor) and
-// addons default to all-on.
+// stepProgress returns the 1-based index and total for progress display:
+// library • presets-config • details. Templates always exist after
+// Bootstrap, so there is no separate API-key step; capabilities live in the
+// preset (edited via the preset editor) and addons default to all-on, so
+// there is no capabilities step either.
 //
 // The 2026-04-30 redesign added stepAgentPresets between the library
 // pick-list and the runtime page: the pick-list is now a pure library
 // manager (edit / new / continue) and stepAgentPresets is where the user
 // commits to a default + the set of presets the agent may swap to.
-//
-// Draft mode (the no-project launcher's create flow) never runs stepAPIKey
-// — its callers pass hasPresets||draftMode so the picker honestly reads
-// "Step 1/4" even on a machine with no presets yet.
-func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
-	if setupMode {
-		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
-	} else if hasPresets {
-		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
-	} else {
-		total = 4 // api key • library • presets-config • details
-	}
-	switch {
-	case !hasPresets && step == stepAPIKey:
+func stepProgress(step firstRunStep) (current int, total int) {
+	total = 3
+	switch step {
+	case stepPickPreset, stepEditPreset, stepPresetKey:
 		return 1, total
-	case !hasPresets && (step == stepPickPreset || step == stepEditPreset || step == stepPresetKey):
+	case stepAgentPresets:
 		return 2, total
-	case step == stepPickPreset || step == stepEditPreset || step == stepPresetKey:
-		return 1, total
-	case step == stepAgentPresets:
-		if setupMode || hasPresets {
-			return 2, total
-		}
-		return 3, total
-	case step == stepAgentNameDir:
-		if setupMode || hasPresets {
-			return 3, total
-		}
-		return 4, total
-	case step == stepLaunching:
+	case stepAgentNameDir, stepLaunching:
 		return total, total
 	}
 	return 1, total
@@ -166,7 +129,6 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 // FirstRunModel orchestrates the first-run experience.
 type FirstRunModel struct {
 	step    firstRunStep
-	setup   SetupModel
 	presets []preset.Preset
 	cursor  int
 	// draftEditedPresetIdx is the m.presets index the preset editor last
@@ -197,7 +159,6 @@ type FirstRunModel struct {
 	globalDir         string
 	width             int
 	height            int
-	hasPresets        bool
 	fieldIdx          int // see agentNameDirFieldCount for field indices
 	// Agent config text inputs
 	agentLangIdx  int // cycle: 0=en, 1=zh, 2=wen
@@ -312,15 +273,6 @@ type FirstRunModel struct {
 	// this model and reacts to PresetEditorCommitMsg / CancelMsg.
 	presetEditor PresetEditorModel
 	existingKeys map[string]string // loaded from Config.Keys
-	// Capability selection state (stepCapabilities)
-	capInfos     map[string]capInfo // from check-caps CLI output
-	capSelected  map[string]bool    // user toggle state
-	capProviders map[string]string  // user's chosen provider per capability (only for caps with ≥2 compatible options)
-	capOrder     []string           // ordered list matching AllCapabilities
-	capCursor    int                // current cursor position (0..len-1)
-	capAtKeep    bool               // true when "Keep current" is focused (setup mode only)
-	capLoading   bool               // true while check-caps is running
-	capErr       string             // error message if check-caps fails
 	// Agent preset config state (stepAgentPresets)
 	//
 	// The page lists *saved* presets only — built-in templates are not
@@ -338,11 +290,10 @@ type FirstRunModel struct {
 	presetDefaultIdx int
 	presetCfgCursor  int    // cursor on the agent-preset-config page (row index)
 	presetCfgMessage string // transient validation flash (e.g. "default cannot be unallowed")
-	// Addon selection state (shown below capabilities)
+	// Addon selection state: every known addon defaults on (setup mode
+	// preserves the agent's existing list); see enterAgentDetails.
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
-	addonCursor   int             // cursor when in addon zone
-	inAddonZone   bool            // true when cursor is in addon section
 
 	// Pending save state (captured at end of stepAgentNameDir, consumed by the
 	// adaptive-commit finalizer)
@@ -422,7 +373,10 @@ func (m *FirstRunModel) clearDraftPendingAPIKey(envName string) bool {
 // NewFirstRunModel constructs a normal (purposeNormal) first-run model —
 // this is the public entry point every existing caller uses and its
 // behavior is unchanged. It delegates to the purpose-aware shared body so
-// purposeNormal callers keep their exact existing signature.
+// purposeNormal callers keep their exact existing signature. hasPresets is
+// accepted for call-site compatibility only: templates always exist after
+// Bootstrap, so the wizard no longer branches on it (there is no separate
+// API-key step).
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
 	return newFirstRunModelForPurpose(purposeNormal, baseDir, globalDir, hasPresets)
 }
@@ -533,7 +487,6 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 		globalDir:            globalDir,
 		nameInput:            ti,
 		dirInput:             di,
-		hasPresets:           hasPresets,
 		langCursor:           langCursor,
 		presetKeyInput:       pki,
 		existingKeys:         existingKeys,
@@ -572,9 +525,8 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 // immediately is redirected into draft (see withPurpose's doc comment).
 // baseDir/globalDir are still passed through unchanged — they are used only
 // for READS (loading existing config/presets to populate pickers),
-// never writes, while purpose is purposeDraft. hasPresets should reflect
-// whatever the caller already knows about the global presets directory (a
-// pure read, same as normal first-run construction).
+// never writes, while purpose is purposeDraft. hasPresets is accepted for
+// call-site compatibility only and is not consulted (see NewFirstRunModel).
 //
 // Calls newFirstRunModelForPurpose directly (NOT the public
 // NewFirstRunModel) with purposeDraft, so purpose is known from the very
@@ -597,7 +549,7 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 // built-ins are appended in memory and stamped as templates. This preserves the
 // full provider picker and correct RefFor/IsTemplate semantics without writing
 // anything before confirmation. The draft flow always proceeds through the
-// picker — it never detours through stepAPIKey. Esc/Back/Ctrl+C at
+// picker. Esc/Back/Ctrl+C at
 // stepPickPreset emit ProjectDraftCancelledMsg (see its doc comment).
 func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *ProjectDraft) FirstRunModel {
 	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets)
@@ -659,7 +611,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	m.presets, _ = preset.List()
 
 	// Load existing addons from orchestrator's init.json so they are preserved
-	// when the user reaches the capabilities step (enterCapabilities resets addonSelected).
+	// when the user reaches the details step (enterAgentDetails resets addonSelected).
 	// Also synthesize `setupKeepPreset` from the same init.json — when the user picks
 	// "Keep current preset" (cursor == -1) in the preset picker, downstream code reads
 	// this synthetic preset via currentPreset() instead of indexing m.presets[-1].
@@ -1127,78 +1079,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// see the KeyPressMsg handler for stepPropagate below.
 		return m, nil
 
-	case capCheckDoneMsg:
-		m.capLoading = false
-		m.capInfos = msg.infos
-		p := m.currentPreset()
-		provider := m.getPresetProvider(p)
-		// Backfill capabilities not returned by check-caps so they're toggleable.
-		// Vision is the only media capability still in-tree; non-MiniMax/non-Zhipu
-		// providers don't get it auto-enabled.
-		for _, name := range m.capOrder {
-			if _, ok := m.capInfos[name]; !ok {
-				if name == "vision" && provider != "minimax" && provider != "zhipu" {
-					continue
-				}
-				m.capInfos[name] = capInfo{}
-			}
-		}
-		presetCaps := make(map[string]bool)
-		if capsMap, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
-			for k := range capsMap {
-				presetCaps[k] = true
-			}
-		}
-		// Also treat "file" group as present if any of read/write/edit/glob/grep are
-		if presetCaps["read"] || presetCaps["write"] || presetCaps["edit"] || presetCaps["glob"] || presetCaps["grep"] {
-			presetCaps["file"] = true
-		}
-		for _, name := range m.capOrder {
-			info, ok := m.capInfos[name]
-			if !ok {
-				continue
-			}
-			if m.isCapAvailable(name, info, provider) && presetCaps[name] {
-				m.capSelected[name] = true
-			}
-		}
-		m.initCapProviders()
-		return m, nil
-
-	case capCheckErrMsg:
-		m.capLoading = false
-		m.capErr = msg.err
-		// Populate capInfos with empty entries so Space toggle works
-		m.capInfos = make(map[string]capInfo)
-		for _, name := range m.capOrder {
-			m.capInfos[name] = capInfo{}
-		}
-		// Fallback: select all capabilities from the preset
-		p := m.currentPreset()
-		if capsMap, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
-			for k := range capsMap {
-				m.capSelected[k] = true
-			}
-		}
-		// Synthesize "file" group
-		if m.capSelected["read"] || m.capSelected["write"] || m.capSelected["edit"] || m.capSelected["glob"] || m.capSelected["grep"] {
-			m.capSelected["file"] = true
-		}
-		m.initCapProviders()
-		return m, nil
-
-	case SetupDoneMsg:
-		// API key saved -> move to preset picker (presets already created by Bootstrap)
-		m.presets, _ = preset.List()
-		// Reload keys after setup saves
-		cfg, _ := config.LoadConfig(m.globalDir)
-		m.existingKeys = cfg.Keys
-		if m.existingKeys == nil {
-			m.existingKeys = make(map[string]string)
-		}
-		m.step = stepPickPreset
-		return m, nil
-
 	case PresetKeyEditorDoneMsg:
 		if msg.Text != "" {
 			m.presetKeyInput.SetValue(msg.Text)
@@ -1271,13 +1151,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.existingKeys == nil {
 					m.existingKeys = make(map[string]string)
 				}
-				// Bootstrap created presets — check if API key needed
-				m.hasPresets = preset.HasAny()
-				if !m.hasPresets {
-					m.step = stepAPIKey
-					m.setup = NewSetupModel(m.globalDir)
-					return m, m.setup.Init()
-				}
+				// Bootstrap wrote the templates, so the picker always has
+				// something to offer; API keys are entered per preset.
 				m.step = stepPickPreset
 				m.presets, _ = preset.List()
 				return m, nil
@@ -1292,16 +1167,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, tea.Quit
 			}
 			return m, nil
-
-		case stepAPIKey:
-			// Esc on provider selection goes back to welcome (not mail)
-			if msg.String() == "esc" && m.setup.step == stepSelectProvider {
-				m.step = stepWelcome
-				return m, nil
-			}
-			var cmd tea.Cmd
-			m.setup, cmd = m.setup.Update(msg)
-			return m, cmd
 
 		case stepPickPreset:
 			if m.codexChoosingMethod {
@@ -1785,14 +1650,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						return m, nil
 					}
 					// Snap m.cursor to the selected default so downstream
-					// helpers (currentPreset, enterCapabilities) operate
+					// helpers (currentPreset, enterAgentDetails) operate
 					// on the right preset.
 					m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
 					p := m.presets[m.cursor]
 					if m.presetNeedsKey(p) {
 						return m.enterPresetKeyFor(p)
 					}
-					return m, m.enterCapabilities()
+					return m, m.enterAgentDetails()
 				}
 			case "esc":
 				m.step = stepPickPreset
@@ -1806,7 +1671,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// Per the 2026-04-29 editor refactor, stepPresetKey does
 			// only one thing: collect the API key value to write to
 			// ~/.lingtai-tui/.env. Provider-specific edits to the
-			// preset (model, base_url, api_compat, region, etc.) now
+			// preset (model, base_url, wire_api, etc.) now
 			// happen in the dedicated PresetEditorModel before this
 			// step. Codex is the one exception — it uses an OAuth
 			// flow that isn't a paste-key form.
@@ -1823,7 +1688,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			keyDoNext := func() (FirstRunModel, tea.Cmd) {
 				envName := m.currentPresetKeyEnv()
 				if envName == "" {
-					return m, m.enterCapabilities()
+					return m, m.enterAgentDetails()
 				}
 				key := strings.TrimSpace(m.presetKeyInput.Value())
 				if key == "" && m.clearDraftPendingAPIKey(envName) {
@@ -1857,7 +1722,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						}
 					}
 				}
-				return m, m.enterCapabilities()
+				return m, m.enterAgentDetails()
 			}
 
 			switch msg.String() {
@@ -2007,149 +1872,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 				return m, cmd
 			}
-
-		case stepCapabilities:
-			if m.capLoading {
-				return m, nil
-			}
-			colSize := (len(m.capOrder) + 1) / 2
-			switch msg.String() {
-			case "up":
-				if m.capAtKeep {
-					// Already at "Keep current" — stay
-				} else if m.inAddonZone {
-					if m.addonCursor > 0 {
-						m.addonCursor--
-					} else {
-						// Exit addon zone, go to bottom of capability grid
-						m.inAddonZone = false
-						m.capCursor = colSize - 1 // bottom of left column
-					}
-				} else {
-					if m.capCursor >= colSize {
-						// Right column
-						if m.capCursor > colSize {
-							m.capCursor--
-						}
-					} else {
-						// Left column
-						if m.capCursor > 0 {
-							m.capCursor--
-						} else if m.setupMode {
-							m.capAtKeep = true
-						}
-					}
-				}
-			case "down":
-				if m.capAtKeep {
-					m.capAtKeep = false
-					m.capCursor = 0
-				} else if m.inAddonZone {
-					if m.addonCursor < len(m.addonOrder)-1 {
-						m.addonCursor++
-					}
-				} else {
-					if m.capCursor >= colSize {
-						// Right column
-						if m.capCursor < len(m.capOrder)-1 {
-							m.capCursor++
-						} else {
-							// At bottom of right column — enter addon zone
-							m.inAddonZone = true
-							m.addonCursor = 0
-						}
-					} else {
-						// Left column
-						if m.capCursor < colSize-1 {
-							m.capCursor++
-						} else {
-							// At bottom of left column — enter addon zone
-							m.inAddonZone = true
-							m.addonCursor = 0
-						}
-					}
-				}
-			case "left":
-				if !m.capAtKeep && !m.inAddonZone && m.capCursor >= colSize {
-					m.capCursor -= colSize
-				}
-			case "right":
-				if !m.capAtKeep && !m.inAddonZone && m.capCursor < colSize && m.capCursor+colSize < len(m.capOrder) {
-					m.capCursor += colSize
-				}
-			case "space":
-				if m.capAtKeep {
-					return m, nil
-				}
-				if m.inAddonZone {
-					name := m.addonOrder[m.addonCursor]
-					m.addonSelected[name] = !m.addonSelected[name]
-				} else {
-					name := m.capOrder[m.capCursor]
-					info, ok := m.capInfos[name]
-					if !ok {
-						return m, nil
-					}
-					provider := m.getPresetProvider(m.currentPreset())
-					if m.isCapAvailable(name, info, provider) {
-						m.capSelected[name] = !m.capSelected[name]
-					}
-				}
-			case "tab":
-				// Cycle the provider for the focused capability (if it has ≥2 compatible options).
-				if !m.capAtKeep && !m.inAddonZone {
-					name := m.capOrder[m.capCursor]
-					info := m.capInfos[name]
-					presetProvider := m.getPresetProvider(m.currentPreset())
-					compat := m.compatibleProviders(info, presetProvider)
-					if len(compat) >= 2 {
-						cur := m.capProviders[name]
-						for i, p := range compat {
-							if p == cur {
-								m.capProviders[name] = compat[(i+1)%len(compat)]
-								break
-							}
-						}
-					}
-				}
-			case "ctrl+a":
-				provider := m.getPresetProvider(m.currentPreset())
-				allSelected := true
-				for _, name := range m.capOrder {
-					info := m.capInfos[name]
-					if m.isCapAvailable(name, info, provider) && !m.capSelected[name] {
-						allSelected = false
-						break
-					}
-				}
-				for _, name := range m.capOrder {
-					info := m.capInfos[name]
-					if m.isCapAvailable(name, info, provider) {
-						m.capSelected[name] = !allSelected
-					}
-				}
-			case "enter":
-				if m.capAtKeep {
-					// Skip — keep existing capabilities, jump to agent details
-					m.applyCapSelections()
-					p := m.currentPreset()
-					m.enterAgentNameDir(p)
-					m.step = stepAgentNameDir
-					return m, textinput.Blink
-				}
-				m.applyCapSelections()
-				p := m.currentPreset()
-				m.enterAgentNameDir(p)
-				m.step = stepAgentNameDir
-				return m, textinput.Blink
-			case "esc":
-				m.capAtKeep = false
-				m.step = stepPickPreset
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			}
-			return m, nil
 
 		case stepAgentNameDir:
 			langs := []string{"en", "zh", "wen"}
@@ -2342,8 +2064,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.message = ""
 				return m.applyDefaultRecipeAndAdvance()
 			case "esc":
-				// stepCapabilities was removed from the flow — Esc from
-				// the agent-name page returns to the preset picker.
+				// Esc from the agent-name page returns to the preset
+				// picker (there is no capabilities step in between).
 				m.step = stepPickPreset
 				return m, nil
 			case "ctrl+c":
@@ -2446,8 +2168,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case 9:
 				m.commentInput, cmd = m.commentInput.Update(msg)
 			}
-		case stepAPIKey:
-			m.setup, cmd = m.setup.Update(msg)
 		}
 		return m, cmd
 	}
@@ -2469,14 +2189,8 @@ func (m FirstRunModel) View() string {
 	b.WriteString(title + "\n")
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
 	switch m.step {
-	case stepAPIKey:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
-		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d", stepNum, total)) + "\n\n")
-		b.WriteString("  " + i18n.T("firstrun.no_presets") + "\n\n")
-		b.WriteString(m.setup.View())
-
 	case stepPickPreset:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
+		stepNum, total := stepProgress(m.step)
 		header := i18n.T("firstrun.pick_preset")
 		if m.setupMode {
 			header = i18n.T("setup.pick_default_preset")
@@ -2664,7 +2378,7 @@ func (m FirstRunModel) View() string {
 		return m.presetEditor.View()
 
 	case stepAgentPresets:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
+		stepNum, total := stepProgress(m.step)
 		header := i18n.T("firstrun.preset_cfg.title")
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
 		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.help")) + "\n\n")
@@ -2780,195 +2494,8 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.preset_key.hint")) + "\n")
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
-	case stepCapabilities:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
-		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_addons")) + "\n\n")
-
-		if m.setupMode {
-			cursor := "  "
-			style := lipgloss.NewStyle()
-			if m.capAtKeep {
-				cursor = "> "
-				style = style.Bold(true).Foreground(ColorAccent)
-			} else {
-				style = style.Bold(true).Foreground(ColorAgent)
-			}
-			keepLabel := i18n.T("setup.keep_current_caps")
-			b.WriteString(cursor + style.Render(keepLabel) + "\n")
-			keepDesc := i18n.T("setup.keep_current_caps_desc")
-			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
-			b.WriteString("\n  " + StyleFaint.Render("────") + "\n\n")
-		}
-
-		if m.capLoading {
-			b.WriteString("  " + StyleSubtle.Render(i18n.T("firstrun.checking_caps")) + "\n")
-			return b.String()
-		}
-
-		if m.capErr != "" {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(m.capErr) + "\n\n")
-		}
-
-		provider := m.getPresetProvider(m.currentPreset())
-		colSize := (len(m.capOrder) + 1) / 2
-		dimStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
-		cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-
-		// Build the left block (grid + addon list) into a separate builder so
-		// that in wide mode we can join it horizontally with a side pane.
-		var leftBlock strings.Builder
-
-		// Always-included capabilities (kernel intrinsics + core floor)
-		// — surfaced for awareness, not toggleable in the preset manifest.
-		leftBlock.WriteString("  " + StyleAccent.Render(i18n.T("firstrun.mandatory_caps")) + "\n\n")
-		mandatoryCaps := []string{"email", "psyche", "knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file"}
-		mandatoryLine := "  "
-		for _, name := range mandatoryCaps {
-			cell := "  [✓] " + name
-			cellWidth := 38
-			visWidth := lipgloss.Width(cell)
-			if visWidth < cellWidth {
-				cell += strings.Repeat(" ", cellWidth-visWidth)
-			}
-			mandatoryLine += cell
-		}
-		leftBlock.WriteString(dimStyle.Render(mandatoryLine) + "\n\n")
-
-		for row := 0; row < colSize; row++ {
-			var line string
-			for col := 0; col < 2; col++ {
-				idx := row + col*colSize
-				if idx >= len(m.capOrder) {
-					break
-				}
-				name := m.capOrder[idx]
-				info := m.capInfos[name]
-				available := m.isCapAvailable(name, info, provider)
-
-				var checkbox, hint string
-				isCurrent := idx == m.capCursor && !m.inAddonZone
-
-				if available {
-					if m.capSelected[name] {
-						checkbox = "[✓]"
-					} else {
-						checkbox = "[ ]"
-					}
-					// Show provider name when one is configured
-					if prov := m.capProviders[name]; prov != "" {
-						hint = prov
-					}
-				} else {
-					checkbox = "[-]"
-					hint = strings.Join(info.Providers, ", ")
-				}
-
-				prefix := "  "
-				if isCurrent {
-					prefix = "> "
-				}
-
-				cell := prefix + checkbox + " " + name
-				if hint != "" {
-					cell += "  " + hint
-				}
-
-				if !available {
-					cell = dimStyle.Render(cell)
-				} else if isCurrent {
-					cell = cursorStyle.Render(cell)
-				}
-
-				cellWidth := 38
-				visWidth := lipgloss.Width(cell)
-				if visWidth < cellWidth {
-					cell += strings.Repeat(" ", cellWidth-visWidth)
-				}
-				line += cell
-			}
-			leftBlock.WriteString(line + "\n")
-		}
-
-		// Addon section
-		leftBlock.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.addons_section")) + "\n\n")
-		for i, name := range m.addonOrder {
-			var checkbox string
-			if m.addonSelected[name] {
-				checkbox = "[✓]"
-			} else {
-				checkbox = "[ ]"
-			}
-			prefix := "  "
-			isCurrent := m.inAddonZone && i == m.addonCursor
-			if isCurrent {
-				cell := "> " + checkbox + " " + name
-				leftBlock.WriteString(cursorStyle.Render(cell) + "\n")
-			} else {
-				leftBlock.WriteString(prefix + checkbox + " " + name + "\n")
-			}
-		}
-
-		// Wide-mode layout: grid/addons on the left, description side pane on
-		// the right. Threshold is capsWidePaneThreshold columns. Below it, we
-		// fall back to the narrow layout (description collapses to one line).
-		wide := m.width >= capsWidePaneThreshold
-		if wide {
-			// Left column fixed at 2 * cellWidth(38) + margin, right column fills
-			// the rest up to a comfortable reading width.
-			leftWidth := 80
-			paneWidth := m.width - leftWidth - 4
-			if paneWidth > 60 {
-				paneWidth = 60
-			}
-			if paneWidth < 30 {
-				// Not actually enough room for a useful pane — fall back to narrow.
-				wide = false
-			} else {
-				pane := m.renderCapsSidePane(paneWidth)
-				// Indent the pane by 2 spaces for visual separation from the grid.
-				paneIndented := "  " + strings.ReplaceAll(pane, "\n", "\n  ")
-				combined := lipgloss.JoinHorizontal(lipgloss.Top, leftBlock.String(), paneIndented)
-				b.WriteString(combined + "\n")
-			}
-		}
-		if !wide {
-			b.WriteString(leftBlock.String())
-			// Narrow mode: show the one-line summary + active provider for the
-			// focused item, in the spot where caps_recommend used to live.
-			focusName, desc := m.focusedItemDesc()
-			summary := descSummaryLine(desc)
-			if summary != "" {
-				provHint := ""
-				if !m.inAddonZone {
-					info := m.capInfos[focusName]
-					compatProvs := m.compatibleProviders(info, provider)
-					if prov := m.capProviders[focusName]; prov != "" && len(compatProvs) >= 2 {
-						provHint = StyleFaint.Render(" ["+prov+"]") + StyleFaint.Render(" tab "+i18n.T("firstrun.cap_provider_cycle"))
-					}
-				}
-				b.WriteString("\n  " + StyleAccent.Render("▸ ") + summary + provHint + "\n")
-			}
-		}
-
-		// Footer. In narrow mode we keep the recommend/change-later guidance
-		// right above the key hints. In wide mode the side pane carries the
-		// per-item detail, so we fold recommend + change-later into a single
-		// compact line above the key hints.
-		if wide {
-			b.WriteString("\n  " + StyleFaint.Render(i18n.T("firstrun.caps_recommend")+"  "+i18n.T("firstrun.caps_change_later")) + "\n")
-		} else {
-			b.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.caps_recommend")) + "\n")
-			b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.caps_change_later")) + "\n")
-		}
-		b.WriteString("\n" + StyleFaint.Render("  ↑↓←→ "+i18n.T("settings.select")+
-			"  space "+i18n.T("settings.change")+
-			"  tab "+i18n.T("firstrun.cap_provider_cycle")+
-			"  Ctrl+A "+i18n.T("firstrun.caps_toggle_all")+
-			"  [Enter] "+i18n.T("firstrun.confirm_caps")+
-			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
-
 	case stepAgentNameDir:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
+		stepNum, total := stepProgress(m.step)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n")
 
 		if m.setupMode {
@@ -3098,7 +2625,7 @@ func (m FirstRunModel) View() string {
 		}
 
 	case stepLaunching:
-		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
+		stepNum, total := stepProgress(m.step)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)) + i18n.T("firstrun.launching") + "\n\n")
 		if m.message != "" {
 			b.WriteString("  " + m.message + "\n")
@@ -3245,203 +2772,9 @@ const agentNameDirFieldCount = 12
 const agentNameDirBackIdx = 10
 const agentNameDirNextIdx = 11
 
-// runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
-func (m FirstRunModel) runCheckCaps() tea.Cmd {
-	return func() tea.Msg {
-		python := config.LingtaiCmd(m.globalDir)
-		cmd := exec.Command(python, "-m", "lingtai", "check-caps")
-		out, err := cmd.Output()
-		if err != nil {
-			return capCheckErrMsg{err: fmt.Sprintf("check-caps failed: %v", err)}
-		}
-		var infos map[string]capInfo
-		if err := json.Unmarshal(out, &infos); err != nil {
-			return capCheckErrMsg{err: fmt.Sprintf("check-caps parse error: %v", err)}
-		}
-		return capCheckDoneMsg{infos: infos}
-	}
-}
-
-// capsWidePaneThreshold is the terminal width at or above which the
-// capabilities page splits into a left grid + right description pane.
-// Below this, the description collapses to a single line under the grid.
-const capsWidePaneThreshold = 110
-
-// focusedItemDesc returns the raw i18n description for whichever item
-// the cursor is currently on — a capability when inAddonZone is false,
-// an addon otherwise. Returns "" if nothing is focused (shouldn't happen).
-func (m FirstRunModel) focusedItemDesc() (name, desc string) {
-	if m.inAddonZone {
-		if m.addonCursor < 0 || m.addonCursor >= len(m.addonOrder) {
-			return "", ""
-		}
-		name = m.addonOrder[m.addonCursor]
-		return name, i18n.T("firstrun.addon_desc." + name)
-	}
-	if m.capCursor < 0 || m.capCursor >= len(m.capOrder) {
-		return "", ""
-	}
-	name = m.capOrder[m.capCursor]
-	return name, i18n.T("firstrun.cap_desc." + name)
-}
-
-// descSummaryLine returns the first line of a multi-line description
-// (the one-sentence summary, by convention). Returns "" for an empty desc.
-func descSummaryLine(desc string) string {
-	if desc == "" {
-		return ""
-	}
-	if i := strings.IndexByte(desc, '\n'); i >= 0 {
-		return desc[:i]
-	}
-	return desc
-}
-
-// renderCapsSidePane renders the wide-mode right-hand description pane.
-// It shows the currently-focused item's full description plus dynamic
-// provider metadata for capabilities. Lines are hard-wrapped to paneWidth.
-func (m FirstRunModel) renderCapsSidePane(paneWidth int) string {
-	name, desc := m.focusedItemDesc()
-	if name == "" {
-		return ""
-	}
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	labelStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
-
-	var b strings.Builder
-	b.WriteString(titleStyle.Render(name) + "\n\n")
-
-	// Static description from i18n — may contain \n separators.
-	for _, line := range strings.Split(desc, "\n") {
-		for _, wrapped := range wrapLine(line, paneWidth) {
-			b.WriteString(wrapped + "\n")
-		}
-	}
-
-	// Dynamic capability metadata — only applies to capabilities, not addons.
-	if !m.inAddonZone {
-		if info, ok := m.capInfos[name]; ok && len(info.Providers) > 0 {
-			b.WriteString("\n")
-			presetProvider := m.getPresetProvider(m.currentPreset())
-			compatProvs := m.compatibleProviders(info, presetProvider)
-			activeProv := m.capProviders[name]
-
-			if len(compatProvs) >= 2 {
-				// Render a provider picker: Providers: name1 · [name2] · name3
-				activeStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorActive)
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " ")
-				for i, p := range compatProvs {
-					if i > 0 {
-						b.WriteString(labelStyle.Render(" · "))
-					}
-					if p == activeProv {
-						b.WriteString(activeStyle.Render("[" + p + "]"))
-					} else {
-						b.WriteString(p)
-					}
-				}
-				b.WriteString("\n")
-				b.WriteString(labelStyle.Render("  [tab] "+i18n.T("firstrun.cap_provider_cycle")) + "\n")
-			} else if len(compatProvs) == 1 {
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " " + compatProvs[0] + "\n")
-			}
-
-			if info.Default != nil && *info.Default != "" {
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_default")) + " " + *info.Default + "\n")
-			}
-		}
-	}
-
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// wrapLine wraps a single line of text to the given width using simple
-// space-based word wrapping. CJK text without spaces is returned unwrapped
-// since char-boundary wrapping would corrupt multi-byte glyphs; the side
-// pane is sized so this is rarely needed.
-func wrapLine(s string, width int) []string {
-	if width <= 0 || lipgloss.Width(s) <= width {
-		return []string{s}
-	}
-	// Only attempt wrapping if the line contains ASCII spaces. For CJK
-	// strings without spaces we return as-is rather than risk splitting
-	// a multi-byte character in half.
-	if !strings.ContainsRune(s, ' ') {
-		return []string{s}
-	}
-	var out []string
-	words := strings.Split(s, " ")
-	line := ""
-	for _, w := range words {
-		if line == "" {
-			line = w
-			continue
-		}
-		if lipgloss.Width(line)+1+lipgloss.Width(w) > width {
-			out = append(out, line)
-			line = w
-		} else {
-			line += " " + w
-		}
-	}
-	if line != "" {
-		out = append(out, line)
-	}
-	return out
-}
-
-// compatibleProviders returns the subset of a capability's providers that
-// work with the current preset. A provider is considered usable if it
-// matches the preset's LLM provider string OR if the capability has a
-// non-nil default (meaning it has a free/builtin fallback like duckduckgo
-// or whisper that works regardless of the LLM provider).
-func (m FirstRunModel) compatibleProviders(info capInfo, presetProvider string) []string {
-	if len(info.Providers) == 0 {
-		return nil
-	}
-	var out []string
-	for _, p := range info.Providers {
-		if p == presetProvider {
-			out = append(out, p)
-		} else if info.Default != nil && p == *info.Default {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// initCapProviders sets the initial provider choice per capability based on
-// the preset manifest. Called after check-caps completes and capInfos is populated.
-func (m *FirstRunModel) initCapProviders() {
-	m.capProviders = make(map[string]string)
-	p := m.currentPreset()
-	presetProvider := m.getPresetProvider(p)
-	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
-	for _, name := range m.capOrder {
-		info := m.capInfos[name]
-		compat := m.compatibleProviders(info, presetProvider)
-
-		// If the preset explicitly configures a provider for this cap, use it
-		// even if check-caps doesn't list it (kernel may not be upgraded).
-		if capCfg, ok := caps[name].(map[string]interface{}); ok {
-			if prov, ok := capCfg["provider"].(string); ok && prov != "" {
-				m.capProviders[name] = prov
-				continue
-			}
-		}
-
-		if len(compat) == 0 {
-			continue
-		}
-		// Default to the first compatible provider.
-		m.capProviders[name] = compat[0]
-	}
-}
-
 // enterPresetKeyFor advances to stepPresetKey with provider-specific
 // state prefilled from `p`. Now that the dedicated PresetEditorModel
-// owns model/base_url/region/api_compat editing, this helper only sets
+// owns model/base_url/wire_api editing, this helper only sets
 // up the API-key textinput.
 func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.Cmd) {
 	provider := m.getPresetProvider(p)
@@ -3522,61 +2855,35 @@ func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Pre
 	return p
 }
 
-// enterCapabilities transitions to stepCapabilities.
-// enterCapabilities used to drop into the cap+addon grid. With the
-// 2026-04 redesign, capabilities live in the preset (edited via the
-// preset editor) and addons default to all-on — so this function is
-// now a thin "skip-and-advance" stub that jumps straight to the
-// agent runtime page.
+// enterAgentDetails jumps to the agent runtime page (stepAgentNameDir).
+// Capabilities live in the preset (edited via the preset editor) and are
+// written into init.json from it unchanged, so there is no capabilities
+// step; addons default to all-on.
 //
-// What it sets up:
-//   - addonSelected: every addon from AllAddons defaulted to true,
-//     unless setup mode has explicit prior selections to preserve.
-//   - capSelected/capProviders: derived from the chosen preset's
-//     manifest.capabilities, so applyCapSelections at save time
-//     writes the editor's choices back unchanged.
+// It sets addonSelected: every addon from AllAddons defaulted to true,
+// unless setup mode has explicit prior selections to preserve.
 //
 // Returns the same tea.Cmd the runtime page expects (textinput.Blink
 // since that page focuses an input on entry).
-func (m *FirstRunModel) enterCapabilities() tea.Cmd {
+func (m *FirstRunModel) enterAgentDetails() tea.Cmd {
 	// Default-on every known addon. Setup mode preserves the user's
 	// previously-saved addons, since /setup is a re-edit, not a fresh
 	// build.
 	m.addonOrder = AllAddons
+	m.addonSelected = map[string]bool{}
 	if len(m.setupLoadedAddonNames) > 0 {
-		m.addonSelected = map[string]bool{}
 		for _, name := range m.setupLoadedAddonNames {
 			m.addonSelected[name] = true
 		}
 	} else {
-		m.addonSelected = map[string]bool{}
 		for _, name := range AllAddons {
 			m.addonSelected[name] = true
 		}
 	}
 
-	// Mirror the chosen preset's capabilities into capSelected so the
-	// init.json write at save time emits exactly what the editor saved
-	// — applyCapSelections walks capSelected, not the preset directly.
-	m.capOrder = AllCapabilities
-	m.capSelected = map[string]bool{}
-	m.capProviders = map[string]string{}
-	p := m.currentPreset()
-	if caps, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
-		for capName, cfg := range caps {
-			m.capSelected[capName] = true
-			if cfgMap, ok := cfg.(map[string]interface{}); ok {
-				if prov, ok := cfgMap["provider"].(string); ok && prov != "" {
-					m.capProviders[capName] = prov
-				}
-			}
-		}
-	}
-
-	// Jump straight to the runtime page. enterAgentNameDir focuses
-	// the name textinput and returns no cmd; we add Blink for
-	// consistency with the textinput's normal cursor behavior.
-	m.enterAgentNameDir(p)
+	// enterAgentNameDir focuses the name textinput and returns no cmd; we
+	// add Blink for consistency with the textinput's normal cursor behavior.
+	m.enterAgentNameDir(m.currentPreset())
 	m.step = stepAgentNameDir
 	return textinput.Blink
 }
@@ -3767,22 +3074,6 @@ func propagatePresetPolicyToNetwork(lingtaiDir, skipDir, defaultRef string, allo
 	preset.PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef, allowed)
 }
 
-// isCapCompatible checks if a capability works with the given provider.
-func (m FirstRunModel) isCapCompatible(info capInfo, provider string) bool {
-	if len(info.Providers) == 0 {
-		return true
-	}
-	if info.Default != nil {
-		return true
-	}
-	for _, p := range info.Providers {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
-
 // currentPreset returns the preset the user is working with.
 //
 // Normal case: m.presets[m.cursor]. In setup mode the picker has a virtual
@@ -3801,89 +3092,6 @@ func (m FirstRunModel) currentPreset() preset.Preset {
 		return m.presets[m.cursor]
 	}
 	return preset.Preset{}
-}
-
-// currentPresetPtr returns a pointer to the preset the user is working with,
-// for call sites that need to mutate it (e.g. applyCapSelections writing back
-// the user's capability toggles). In setup mode's keep-current case, returns
-// a pointer to setupKeepPreset so the final init.json save reflects the
-// user's capability edits.
-func (m *FirstRunModel) currentPresetPtr() *preset.Preset {
-	if m.cursor == -1 {
-		return &m.setupKeepPreset
-	}
-	if m.cursor >= 0 && m.cursor < len(m.presets) {
-		return &m.presets[m.cursor]
-	}
-	return nil
-}
-
-// isCapAvailable returns true if a capability can be used with the current
-// preset. Checks three sources: check-caps provider list, local provider,
-// and preset manifest (which may configure a provider not yet in the
-// installed kernel's PROVIDERS list).
-func (m FirstRunModel) isCapAvailable(name string, info capInfo, provider string) bool {
-	if m.isCapCompatible(info, provider) {
-		return true
-	}
-	if m.isCapLocal(info) {
-		return true
-	}
-	// Preset explicitly configures this capability with the current provider
-	p := m.currentPreset()
-	if caps, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
-		if cfg, ok := caps[name].(map[string]interface{}); ok {
-			if prov, _ := cfg["provider"].(string); prov == provider {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isCapLocal checks if a capability has a "local" provider option.
-func (m FirstRunModel) isCapLocal(info capInfo) bool {
-	for _, p := range info.Providers {
-		if p == "local" {
-			return true
-		}
-	}
-	return false
-}
-
-// applyCapSelections writes the user's capability selections back into the preset manifest.
-func (m *FirstRunModel) applyCapSelections() {
-	p := m.currentPresetPtr()
-	if p == nil {
-		return
-	}
-	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		caps = make(map[string]interface{})
-		p.Manifest["capabilities"] = caps
-	}
-
-	for _, name := range m.capOrder {
-		if m.capSelected[name] {
-			capCfg := map[string]interface{}{}
-			// Preserve existing config fields (e.g. api_key_env) if the preset
-			// already specified them, then overlay the user's provider choice.
-			if existing, ok := caps[name].(map[string]interface{}); ok {
-				for k, v := range existing {
-					capCfg[k] = v
-				}
-			}
-			if prov, ok := m.capProviders[name]; ok && prov != "" {
-				capCfg["provider"] = prov
-			}
-			caps[name] = capCfg
-		} else {
-			delete(caps, name)
-		}
-	}
-	// Kernel core capabilities (knowledge, skills, shell, avatar, daemon,
-	// mcp, file group) are injected at runtime by apply_core_defaults, so
-	// we don't stamp them into the saved manifest here.
 }
 
 // enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.
@@ -4148,7 +3356,7 @@ func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 			return provider
 		}
 	}
-	return "minimax" // default
+	return preset.ProviderCodex // default: the first-run default template
 }
 
 // refreshCodexAuth reads codex-auth.json from globalDir and sets
@@ -4287,10 +3495,10 @@ func presetModelName(p preset.Preset) string {
 
 // presetCapabilitiesSummary lists the capability names actually configured
 // in the preset's manifest.capabilities object — the same location
-// Preset.Validate() type-checks and initCapProviders reads from — as a
+// Preset.Validate() type-checks — as a
 // short, comma-joined, alphabetically sorted row for the Review page. This
 // reflects whatever the preset (template or user-edited) actually declares,
-// never a placeholder or the full AllCapabilities list: a preset that
+// never a placeholder or a fixed capability list: a preset that
 // configures none of them truthfully shows "—" (via the caller's row()
 // helper on an empty string), not a fabricated "none available".
 func presetCapabilitiesSummary(p preset.Preset) string {

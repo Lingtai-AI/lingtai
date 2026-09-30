@@ -17,20 +17,17 @@ import (
 // pass through preset.GenerateInitJSONWithOpts without a real LLM API key,
 // and a non-empty Description.Summary so it also passes Preset.Validate()
 // (required by validateDraftForCommit's commit-boundary check — see
-// project_create.go). base_url is set because minimax has a region table,
-// and Validate requires a non-empty endpoint for those providers. It uses the
-// INTL endpoint specifically: that is what an absent base_url already resolved
-// to through preset.regionSuffix, so the api_key_env stamping these tests
-// assert on (MINIMAX_INTL_1_API_KEY) is unchanged.
+// project_create.go). It is an openai-family preset with no base_url (the
+// official endpoint) and no api_key_env, so the api_key_env stamping these
+// tests assert on is OPENAI_1_API_KEY.
 func minimalDraftPreset() preset.Preset {
 	return preset.Preset{
 		Name:        "test-preset",
 		Description: preset.PresetDescription{Summary: "test fixture preset"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider": "minimax",
+				"provider": "openai",
 				"model":    "test-model",
-				"base_url": preset.ProviderRegionURLs["minimax"][1].URL, // [1] = INTL
 			},
 		},
 	}
@@ -519,8 +516,8 @@ func TestRunProjectCreate_DirtyPresetSavedAndReferencedOnSuccess(t *testing.T) {
 		t.Fatalf("saved preset name = %q, want %q", saved.Name, presetName)
 	}
 	savedLLM, _ := saved.Manifest["llm"].(map[string]interface{})
-	if got, _ := savedLLM["api_key_env"].(string); got != "MINIMAX_INTL_1_API_KEY" {
-		t.Fatalf("saved preset api_key_env = %q, want normalized/stamped MINIMAX_INTL_1_API_KEY", got)
+	if got, _ := savedLLM["api_key_env"].(string); got != "OPENAI_1_API_KEY" {
+		t.Fatalf("saved preset api_key_env = %q, want normalized/stamped OPENAI_1_API_KEY", got)
 	}
 
 	// The staged (now final) init.json must reference the same preset path that
@@ -699,13 +696,13 @@ func TestRunProjectCreate_ColdCompiledTemplateMaterializesExactRefBeforeRename(t
 	draft, root := newTestDraft(t)
 	var selected preset.Preset
 	for _, candidate := range preset.BuiltinPresets() {
-		if candidate.Name == "minimax" {
+		if candidate.Name == "codex" {
 			selected = candidate
 			break
 		}
 	}
 	if selected.Name == "" {
-		t.Fatal("minimax built-in fixture missing")
+		t.Fatal("codex built-in fixture missing")
 	}
 	selected.Source = preset.SourceTemplate
 	draft.DraftPreset = &selected
@@ -758,7 +755,7 @@ func TestRunProjectCreate_PendingCodexPersistenceFailureDoesNotPublishProject(t 
 func TestRunProjectCreate_SuccessPublishesResolvableSavedRefAndCredentialsBeforeLaunch(t *testing.T) {
 	draft, root := newTestDraft(t)
 	p := minimalDraftPreset()
-	p.Name = "minimax"
+	p.Name = "openai"
 	p.Source = preset.SourceTemplate
 	const (
 		keyEnv         = "ISSUE_771_API_KEY"
@@ -792,7 +789,7 @@ func TestRunProjectCreate_SuccessPublishesResolvableSavedRefAndCredentialsBefore
 
 	initPath := filepath.Join(root, ".lingtai", "orchestrator", "init.json")
 	ref := activePresetRefFromInit(t, initPath)
-	wantRef := "~/.lingtai-tui/presets/saved/minimax.json"
+	wantRef := "~/.lingtai-tui/presets/saved/openai.json"
 	if ref != wantRef {
 		t.Fatalf("final init active preset ref = %q, want %q", ref, wantRef)
 	}

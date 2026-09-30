@@ -11,7 +11,7 @@ func TestGenerateInitJSONFreshOmitsObsoletePromptFiles(t *testing.T) {
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, "global")
-	if err := GenerateInitJSON(minimaxPreset(), "fresh", "fresh", lingtaiDir, globalDir); err != nil {
+	if err := GenerateInitJSON(codexPreset(), "fresh", "fresh", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "fresh", "init.json"))
@@ -66,7 +66,7 @@ func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *t
 		t.Fatal(err)
 	}
 
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 

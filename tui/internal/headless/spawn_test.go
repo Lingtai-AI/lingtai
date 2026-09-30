@@ -79,7 +79,7 @@ func TestRunSpawn_RejectsExistingLingtaiDir(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:       dir,
-		Preset:    "minimax",
+		Preset:    "codex",
 		AgentName: "test",
 		Language:  "en",
 	})
@@ -151,7 +151,7 @@ func TestRunSpawn_CreatesInitJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        dir,
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "test-agent",
 		Language:   "en",
 		SkipLaunch: true,
@@ -217,7 +217,7 @@ func TestRunSpawn_SuccessOutput_HasRequiredFields(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        dir,
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "test-agent",
 		Language:   "en",
 		SkipLaunch: true,
@@ -239,8 +239,8 @@ func TestRunSpawn_SuccessOutput_HasRequiredFields(t *testing.T) {
 	if result.AgentName != "test-agent" {
 		t.Errorf("agent_name = %q, want %q", result.AgentName, "test-agent")
 	}
-	if result.Preset != "minimax" {
-		t.Errorf("preset = %q, want %q", result.Preset, "minimax")
+	if result.Preset != "codex" {
+		t.Errorf("preset = %q, want %q", result.Preset, "codex")
 	}
 	if result.Recipe != "plain" {
 		t.Errorf("recipe = %q, want %q", result.Recipe, "plain")
@@ -338,7 +338,7 @@ func TestRunSpawn_LanguageDefault(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        dir,
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "agent",
 		Language:   "zh",
 		SkipLaunch: true,
@@ -434,7 +434,7 @@ func TestRunSpawn_PostCreateFailureReportsCreatedRecoveryAndDoesNotLaunch(t *tes
 
 			dir := filepath.Join(t.TempDir(), "project")
 			var stdout, stderr bytes.Buffer
-			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "minimax", AgentName: "alice", Language: "en"})
+			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: dir, Preset: "codex", AgentName: "alice", Language: "en"})
 			if code != 1 || stdout.Len() != 0 {
 				t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
 			}
@@ -517,7 +517,7 @@ func TestRunSpawn_UntrustedCreateOutcomeWritesOneErrorAndDoesNotRegisterOrLaunch
 			})
 
 			var stdout, stderr bytes.Buffer
-			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: filepath.Join(t.TempDir(), "project"), Preset: "minimax", AgentName: "alice", Language: "en"})
+			code := RunSpawn(&stdout, &stderr, SpawnOpts{Dir: filepath.Join(t.TempDir(), "project"), Preset: "codex", AgentName: "alice", Language: "en"})
 			if code != 1 || stdout.Len() != 0 {
 				t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())
 			}
@@ -560,7 +560,7 @@ func TestRunSpawn_RejectsUnsafeAgentName(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := RunSpawn(&stdout, &stderr, SpawnOpts{
 			Dir:        dir,
-			Preset:     "minimax",
+			Preset:     "codex",
 			AgentName:  name,
 			Language:   "en",
 			SkipLaunch: true,
@@ -604,7 +604,7 @@ func TestRunSpawn_AcceptsNormalAgentName(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        dir,
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "ok-agent",
 		Language:   "en",
 		SkipLaunch: true,
@@ -647,7 +647,7 @@ func TestRunSpawn_HandlerCreateFailureWritesOneStructuredErrorAndDoesNotLaunch(t
 
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
-		Dir: filepath.Join(t.TempDir(), "project"), Preset: "minimax", AgentName: "alice", Language: "en",
+		Dir: filepath.Join(t.TempDir(), "project"), Preset: "codex", AgentName: "alice", Language: "en",
 	})
 	if code != 1 || stdout.Len() != 0 {
 		t.Fatalf("exit/stdout = %d/%q, want 1 and no stdout document", code, stdout.String())

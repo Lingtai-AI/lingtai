@@ -24,7 +24,7 @@ func TestGenerateInitJSONOmitsMoltPressure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatal(err)
 	}
 

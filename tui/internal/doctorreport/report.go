@@ -54,7 +54,7 @@ type LLMConfig struct {
 	Provider      string `json:"provider,omitempty"`
 	Model         string `json:"model,omitempty"`
 	BaseHost      string `json:"base_host,omitempty"`
-	APICompat     string `json:"api_compat,omitempty"`
+	WireAPI       string `json:"wire_api,omitempty"`
 	APIKeyEnv     string `json:"api_key_env,omitempty"`
 	APIKeyPresent bool   `json:"api_key_present"`
 }
@@ -163,7 +163,7 @@ func renderMarkdown(draft Draft) string {
 	writeField(&b, "provider", draft.LLM.Provider)
 	writeField(&b, "model", draft.LLM.Model)
 	writeField(&b, "base_host", draft.LLM.BaseHost)
-	writeField(&b, "api_compat", draft.LLM.APICompat)
+	writeField(&b, "wire_api", draft.LLM.WireAPI)
 	writeField(&b, "api_key_env", draft.LLM.APIKeyEnv)
 	fmt.Fprintf(&b, "- api_key_present: %t\n", draft.LLM.APIKeyPresent)
 
@@ -212,7 +212,7 @@ func redactDraft(draft Draft) Draft {
 	draft.LLM.Provider = redactText(draft.LLM.Provider)
 	draft.LLM.Model = redactText(draft.LLM.Model)
 	draft.LLM.BaseHost = redactText(draft.LLM.BaseHost)
-	draft.LLM.APICompat = redactText(draft.LLM.APICompat)
+	draft.LLM.WireAPI = redactText(draft.LLM.WireAPI)
 	draft.LLM.APIKeyEnv = redactText(draft.LLM.APIKeyEnv)
 
 	lines := make([]Line, len(draft.Lines))

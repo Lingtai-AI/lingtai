@@ -1,11 +1,10 @@
 ---
 name: preset-skill-op-availability-save-gate
 description: Save on the preset editor performs local structural validation only — it never makes a live provider/model network call. Real availability diagnosis is owned by /doctor and actual runtime execution.
-version: 2.0.1
+version: 3.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/tui/preset_editor.go
-  - tui/internal/tui/model_validity.go
   - tui/internal/tui/doctor.go
   - tui/internal/preset/preset_skill_router_test.go
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
@@ -20,9 +19,9 @@ Evidence: `tui/internal/tui/preset_editor.go`'s `commit()`.
 `commit()` runs the preset's structural `Validate()` and, if it passes,
 saves immediately. There is no live HTTP call, no pending/checking state,
 and no per-tuple credential fingerprinting gate on Save — for any
-provider, including Codex and API-key providers like
-DeepSeek. See `reference/operations/saved-presets/SKILL.md` for what
-`Validate()` checks.
+provider family: Codex and Claude Code logins as well as openai- and
+anthropic-family API keys. See `reference/operations/saved-presets/SKILL.md`
+for what `Validate()` checks.
 
 ## History
 
@@ -39,7 +38,12 @@ retry loop.
 
 `/doctor` (`tui/internal/tui/doctor.go`'s `probeLLM`) and real runtime
 execution remain the places that diagnose whether a provider/model is
-actually reachable. Save does not duplicate that check.
+actually reachable. `probeLLM` checks by provider family: `openai` lists
+`{base_url}/models` with a Bearer key, `anthropic` lists
+`{base_url}/v1/models` with `x-api-key` + `anthropic-version` (each then makes
+one `max_tokens=1` generation call to catch empty gateway replies), `codex`
+and `claude-code` are reported as login-owned without a network call, and any
+other provider is reported as unsupported. Save does not duplicate that check.
 
 ## Operations
 

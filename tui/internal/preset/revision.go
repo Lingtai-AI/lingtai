@@ -920,8 +920,8 @@ func validateChangeSemantics(target RevisionTarget, change RevisionChange, retai
 		return malformedf("non-capability change %q must not declare model_refs", path)
 	}
 	if strings.Contains(lower, "wire_api") || strings.Contains(lower, "responses_transport") {
-		if target.ProviderID != "custom" || target.Route.API != "responses" || target.Route.Binding.Mode != RouteBindingDirect || (target.Route.Transport != "http" && target.Route.Transport != "websocket") {
-			return conflictf("wire_api/responses_transport is only eligible for custom Responses targets")
+		if target.ProviderID != ProviderOpenAI || target.Route.API != "responses" || target.Route.Binding.Mode != RouteBindingDirect || (target.Route.Transport != "http" && target.Route.Transport != "websocket") {
+			return conflictf("wire_api/responses_transport is only eligible for openai Responses targets")
 		}
 	}
 	if isReasoningPath(path) {
