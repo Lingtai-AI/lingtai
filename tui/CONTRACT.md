@@ -29,6 +29,7 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/anthropic/SKILL.md
   - tui/internal/tui/doctor.go
   - tui/internal/tui/login.go
+  - tui/internal/tui/claude_auth.go
   - tui/main.go
   - tui/main_preset_revision_test.go
   - tui/internal/config/global_test.go
@@ -168,9 +169,9 @@ appears as the degraded state below.
 The TUI ships exactly four provider families, matching the providers the
 kernel accepts, with one built-in template each (`BuiltinPresets()`, in picker
 order): `codex` (ChatGPT OAuth; the first-run default), `claude` (provider
-`claude-code`, the local Claude Code CLI login), `openai` (any
-OpenAI-compatible endpoint), and `anthropic` (any Anthropic
-Messages-compatible endpoint). There are no per-vendor templates, region
+`claude-code`, shown as `claude-p`: the local Claude login, or a
+`claude setup-token` OAuth token), `openai` (any OpenAI-compatible
+endpoint), and `anthropic` (any Anthropic Messages-compatible endpoint). There are no per-vendor templates, region
 tables, or vendor-named providers; another vendor, subscription, gateway, or
 account pool (for example sub2api / subs-pool) is reached through `openai` or
 `anthropic` with that endpoint as `base_url`.
@@ -180,8 +181,32 @@ account pool (for example sub2api / subs-pool) is reached through `openai` or
   (`https://api.anthropic.com`); `codex` keeps its `/backend-api/codex` route
   and `claude-code` has none.
 - `api_key_env` defaults to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`; saving an
-  edited template stamps a fresh `<PROVIDER>_<N>_API_KEY` slot. `codex` and
-  `claude-code` carry no key slot.
+  edited template stamps a fresh `<PROVIDER>_<N>_API_KEY` slot. `codex`
+  carries no key slot. `claude-code` uses the one shared
+  `CLAUDE_CODE_OAUTH_TOKEN` slot (a setup-token belongs to the Claude
+  account, so it is never numbered; a legacy Claude preset with no
+  `api_key_env` reads that slot too).
+- `claude-code` credential order: a stored `claude setup-token` token (in
+  `~/.lingtai-tui/.env` under the preset's `api_key_env`) takes precedence;
+  otherwise the local `claude` CLI login is used. The TUI detects the login
+  with the non-billed `claude auth status --json` and never spends a model
+  call to verify either path. It runs that probe only where a Claude
+  credential is shown or decided — the Claude preset editor, `/presets`,
+  Setup → Credentials and `/doctor` when Claude is in use, and Next on a
+  Claude preset in first-run — never while merely constructing the
+  first-run wizard, so a first-run that picks another family never execs
+  `claude`. The first-run paste step asks for a token (hint: run
+  `claude setup-token` and paste it) only when neither is present.
+- The `claude` template carries no `model` and no `thinking`: Claude Code
+  runs its own default model and effort. `Validate` accepts a model-less
+  `claude-code` preset (and only that family), and saving a Claude preset
+  drops `model`, `thinking`, `base_url`, `service_tier`, and `wire_api`.
+- The preset editor shows only the chosen family's fields: openai — model,
+  service tier, reasoning, wire format (+ transport on Responses), base_url,
+  key; anthropic — model, reasoning, base_url, key; codex — model, service
+  tier, reasoning, base_url, account; claude-code — the auth row only. The
+  family is named in the LLM section header; the four-family provider
+  choice is offered only to convert a legacy saved provider.
 - `wire_api` exists only on `openai`: `chat_completions` (the default, always
   written explicitly) or `responses`; `responses_transport` (`http` omitted
   default, or `websocket`) only on the Responses wire.
@@ -193,10 +218,15 @@ account pool (for example sub2api / subs-pool) is reached through `openai` or
   `anthropic`); the `claude` template declares neither.
 - `/doctor` probes by family (openai: Bearer `GET {base_url}/models`;
   anthropic: `x-api-key` + `anthropic-version` `GET {base_url}/v1/models`;
-  codex/claude-code: login-owned, no network call) and reports any other
-  provider as unsupported. Setup → Credentials derives an API key's endpoint
-  from the openai/anthropic preset that declares its env var and never
-  reports a stored key as failed merely because no endpoint is known.
+  codex: login-owned, no network call; claude-code: presence only, no
+  network or model call — reports the active path: setup-token present,
+  local Claude login, or neither with the `claude setup-token` hint) and
+  reports any other provider as unsupported. Setup → Credentials derives an
+  API key's endpoint from the openai/anthropic preset that declares its env
+  var and never reports a stored key as failed merely because no endpoint is
+  known; a Claude setup-token is listed by presence only, and a Claude line
+  shows which Claude path is active when a Claude preset, agent, or token is
+  in use.
 
 ## Preset editor service tier
 
@@ -224,13 +254,13 @@ only ever grows rots into one.
 
 - `providerModels` (`tui/internal/tui/preset_editor.go`) — the curated
   catalog for the ←/→ picker on the editor's model row, looked up by
-  `modelOptions(provider)`. Only the two subscription routes carry one: the
-  Codex OAuth catalog and the Claude Code CLI aliases. The `openai` and
-  `anthropic` families point at arbitrary endpoints, so their model row is
-  free text and their templates ship an empty model that Save requires the
-  user to fill in. When the user switches provider, a curated id the new
-  family cannot serve falls back to that family's first catalog entry, or is
-  cleared for a free-text family; arbitrary user text is never rewritten;
+  `modelOptions(provider)`. Only the Codex OAuth route carries one. The
+  `openai` and `anthropic` families point at arbitrary endpoints, so their
+  model row is free text and their templates ship an empty model that Save
+  requires the user to fill in; `claude-code` has no model row at all.
+  When a legacy provider is converted, a curated id the new family cannot
+  serve falls back to that family's first catalog entry, or is cleared for a
+  free-text family; arbitrary user text is never rewritten;
 - the default `model` of every built-in preset constructor
   (`tui/internal/preset/preset.go`), which for a picker-bearing provider must
   itself be the first of that provider's shipped ids.
@@ -245,7 +275,7 @@ Reading of the rule:
 | family | one model line in a curated catalog — the Codex `gpt-*` line |
 | generation | the version step within the family — `gpt-6` vs `gpt-5.6` |
 | **not** a generation | a variant inside one generation — `-mini`, the `gpt-5.6-sol/-terra/-luna` routes. All variants of a kept generation stay. |
-| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`). Free-text rows (`openai`, `anthropic`) have no catalog to curate. |
+| exempt | Free-text rows (`openai`, `anthropic`) and `claude-code` (no model row; Claude Code picks its default) have no catalog to curate. |
 
 **Standing obligation.** Adding a new generation is the same change that
 removes the third-newest one — from `providerModels` and from any provider

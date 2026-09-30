@@ -2,7 +2,7 @@
 name: preset-skill-op-saved-presets
 description: How saved presets differ from templates, and the Load/Save/Delete/Bootstrap contract — order, atomicity, and naming.
 version: 2.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/preset/preset_skill_router_test.go
@@ -46,8 +46,9 @@ absent does `Load` return the not-found error.
 `Validate()` mirrors the kernel's own load-time
 validation gauntlet (`description.summary` non-empty; a **non-empty** `tier`
 must be one of 1..5, while an empty tier is allowed;
-`llm.provider`/`llm.model` non-empty; `context_limit` shape; `base_url` is
-optional for every family). It exists so
+`llm.provider` non-empty; `llm.model` non-empty except for `claude-code`,
+which carries no model; `context_limit` shape; `base_url` is optional for
+every family). It exists so
 callers — notably the preset editor's commit path — can refuse to save
 something the kernel would refuse to load. **Neither `Save` nor `Load` calls
 it automatically**; a caller that writes a preset without checking

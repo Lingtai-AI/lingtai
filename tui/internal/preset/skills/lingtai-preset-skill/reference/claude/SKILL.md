@@ -1,11 +1,15 @@
 ---
 name: preset-skill-claude
 description: "Use when revising the built-in claude TUI preset."
-version: 4.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+version: 5.0.0
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
+  - tui/internal/tui/claude_auth.go
+  - tui/internal/tui/firstrun.go
+  - tui/internal/tui/doctor.go
+  - tui/internal/tui/login.go
   - tui/internal/tui/SKILL.md
   - tui/CONTRACT.md
   - tui/internal/preset/revision.go
@@ -17,33 +21,45 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 Use this child for the named built-in claude preset. claudePreset in
 tui/internal/preset/preset.go uses canonical provider claude-code (shown as
-"claude-p" in the TUI) and the local Claude Code CLI's OAuth login, with model
-alias opus and no API-key env, base_url, web_search override, or LingTai
-vision capability. The editor also offers fable, sonnet, and haiku aliases.
-An Anthropic API key or an Anthropic-compatible endpoint is the separate
+"claude-p" in the TUI): the kernel runs Claude Code print mode (`claude -p`)
+with LingTai's system prompt in place of Claude Code's. The template carries
+no model and no thinking — Claude Code runs its own default model and effort
+— and no base_url, web_search override, or LingTai vision capability. An
+Anthropic API key or an Anthropic-compatible endpoint is the separate
 `anthropic` family (`reference/anthropic/SKILL.md`).
 
 ## Template-specific settings
 
-Read the official [Claude Code workflows](https://code.claude.com/docs/en/common-workflows)
-and [Claude vision guide](https://platform.claude.com/docs/en/build-with-claude/vision).
-This preset uses CLI/OAuth aliases, not an Anthropic API model catalog: use the
-installed claude CLI's documented model-selection/help surface to see aliases
-that the local CLI serves, and verify an alias with its normal print-mode
-selection. Do not replace an alias with a dated API ID or inspect credential
-contents. CLI alias support and API model availability are distinct facts.
-The current Claude Code mapping is fable to claude-fable-5-1; the TUI still
-stores the alias, not that full API identifier. Underlying CLI image support
-does not establish forwarding through LingTai's CLI adapter.
+Credential order:
+
+1. A long-lived OAuth token from `claude setup-token`, stored in
+   `~/.lingtai-tui/.env` under the preset's `api_key_env` (the template, and
+   every Claude preset, uses the one shared `CLAUDE_CODE_OAUTH_TOKEN` slot;
+   a legacy Claude preset with no `api_key_env` reads that slot too). When
+   present it takes precedence, and the kernel isolates `~/.claude`.
+2. Otherwise the local `claude` CLI login. The TUI detects it with the
+   non-billed `claude auth status --json` (tui/internal/tui/claude_auth.go)
+   and never reads Claude credential files.
+3. Neither: the first-run paste step, the editor's auth row, `/doctor`, and
+   Setup → Credentials all say "Run `claude setup-token` in a terminal and
+   paste the token here".
+
+No TUI surface spends a model call to verify either path; status is presence
+only (`ResolvePresetWithAuth`, `probeLLM`, the credentials page).
 
 ## TUI surfaces to revise
 
-Start at claudePreset in tui/internal/preset/preset.go. Revise the
-claude-code entries in providerModels in tui/internal/tui/preset_editor.go
-when CLI aliases change. There is intentionally no constructor vision
-capability, and the editor exposes no reasoning or service-tier row for this
-provider; inspect only the model alias picker and fixed capability rendering
-if that contract changes. Follow the CLI-alias exemption in tui/CONTRACT.md.
+Start at claudePreset and `ClaudeCodeOAuthTokenEnv` / `APIKeyEnvName` in
+tui/internal/preset/preset.go. In tui/internal/tui/preset_editor.go the
+claude-code editor is auth-only: `fieldVisible` hides provider, model,
+base_url, reasoning, service tier, and wire rows; `claudeAuthLabel` renders
+the auth row, which takes a pasted token; `normalizeClaudeCode` drops model,
+base_url, and codex_auth_path on save. The first-run key step
+(`presetNeedsKey`, `ensureClaudeLoginFor` in firstrun.go), `/doctor`
+(`probeClaudeToken` / `probeClaudeLogin` / `probeClaudeNoAuth` in
+doctor.go), and Setup → Credentials (`claudeStatus` in login.go) share the
+`resolveClaudeAuth` order in claude_auth.go. There is no model catalog for
+this provider.
 
 ## Reviewed deterministic revision
 
@@ -51,8 +67,7 @@ Prepare an evidence-bound manifest and explicit input, then run
 lingtai-tui presets revise --manifest PATH --input PATH --mode dry-run|check|apply
 [--output-dir PATH]. Review the JSON plan, use dry-run/check before apply, and
 apply only to a new explicit output directory. revision.go validates hashes,
-route bindings, and evidence and preserves unowned bytes. This amendment does
-not change the current claude values.
+route bindings, and evidence and preserves unowned bytes.
 
 Maintenance: If the relevant TUI preset/page is revised, check whether this sub-skill also needs revision and, if so, include it in the same PR.
 
@@ -60,4 +75,4 @@ Maintenance: If the relevant TUI preset/page is revised, check whether this sub-
 
 For save, endpoint/capability, availability, activation/refresh, or
 troubleshooting, use the five shared operation children under
-`reference/operations/`; this child owns Claude CLI alias facts.
+`reference/operations/`; this child owns the Claude credential-order facts.

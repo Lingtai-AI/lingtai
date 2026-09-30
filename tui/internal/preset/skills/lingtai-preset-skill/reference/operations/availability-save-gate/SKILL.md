@@ -2,7 +2,7 @@
 name: preset-skill-op-availability-save-gate
 description: Save on the preset editor performs local structural validation only — it never makes a live provider/model network call. Real availability diagnosis is owned by /doctor and actual runtime execution.
 version: 3.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/doctor.go
@@ -19,8 +19,8 @@ Evidence: `tui/internal/tui/preset_editor.go`'s `commit()`.
 `commit()` runs the preset's structural `Validate()` and, if it passes,
 saves immediately. There is no live HTTP call, no pending/checking state,
 and no per-tuple credential fingerprinting gate on Save — for any
-provider family: Codex and Claude Code logins as well as openai- and
-anthropic-family API keys. See `reference/operations/saved-presets/SKILL.md`
+provider family: Codex and Claude Code logins (and Claude setup-tokens) as
+well as openai- and anthropic-family API keys. See `reference/operations/saved-presets/SKILL.md`
 for what `Validate()` checks.
 
 ## History
@@ -42,8 +42,10 @@ actually reachable. `probeLLM` checks by provider family: `openai` lists
 `{base_url}/models` with a Bearer key, `anthropic` lists
 `{base_url}/v1/models` with `x-api-key` + `anthropic-version` (each then makes
 one `max_tokens=1` generation call to catch empty gateway replies), `codex`
-and `claude-code` are reported as login-owned without a network call, and any
-other provider is reported as unsupported. Save does not duplicate that check.
+is reported as login-owned without a network call, `claude-code` reports its
+active credential path by presence only (setup-token present, local Claude
+login, or neither with the `claude setup-token` hint — no network or model
+call), and any other provider is reported as unsupported. Save does not duplicate that check.
 
 ## Operations
 

@@ -382,7 +382,9 @@ func (p Preset) Validate() []error {
 		if s, _ := llm["provider"].(string); s == "" {
 			errs = append(errs, fmt.Errorf("manifest.llm.provider must be non-empty"))
 		}
-		if s, _ := llm["model"].(string); s == "" {
+		// The claude-code family carries no model: Claude Code runs its own
+		// default model, so only the other families require one.
+		if s, _ := llm["model"].(string); s == "" && !ClaudeCodeFamily(asStringValue(llm["provider"])) {
 			errs = append(errs, fmt.Errorf("manifest.llm.model must be non-empty"))
 		}
 		// base_url is optional for every family: the openai and anthropic
@@ -554,10 +556,18 @@ const (
 	ProviderAnthropic = "anthropic"
 	// ProviderCodex is the ChatGPT-OAuth Codex backend.
 	ProviderCodex = "codex"
-	// ProviderClaudeCode is the local Claude Code CLI login (shown as
-	// "claude-p" in the TUI).
+	// ProviderClaudeCode is Claude Code print mode (`claude -p`, shown as
+	// "claude-p" in the TUI). It runs on the local Claude CLI login, or on a
+	// long-lived `claude setup-token` OAuth token stored under api_key_env,
+	// which takes precedence when present.
 	ProviderClaudeCode = "claude-code"
 )
+
+// ClaudeCodeOAuthTokenEnv is the api_key_env slot a claude-code preset stores
+// its `claude setup-token` OAuth token under. Every Claude preset shares this
+// one slot (a setup-token is per Claude account, not per preset), so it is
+// never auto-numbered.
+const ClaudeCodeOAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
 
 // Official endpoints the two API-key families fall back to when a preset
 // leaves manifest.llm.base_url empty. The kernel applies the same defaults;
@@ -576,7 +586,8 @@ const (
 
 // DefaultAPIKeyEnv returns the api_key_env slot a fresh preset of the given
 // provider family declares: OPENAI_API_KEY / ANTHROPIC_API_KEY for the two
-// API-key families, "" for the OAuth/CLI families and anything else.
+// API-key families, CLAUDE_CODE_OAUTH_TOKEN for claude-code, and "" for Codex
+// OAuth and anything else.
 func DefaultAPIKeyEnv(provider string) string {
 	switch provider {
 	case ProviderOpenAI:
@@ -584,7 +595,40 @@ func DefaultAPIKeyEnv(provider string) string {
 	case ProviderAnthropic:
 		return "ANTHROPIC_API_KEY"
 	}
+	if ClaudeCodeFamily(provider) {
+		return ClaudeCodeOAuthTokenEnv
+	}
 	return ""
+}
+
+// ClaudeCodeFamily reports whether provider is the claude-code family
+// (including its legacy spellings).
+func ClaudeCodeFamily(provider string) bool {
+	return ClassifyCredentialFamily(provider) == CredentialFamilyClaude
+}
+
+// APIKeyEnvName returns the env var that holds an llm block's secret: the
+// declared api_key_env, or — for the claude-code family only — the shared
+// CLAUDE_CODE_OAUTH_TOKEN slot when none is declared (Claude presets saved
+// before the setup-token slot existed). Codex OAuth never uses an env var, so
+// it returns "" even when a stale value is present.
+func APIKeyEnvName(llm map[string]interface{}) string {
+	provider := asStringValue(llm["provider"])
+	if ClassifyCredentialFamily(provider) == CredentialFamilyCodexSingle {
+		return ""
+	}
+	if env := strings.TrimSpace(asStringValue(llm["api_key_env"])); env != "" {
+		return env
+	}
+	if ClaudeCodeFamily(provider) {
+		return ClaudeCodeOAuthTokenEnv
+	}
+	return ""
+}
+
+func asStringValue(v interface{}) string {
+	s, _ := v.(string)
+	return s
 }
 
 // DefaultBaseURL returns the official endpoint an API-key family uses when
@@ -600,8 +644,9 @@ func DefaultBaseURL(provider string) string {
 }
 
 // BuiltinPresets returns the built-in templates, one per provider family.
-// Order is the picker order: codex first (the first-run default), then the
-// Claude Code CLI login, then the two bring-your-own-endpoint families.
+// Order is the picker order: codex first (the first-run default), then Claude
+// Code (local login or setup-token), then the two bring-your-own-endpoint
+// families.
 func BuiltinPresets() []Preset {
 	return []Preset{
 		codexPreset(),
@@ -678,9 +723,17 @@ func isSyntheticPreset(p Preset) bool {
 type CredentialFamily string
 
 const (
-	CredentialFamilyOther       CredentialFamily = "other"
+	// CredentialFamilyOther authenticates with the secret stored under
+	// manifest.llm.api_key_env (the openai/anthropic API-key families and any
+	// unknown provider).
+	CredentialFamilyOther CredentialFamily = "other"
+	// CredentialFamilyCodexSingle is ChatGPT OAuth through one Codex token
+	// file; it never uses api_key_env.
 	CredentialFamilyCodexSingle CredentialFamily = "codex_single"
-	CredentialFamilyClaudeCLI   CredentialFamily = "claude_cli"
+	// CredentialFamilyClaude is claude-code: a `claude setup-token` OAuth
+	// token stored under api_key_env (default CLAUDE_CODE_OAUTH_TOKEN), which
+	// takes precedence, or else the local Claude CLI login.
+	CredentialFamilyClaude CredentialFamily = "claude"
 )
 
 // ClassifyCredentialFamily classifies only exact manifest.llm.provider values.
@@ -690,7 +743,7 @@ func ClassifyCredentialFamily(provider string) CredentialFamily {
 	case "codex", "codex_oauth":
 		return CredentialFamilyCodexSingle
 	case "claude-code", "claude_code", "claude-agent-sdk", "claude_agent_sdk":
-		return CredentialFamilyClaudeCLI
+		return CredentialFamilyClaude
 	default:
 		return CredentialFamilyOther
 	}
@@ -720,14 +773,13 @@ type ResolvedRef struct {
 	// only when that env var has a value in the passed existingKeys map.
 	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
 	// declares no api_key_env), this is true only when OAuth is configured
-	// (see AuthState.CodexOAuthConfigured). For a Claude preset
-	// (provider "claude-code"/"claude_code", which authenticates through the
-	// local Claude Code CLI login and declares no api_key_env),
-	// this is true only when the CLI reports a logged-in session (see
+	// (see AuthState.CodexOAuthConfigured). For a Claude preset (provider
+	// "claude-code"), this is true when its setup-token slot (APIKeyEnvName:
+	// api_key_env, default CLAUDE_CODE_OAUTH_TOKEN) has a value, or else when
+	// the local Claude CLI reports a logged-in session (see
 	// AuthState.ClaudeCodeAuthConfigured). A preset with an empty
-	// api_key_env that is not one of those OAuth/CLI providers has no
-	// configured credential, so this is false. Only meaningful when Exists
-	// is true.
+	// api_key_env that is not one of those providers has no configured
+	// credential, so this is false. Only meaningful when Exists is true.
 	HasKey bool
 	// CodexAuthRef is the codex preset's manifest.llm.codex_auth_path value
 	// (verbatim, possibly ""). Empty with the field omitted or literal "" means
@@ -741,7 +793,7 @@ type ResolvedRef struct {
 
 // AuthState carries machine-level credential facts the credential guard
 // cannot derive from a preset file alone: Codex OAuth token state and the
-// Claude Code CLI session.
+// local Claude Code CLI login.
 type AuthState struct {
 	// CodexOAuthConfigured is the caller-provided fallback signal for a codex
 	// preset that declares no manifest.llm.codex_auth_path when CodexAuthDir is
@@ -759,12 +811,12 @@ type AuthState struct {
 	CodexAuthDir string
 
 	// ClaudeCodeAuthConfigured is true when the local Claude Code CLI
-	// (`claude`) is installed and reports a logged-in session. The
-	// claude-code provider authenticates through that existing CLI login
-	// (no per-request API key, no separate token stored by the TUI), so a
-	// Claude preset is credential-valid only when this is
-	// true. Computed by the caller (see tui.claudeCodeAuthConfigured) and
-	// passed in to avoid the preset→tui import cycle.
+	// (`claude`) is installed and reports a logged-in session (a non-billed
+	// `claude auth status` check). A Claude preset with no stored
+	// setup-token runs on that login, so it is credential-valid when this is
+	// true; a stored token takes precedence and does not need it. Computed by
+	// the caller (see tui.claudeCodeAuthConfigured) and passed in to avoid
+	// the preset→tui import cycle.
 	ClaudeCodeAuthConfigured bool
 }
 
@@ -911,8 +963,11 @@ func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthSt
 				setAuth(auth.CodexOAuthConfigured)
 			}
 		}
-	case CredentialFamilyClaudeCLI:
-		setAuth(auth.ClaudeCodeAuthConfigured)
+	case CredentialFamilyClaude:
+		// A stored setup-token takes precedence; the local CLI login is the
+		// fallback. Either one makes the preset runnable.
+		env := APIKeyEnvName(llm)
+		setAuth((env != "" && existingKeys[env] != "") || auth.ClaudeCodeAuthConfigured)
 	default:
 		if apiKeyEnv != "" {
 			setAuth(existingKeys[apiKeyEnv] != "")
@@ -1097,20 +1152,19 @@ func codexPreset() Preset {
 func claudePreset() Preset {
 	return Preset{
 		Name:        "claude",
-		Description: PresetDescription{Summary: "Claude Code / Claude Max — uses your local Claude CLI login (no API key)"},
+		Description: PresetDescription{Summary: "Claude Code / Claude Max — local Claude login, or a `claude setup-token` token"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// The kernel's canonical Claude Code provider invokes the local
-				// `claude` CLI, whose print-mode backend is shown as "claude-p"
-				// in the TUI. It reuses the CLI's OAuth login — no per-request
-				// API key, and the TUI stores no Anthropic token of its own. So
-				// api_key is nil and api_key_env is empty; credential validity
-				// is judged by detecting an existing `claude` CLI login (see
-				// AuthState.ClaudeCodeAuthConfigured). Default model is the CLI
-				// alias "opus"; the editor also offers "fable", whose full ID
-				// is `claude-fable-5-1` in current Claude Code.
-				"provider": ProviderClaudeCode, "model": "opus",
-				"api_key": nil, "api_key_env": "",
+				// The kernel runs Claude Code print mode (`claude -p`, shown as
+				// "claude-p" in the TUI) with LingTai's system prompt. It uses
+				// the local Claude CLI login when one exists; a long-lived OAuth
+				// token from `claude setup-token`, stored under api_key_env
+				// (CLAUDE_CODE_OAUTH_TOKEN), takes precedence when present.
+				// There is deliberately no model and no thinking: Claude Code
+				// picks its own default model and effort.
+				"provider":    ProviderClaudeCode,
+				"api_key":     nil,
+				"api_key_env": ClaudeCodeOAuthTokenEnv,
 			},
 			// Conservative capabilities: Claude Code is wired here as a completion
 			// provider only. We do NOT route web_search or vision through it —
@@ -1353,6 +1407,10 @@ func DefaultMCPSpec(name string) (module, envVar, configRel string, supported bo
 //     existingKeys (1-based). Reuses freed slots since the
 //     user said API keys rapidly rotate anyway.
 //
+// The claude-code family is the exception: it always gets the shared
+// CLAUDE_CODE_OAUTH_TOKEN slot, because a setup-token belongs to the Claude
+// account rather than to one preset.
+//
 // existingKeys is the env-var-keyed map from Config.Keys — caller
 // passes it in so this stays a pure function (no I/O).
 //
@@ -1363,6 +1421,9 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 	provider, _ := llm["provider"].(string)
 	if provider == "" {
 		return ""
+	}
+	if ClaudeCodeFamily(provider) {
+		return ClaudeCodeOAuthTokenEnv
 	}
 	prefix := strings.ToUpper(provider)
 	// Find the lowest unused N. We scan existingKeys for entries that

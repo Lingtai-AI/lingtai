@@ -1,6 +1,31 @@
 package tui
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
+
+// TestMain keeps the package hermetic: no test may exec the developer
+// machine's `claude` (which can also write ~/.claude.json under a temp HOME
+// and trip the draft zero-write checks). Tests that need a login state stub
+// claudeLoginProbe themselves via stubClaudeLogin.
+func TestMain(m *testing.M) {
+	claudeLoginProbe = func() claudeCodeAuthInfo { return claudeCodeAuthInfo{} }
+	os.Exit(m.Run())
+}
+
+// stubClaudeLogin replaces the local-login probe for one test.
+func stubClaudeLogin(t *testing.T, info claudeCodeAuthInfo) *int {
+	t.Helper()
+	calls := 0
+	old := claudeLoginProbe
+	claudeLoginProbe = func() claudeCodeAuthInfo {
+		calls++
+		return info
+	}
+	t.Cleanup(func() { claudeLoginProbe = old })
+	return &calls
+}
 
 // TestParseClaudeAuthStatus locks in the tolerant parsing of
 // `claude auth status` output. The CLI defaults to JSON with a
@@ -67,12 +92,44 @@ func TestParseClaudeAuthStatus(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeAuthConfigured_MissingBinary verifies the wrapper returns
-// false (never panics or hangs) when the claude CLI is not on PATH.
-func TestClaudeCodeAuthConfigured_MissingBinary(t *testing.T) {
+// TestReadClaudeCodeAuthInfo_MissingBinary verifies the real probe returns
+// "not logged in" (never panics or hangs) when the claude CLI is not on PATH.
+func TestReadClaudeCodeAuthInfo_MissingBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // a dir with no `claude` binary
-	if claudeCodeAuthConfigured() {
-		t.Errorf("claudeCodeAuthConfigured() = true with no claude on PATH, want false")
+	if info := readClaudeCodeAuthInfo(); info.LoggedIn {
+		t.Errorf("readClaudeCodeAuthInfo() = %#v with no claude on PATH, want logged out", info)
+	}
+}
+
+// TestResolveClaudeAuthOrder pins the credential order: a stored
+// setup-token wins without even asking the CLI; otherwise the local login
+// decides; neither is "none".
+func TestResolveClaudeAuthOrder(t *testing.T) {
+	calls := 0
+	loggedIn := func() claudeCodeAuthInfo {
+		calls++
+		return claudeCodeAuthInfo{LoggedIn: true, Email: "user@example.com"}
+	}
+	st := resolveClaudeAuth("CLAUDE_CODE_OAUTH_TOKEN", true, loggedIn)
+	if st.Source != claudeAuthToken || calls != 0 {
+		t.Fatalf("token present: source=%v probe calls=%d, want token without probing", st.Source, calls)
+	}
+	if got := st.Label(); got != "✓ setup-token stored (CLAUDE_CODE_OAUTH_TOKEN)" {
+		t.Fatalf("token label = %q", got)
+	}
+	st = resolveClaudeAuth("CLAUDE_CODE_OAUTH_TOKEN", false, loggedIn)
+	if st.Source != claudeAuthLogin || st.Email != "user@example.com" {
+		t.Fatalf("login: %#v, want local login with account", st)
+	}
+	if got := st.Label(); got != "✓ using local Claude login (user@example.com)" {
+		t.Fatalf("login label = %q", got)
+	}
+	st = resolveClaudeAuth("CLAUDE_CODE_OAUTH_TOKEN", false, func() claudeCodeAuthInfo { return claudeCodeAuthInfo{} })
+	if st.Source != claudeAuthNone {
+		t.Fatalf("neither: source=%v, want none", st.Source)
+	}
+	if got := st.Label(); got != "✗ no local Claude login and no setup-token" {
+		t.Fatalf("none label = %q", got)
 	}
 }
 

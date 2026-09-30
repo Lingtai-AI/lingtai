@@ -100,9 +100,10 @@ var editorProviders = []string{
 }
 
 // providerModels maps a provider to the curated model lineup the editor cycles
-// through with ←/→ on the model row. Only the two subscription routes carry a
-// catalog; the openai and anthropic families point at arbitrary endpoints, so
-// their model is free text.
+// through with ←/→ on the model row. Only the Codex OAuth route carries a
+// catalog: the openai and anthropic families point at arbitrary endpoints, so
+// their model is free text, and claude-code has no model row at all (Claude
+// Code runs its own default model).
 //
 // CURATION RULE (tui/CONTRACT.md, "Model list curation"): every family
 // listed here ships only its LATEST TWO GENERATIONS. A third-newest
@@ -121,11 +122,6 @@ var providerModels = map[string][]string{
 	// OAuth route, so keep the proven gpt-5.6-sol default first. gpt-5.5 is
 	// retired from this latest-two curation. Saved presets are never rewritten.
 	preset.ProviderCodex: {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
-	// Claude Code uses CLI aliases, not dated API IDs — `opus`/`fable`/
-	// `sonnet`/`haiku` name concurrent tiers of one generation, so the
-	// two-generation rule has nothing to trim here. Current Claude Code
-	// resolves fable to claude-fable-5-1.
-	preset.ProviderClaudeCode: {"opus", "fable", "sonnet", "haiku"},
 }
 
 // modelOptions is the single catalog lookup used by every model picker
@@ -135,10 +131,9 @@ func modelOptions(provider string) []string {
 }
 
 // isCuratedModel reports whether model is one of any provider's curated
-// catalog ids. A curated id belongs to its own route (a Codex OAuth model or
-// a Claude CLI alias), so it is cleared when the user switches to a
-// free-text provider family instead of being sent to an endpoint that does
-// not serve it.
+// catalog ids. A curated id belongs to its own route (a Codex OAuth model),
+// so it is cleared when the user switches to a free-text provider family
+// instead of being sent to an endpoint that does not serve it.
 func isCuratedModel(model string) bool {
 	for _, models := range providerModels {
 		for _, candidate := range models {
@@ -232,6 +227,14 @@ type PresetEditorModel struct {
 	apiKey       string
 	apiKeySet    bool
 
+	// Local Claude CLI login state for the claude-code auth row, filled
+	// asynchronously by probeClaudeLoginCmd (Init, or a provider switch into
+	// claude-code). A stored setup-token takes precedence, so the probe only
+	// runs while no token is in the buffer.
+	claudeLogin        claudeCodeAuthInfo
+	claudeLoginKnown   bool
+	claudeLoginPending bool
+
 	// Status
 	saveErr string
 
@@ -290,10 +293,14 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 	// masked and preserves the key when untouched. For templates, keep the
 	// buffer empty: editing a template creates a new preset, and that new
 	// preset must not silently inherit an old provider-wide key.
+	//
+	// Claude is the exception: every Claude preset shares the one
+	// CLAUDE_CODE_OAUTH_TOKEN slot (a setup-token belongs to the account),
+	// so a Claude template shows — and keeps — the stored token.
 	apiKey := ""
-	if !isBuiltin {
-		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-			if envName, _ := llm["api_key_env"].(string); envName != "" {
+	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+		if !isBuiltin || preset.ClaudeCodeFamily(asString(llm["provider"])) {
+			if envName := preset.APIKeyEnvName(llm); envName != "" {
 				apiKey = existingKeys[envName]
 			}
 		}
@@ -315,10 +322,23 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 	}
 }
 
-func (m PresetEditorModel) Init() tea.Cmd { return nil }
+// Init starts the local Claude login probe for a claude-code preset with no
+// stored token; every other preset needs no startup work.
+func (m PresetEditorModel) Init() tea.Cmd {
+	if m.needsClaudeLoginProbe() {
+		return probeClaudeLoginCmd()
+	}
+	return nil
+}
 
 func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case claudeLoginStatusMsg:
+		m.claudeLogin = msg.Info
+		m.claudeLoginKnown = true
+		m.claudeLoginPending = false
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -411,10 +431,10 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 	case "left", "h":
 		// Cycle backwards on enum fields.
 		m.cycleFocused(-1)
-		return m, nil
+		return m, m.claudeLoginProbeCmd()
 	case "right", "l":
 		m.cycleFocused(+1)
-		return m, nil
+		return m, m.claudeLoginProbeCmd()
 	case "tab":
 		// Jump straight to the Save button. Press Enter there to
 		// commit (or Tab again to cycle back to the previous field).
@@ -432,7 +452,11 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 		}
 		return m, nil
 	case "enter":
-		return m.openInline()
+		updated, cmd := m.openInline()
+		if probe := updated.claudeLoginProbeCmd(); probe != nil {
+			return updated, tea.Batch(cmd, probe)
+		}
+		return updated, cmd
 	case "ctrl+s":
 		return m.commit()
 	case "ctrl+d":
@@ -535,16 +559,12 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feAPIKey:
-		// Non-Other credential families do not consume a typed API key at
-		// save time. Keep this row visibly read-only so it cannot suggest
-		// that typing here changes the bound OAuth/CLI credential.
-		family := preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"]))
-		switch family {
-		case preset.CredentialFamilyCodexSingle:
+		// Codex binds an OAuth account, not a typed key: keep its row
+		// visibly read-only so it cannot suggest that typing here changes
+		// the bound account. Every other family — including claude-code,
+		// whose row takes a `claude setup-token` token — pastes a secret.
+		if preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"])) == preset.CredentialFamilyCodexSingle {
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
-			return *m, nil
-		case preset.CredentialFamilyClaudeCLI:
-			m.saveErr = i18n.T("preset_editor.api_key_managed_externally")
 			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
@@ -953,6 +973,22 @@ func normalizeLLMForCommit(manifest map[string]interface{}) {
 	normalizeThinking(manifest)
 	normalizeWireAPI(manifest)
 	normalizeResponsesTransport(manifest)
+	normalizeClaudeCode(manifest)
+}
+
+// normalizeClaudeCode keeps a claude-code llm block to what the family uses:
+// provider plus its setup-token slot. model and base_url are dropped (Claude
+// Code runs its own default model on its own route); thinking, service_tier,
+// wire_api, and codex_auth_path are already removed by the other
+// normalizers.
+func normalizeClaudeCode(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil || !preset.ClaudeCodeFamily(asString(llm["provider"])) {
+		return
+	}
+	delete(llm, "model")
+	delete(llm, "base_url")
+	delete(llm, "codex_auth_path")
 }
 
 // setExtra writes into Description.Extra, allocating the map on first
@@ -1037,10 +1073,15 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 }
 
 // switchProvider moves the working preset from one provider to another
-// without leaking route-specific state across:
+// without leaking route-specific state across. The provider row is only
+// offered for a legacy saved provider (see fieldVisible), so this is the
+// path that converts such a preset into one of the four families:
 //
-//   - codex adopts its template's /codex route; claude-code drops base_url.
-//     Both clear api_key_env (OAuth / CLI login, no key slot).
+//   - codex adopts its template's /codex route and clears api_key_env
+//     (OAuth, no key slot).
+//   - claude-code drops base_url, model, and thinking (Claude Code runs its
+//     own default model and effort) and uses the shared
+//     CLAUDE_CODE_OAUTH_TOKEN slot.
 //   - openai/anthropic coming from codex or claude-code start from the
 //     official endpoint (base_url nil) and the family's default key slot.
 //   - openai/anthropic coming from each other (or from a legacy saved
@@ -1062,9 +1103,10 @@ func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
 	case preset.CredentialFamilyCodexSingle:
 		llm["base_url"] = familyTemplateLLM(newProvider)["base_url"]
 		llm["api_key_env"] = ""
-	case preset.CredentialFamilyClaudeCLI:
+	case preset.CredentialFamilyClaude:
 		delete(llm, "base_url")
-		llm["api_key_env"] = ""
+		delete(llm, "model")
+		llm["api_key_env"] = preset.DefaultAPIKeyEnv(newProvider)
 	default:
 		env := asString(llm["api_key_env"])
 		if oldRouteOwned {
@@ -1075,6 +1117,12 @@ func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
 			env = preset.DefaultAPIKeyEnv(newProvider)
 		}
 		llm["api_key_env"] = env
+	}
+	// The key buffer follows the new slot unless the user typed a key in
+	// this session: a Claude setup-token must not display as an OpenAI key
+	// (or the reverse).
+	if !m.apiKeySet && (preset.ClaudeCodeFamily(oldProvider) || preset.ClaudeCodeFamily(newProvider)) {
+		m.apiKey = m.existingKeys[preset.APIKeyEnvName(llm)]
 	}
 
 	currentModel := asString(llm["model"])
@@ -1260,6 +1308,60 @@ func (m PresetEditorModel) llmMap() map[string]interface{} {
 	return llm
 }
 
+// originalLLM is the llm block the editor was opened with (never nil).
+func (m PresetEditorModel) originalLLM() map[string]interface{} {
+	llm, _ := m.original.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return map[string]interface{}{}
+	}
+	return llm
+}
+
+// isFamilyProvider reports whether provider is one of the four canonical
+// families (as opposed to a legacy saved provider awaiting conversion).
+func isFamilyProvider(provider string) bool {
+	return containsString(editorProviders, provider)
+}
+
+// isClaudeCode reports whether the working preset is the claude-code family,
+// whose LLM section is only the auth row.
+func (m PresetEditorModel) isClaudeCode() bool {
+	return preset.ClaudeCodeFamily(asString(m.llmMap()["provider"]))
+}
+
+// claudeTokenInBuffer reports whether a setup-token is stored (prefilled) or
+// was pasted in this session.
+func (m PresetEditorModel) claudeTokenInBuffer() bool {
+	return strings.TrimSpace(m.apiKey) != ""
+}
+
+// needsClaudeLoginProbe: a claude-code preset with no token and no known (or
+// pending) local-login result.
+func (m PresetEditorModel) needsClaudeLoginProbe() bool {
+	return m.isClaudeCode() && !m.claudeTokenInBuffer() && !m.claudeLoginKnown && !m.claudeLoginPending
+}
+
+// claudeLoginProbeCmd starts the local-login probe once when the working
+// preset needs it (e.g. right after a provider switch into claude-code).
+func (m *PresetEditorModel) claudeLoginProbeCmd() tea.Cmd {
+	if !m.needsClaudeLoginProbe() {
+		return nil
+	}
+	m.claudeLoginPending = true
+	return probeClaudeLoginCmd()
+}
+
+// claudeAuthLabel renders the claude-code auth row: a stored/pasted
+// setup-token wins, else the local Claude login, else "not configured".
+func (m PresetEditorModel) claudeAuthLabel() string {
+	env := preset.APIKeyEnvName(m.llmMap())
+	if !m.claudeTokenInBuffer() && !m.claudeLoginKnown {
+		return i18n.T("claude.auth_checking")
+	}
+	login := m.claudeLogin
+	return resolveClaudeAuth(env, m.claudeTokenInBuffer(), func() claudeCodeAuthInfo { return login }).Label()
+}
+
 // fieldString returns the current display value for the given field.
 func (m PresetEditorModel) fieldString(f editorField) string {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
@@ -1317,8 +1419,8 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 			}
 			return i18n.T("codex.oauth_not_logged_in")
 		}
-		if family == preset.CredentialFamilyClaudeCLI {
-			return i18n.T("preset_editor.api_key_managed_externally")
+		if family == preset.CredentialFamilyClaude {
+			return m.claudeAuthLabel()
 		}
 		// Other providers display the existing key masked. The env-var name
 		// is an internal detail; the user only needs to see whether a key is
@@ -1457,10 +1559,21 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feGains, m.row(feGains, lbl("gains"), asExtra(m.working.Description.Extra, "gains"), width-4)))
 	rows = append(rows, row(feLoses, m.row(feLoses, lbl("loses"), asExtra(m.working.Description.Extra, "loses"), width-4)))
 	rows = append(rows, plain(""))
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_llm"))))
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
-	rows = append(rows, row(feProvider, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4)))
-	rows = append(rows, row(feModel, m.row(feModel, lbl("model"), asString(llm["model"]), width-4)))
+	// Only the chosen family's fields render. The family itself is named in
+	// the section header; the four-family choice appears only to convert a
+	// legacy saved provider (fieldVisible(feProvider)).
+	llmHeader := i18n.T("preset_editor.section_llm")
+	if provider := asString(llm["provider"]); isFamilyProvider(provider) {
+		llmHeader += " · " + providerDisplayName(provider)
+	}
+	rows = append(rows, plain(m.sectionHeader(llmHeader)))
+	if m.fieldVisible(feProvider) {
+		rows = append(rows, row(feProvider, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4)))
+	}
+	if m.fieldVisible(feModel) {
+		rows = append(rows, row(feModel, m.row(feModel, lbl("model"), asString(llm["model"]), width-4)))
+	}
 	if m.fieldVisible(feServiceTier) {
 		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.serviceTier(), width-4)))
 	}
@@ -1473,8 +1586,14 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	if m.fieldVisible(feResponsesTransport) {
 		rows = append(rows, row(feResponsesTransport, m.row(feResponsesTransport, lbl("responses_transport"), m.fieldString(feResponsesTransport), width-4)))
 	}
-	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
-	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
+	if m.fieldVisible(feBaseURL) {
+		rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
+	}
+	apiKeyLabel := lbl("api_key")
+	if m.isClaudeCode() {
+		apiKeyLabel = lbl("claude_auth")
+	}
+	rows = append(rows, row(feAPIKey, m.row(feAPIKey, apiKeyLabel, m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
 	// Capabilities — every tool/subsystem the runtime can grant an agent,
 	// including web_search and vision. All of them are always included:
@@ -1814,6 +1933,15 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
+	case feProvider:
+		// The family is chosen when the preset is created (by its template),
+		// so the four-family choice is only offered to convert a legacy saved
+		// provider. Keyed on the original provider so a conversion can still
+		// cycle through every family before Save.
+		return !isFamilyProvider(asString(m.originalLLM()["provider"]))
+	case feModel, feBaseURL:
+		// claude-code is auth-only: no model, no endpoint.
+		return !m.isClaudeCode()
 	case feServiceTier:
 		return m.hasServiceTier()
 	case feThinking:
@@ -1893,8 +2021,12 @@ func (m PresetEditorModel) renderFooter() string {
 	if m.saveErr != "" {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + m.saveErr)
 	}
+	claudeAuthFocused := m.isClaudeCode() && editorFieldOrder[m.cursor] == feAPIKey
 	switch m.mode {
 	case emInline:
+		if claudeAuthFocused {
+			return hintStyle.Render("  " + i18n.T("claude.setup_token_hint") + "  ·  " + i18n.T("preset_editor.hint_inline"))
+		}
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
 	case emDirtyPrompt:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_dirty"))
@@ -1906,6 +2038,9 @@ func (m PresetEditorModel) renderFooter() string {
 		// Transient feedback (e.g. a completed CLI credential import)
 		// replaces the generic browse hint until the next keypress.
 		hint = m.statusMsg
+	} else if claudeAuthFocused {
+		// The claude-code auth row takes a `claude setup-token` token.
+		hint = "[Enter] " + i18n.T("claude.setup_token_hint") + "  ·  " + hint
 	} else if m.codexCLIImportAvailable() {
 		// A `codex login` credential exists while this preset's bound
 		// account is invalid: advertise the one-click import on the

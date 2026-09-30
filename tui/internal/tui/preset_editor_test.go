@@ -109,10 +109,10 @@ func builtinPresetForEditorTest(t *testing.T, name string) preset.Preset {
 	return preset.Preset{}
 }
 
-// TestPresetEditorProviderModelLineupsPinRequestedDefaults pins the only two
-// curated catalogs: the Codex OAuth route and the Claude Code CLI aliases.
-// The openai and anthropic families point at arbitrary endpoints, so their
-// model row is free text.
+// TestPresetEditorProviderModelLineupsPinRequestedDefaults pins the only
+// curated catalog: the Codex OAuth route. The openai and anthropic families
+// point at arbitrary endpoints, so their model row is free text, and
+// claude-code has no model at all (Claude Code runs its own default).
 func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	// GPT-6 Astra is documented but account/client rollout is not proven, so
 	// Sol remains the default-first entry. The named GPT-5.6 routes are one
@@ -123,31 +123,29 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if models := providerModels["codex"]; !reflect.DeepEqual(models, wantCodexModels) {
 		t.Fatalf("codex provider models = %#v, want %#v", models, wantCodexModels)
 	}
-	wantClaudeModels := []string{"opus", "fable", "sonnet", "haiku"}
-	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
-		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
-	}
 	gotProviders := make([]string, 0, len(providerModels))
 	for provider := range providerModels {
 		gotProviders = append(gotProviders, provider)
 	}
 	sort.Strings(gotProviders)
-	if want := []string{"claude-code", "codex"}; !reflect.DeepEqual(gotProviders, want) {
+	if want := []string{"codex"}; !reflect.DeepEqual(gotProviders, want) {
 		t.Fatalf("curated catalogs = %#v, want only %#v", gotProviders, want)
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "claude-code"} {
 		if got := modelOptions(provider); got != nil {
-			t.Fatalf("%s must keep a free-text model row, got catalog %#v", provider, got)
+			t.Fatalf("%s must carry no curated catalog, got %#v", provider, got)
 		}
 	}
-	// Each template's default model is the first entry of its catalog.
-	for _, name := range []string{"codex", "claude"} {
-		p := builtinPresetForEditorTest(t, name)
-		llm := p.Manifest["llm"].(map[string]interface{})
-		provider := asString(llm["provider"])
-		if got, want := asString(llm["model"]), providerModels[provider][0]; got != want {
-			t.Fatalf("%s template model = %q, want catalog default %q", name, got, want)
-		}
+	// The codex template's default model is the first entry of its catalog.
+	p := builtinPresetForEditorTest(t, "codex")
+	llm := p.Manifest["llm"].(map[string]interface{})
+	if got, want := asString(llm["model"]), providerModels["codex"][0]; got != want {
+		t.Fatalf("codex template model = %q, want catalog default %q", got, want)
+	}
+	// The claude template carries no model.
+	claude := builtinPresetForEditorTest(t, "claude")
+	if v, ok := claude.Manifest["llm"].(map[string]interface{})["model"]; ok {
+		t.Fatalf("claude template model = %#v, want absent", v)
 	}
 }
 
@@ -1855,10 +1853,11 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 	}{
 		{name: "codex", provider: "codex", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
 		{name: "codex oauth alias", provider: "codex_oauth", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
-		{name: "claude cli", provider: "claude-code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
-		{name: "claude cli alias", provider: "claude_code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
-		{name: "claude agent sdk", provider: "claude-agent-sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
-		{name: "claude agent sdk alias", provider: "claude_agent_sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		// claude-code takes a pasted `claude setup-token` token, like a key.
+		{name: "claude code", provider: "claude-code", readOnly: false},
+		{name: "claude code alias", provider: "claude_code", readOnly: false},
+		{name: "claude agent sdk", provider: "claude-agent-sdk", readOnly: false},
+		{name: "claude agent sdk alias", provider: "claude_agent_sdk", readOnly: false},
 		{name: "openai", provider: "openai", readOnly: false},
 		{name: "anthropic", provider: "anthropic", readOnly: false},
 	}
@@ -1909,8 +1908,16 @@ func TestPresetEditorProviderCycleIsFourFamilies(t *testing.T) {
 	if want := []string{"openai", "anthropic", "codex", "claude-code"}; !reflect.DeepEqual(editorProviders, want) {
 		t.Fatalf("editorProviders = %#v, want %#v", editorProviders, want)
 	}
-	m := NewPresetEditorModelWithBuiltinFlag(testOpenAIPresetEditorPreset(), "en", nil, "", false)
+	// The four-family choice is only offered to convert a legacy saved
+	// provider; the first → lands on openai.
+	legacy := testOpenAIPresetEditorPreset()
+	legacy.Manifest["llm"].(map[string]interface{})["provider"] = "custom"
+	m := NewPresetEditorModelWithBuiltinFlag(legacy, "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
+	m.cycleFocused(+1)
+	if got := m.fieldString(feProvider); got != "openai" {
+		t.Fatalf("legacy provider → = %q, want openai", got)
+	}
 	for _, want := range []string{"anthropic", "codex", "claude-code", "openai"} {
 		m.cycleFocused(+1)
 		if got := m.fieldString(feProvider); got != want {
@@ -2007,16 +2014,26 @@ func TestPresetEditorProviderSwitchResetsRouteState(t *testing.T) {
 		t.Fatalf("-> codex thinking = %#v, want xhigh default", got)
 	}
 
-	// -> claude-code drops base_url and adopts its alias catalog.
+	// -> claude-code drops base_url, model, and thinking (Claude Code runs
+	// its own default model and effort) and uses the shared token slot.
 	m.switchProvider("codex", "claude-code")
-	if _, ok := llm["base_url"]; ok {
-		t.Fatalf("claude-code must not carry base_url, got %#v", llm["base_url"])
+	for _, key := range []string{"base_url", "model", "thinking", "service_tier", "codex_auth_path"} {
+		if v, ok := llm[key]; ok {
+			t.Fatalf("claude-code must not carry %s, got %#v", key, v)
+		}
 	}
-	if got := llm["model"]; got != "opus" {
-		t.Fatalf("-> claude-code model = %#v, want opus", got)
+	if got := llm["api_key_env"]; got != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("-> claude-code api_key_env = %#v, want CLAUDE_CODE_OAUTH_TOKEN", got)
 	}
-	if _, ok := llm["service_tier"]; ok {
-		t.Fatalf("claude-code must not carry service_tier")
+
+	// claude-code -> openai starts from the official endpoint and the
+	// family's default key slot; the Claude token slot never follows.
+	m.switchProvider("claude-code", "openai")
+	if got := llm["api_key_env"]; got != "OPENAI_API_KEY" {
+		t.Fatalf("claude-code -> openai api_key_env = %#v, want OPENAI_API_KEY", got)
+	}
+	if v, ok := llm["base_url"]; !ok || v != nil {
+		t.Fatalf("claude-code -> openai base_url = %#v (present=%v), want nil", v, ok)
 	}
 }
 
