@@ -7,9 +7,9 @@ description: >
   referencing existing presets instead of copying preset JSON files, refresh or
   relaunch, and verify the bot safely. The bundled helper currently implements
   the Telegram MCP case.
-version: 1.1.0
+version: 1.1.1
 tags: [utilities, bot, telegram, mcp, headless, bootstrap]
-last_changed_at: "2026-07-18T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -60,7 +60,7 @@ or the source-checkout path
 read -rsp 'Telegram bot token: ' TELEGRAM_BOT_TOKEN; export TELEGRAM_BOT_TOKEN; echo
 python3 <helper-path>/create_telegram_bot_project.py \
   --project-dir /path/to/new-project \
-  --preset minimax \
+  --preset codex \
   --agent-name my-bot-agent \
   --language en \
   --allowed-users 123456789 \

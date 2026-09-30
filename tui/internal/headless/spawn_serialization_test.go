@@ -30,7 +30,7 @@ func TestRunSpawn_SerializationLockFailureWritesOneInitError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        filepath.Join(blocker, "project"),
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "alice",
 		Language:   "en",
 		SkipLaunch: true,
@@ -73,7 +73,7 @@ func TestRunSpawn_SerializationReleaseFailureDoesNotLaunch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:       filepath.Join(t.TempDir(), "project"),
-		Preset:    "minimax",
+		Preset:    "codex",
 		AgentName: "alice",
 		Language:  "en",
 	})
@@ -303,7 +303,7 @@ func TestRunSpawnSerializationHelper(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := RunSpawn(&stdout, &stderr, SpawnOpts{
 		Dir:        target,
-		Preset:     "minimax",
+		Preset:     "codex",
 		AgentName:  "alice",
 		Language:   "en",
 		SkipLaunch: role != "contender",

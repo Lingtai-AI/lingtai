@@ -26,8 +26,8 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 
 	// Seed an existing init.json where the agent has runtime-swapped
 	// to an alternate preset (active != default).
-	defaultRef := "~/.lingtai-tui/presets/templates/minimax.json"
-	swappedRef := "~/.lingtai-tui/presets/saved/zhipu-1.json"
+	defaultRef := "~/.lingtai-tui/presets/templates/codex.json"
+	swappedRef := "~/.lingtai-tui/presets/saved/openai-1.json"
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "alice",
@@ -50,7 +50,7 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 	opts.AllowedPresets = []string{defaultRef} // user deselected swappedRef
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -99,8 +99,8 @@ func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defaultRef := "~/.lingtai-tui/presets/templates/minimax.json"
-	swappedRef := "~/.lingtai-tui/presets/saved/zhipu-1.json"
+	defaultRef := "~/.lingtai-tui/presets/templates/codex.json"
+	swappedRef := "~/.lingtai-tui/presets/saved/openai-1.json"
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "bob",
@@ -120,7 +120,7 @@ func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
 	opts.AllowedPresets = []string{defaultRef, swappedRef} // both still allowed
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 

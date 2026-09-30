@@ -1,7 +1,7 @@
 ---
 name: preset-skill-op-troubleshooting-migration
 description: Bounded first-pass triage for preset problems; routes deeper runtime/update/migration questions elsewhere instead of guessing.
-version: 1.0.1
+version: 2.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
@@ -41,11 +41,21 @@ migration internals it doesn't own.
   Expected — see `reference/operations/activation-session-refresh/SKILL.md`:
   saving alone never switches a running session; an explicit refresh,
   relaunch, or new service construction is required.
+- **"My vendor preset (minimax, zhipu, mimo, deepseek, gemini, kimi, grok,
+  nvidia, openrouter, custom) is gone / the agent now fails to start."**
+  Expected — LingTai ships only the four provider families (codex, claude,
+  openai, anthropic); the per-vendor templates are pruned by
+  `RefreshTemplates`, and the kernel rejects a saved preset whose provider is
+  a retired vendor name. Open the saved preset in the editor, move the
+  provider to `openai` or `anthropic` (→ on the provider row converts a legacy
+  provider to `openai` while keeping its endpoint, model, and key slot), make
+  sure `base_url` is that vendor's compatible endpoint, and save. See
+  `reference/openai/SKILL.md` and `reference/anthropic/SKILL.md`.
 - **"The codex-pool preset/provider is gone."** Expected — built-in Codex
-  account pooling was retired (its template is pruned by
-  `RefreshTemplates`). Pooling now lives in the external subs-pool proxy;
-  see `reference/subs-pool/SKILL.md` for the `custom` Responses preset
-  shape to repoint the agent at.
+  account pooling was retired. Pooling lives in an external pool such as
+  sub2api / subs-pool, reached through an `openai` preset on the Responses
+  wire; see `reference/openai/SKILL.md` for the preset shape to repoint the
+  agent at.
 
 ## Out of scope — route, don't guess
 

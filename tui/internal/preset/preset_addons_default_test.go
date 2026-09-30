@@ -28,7 +28,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := DefaultPreset()
+	p := codexPreset()
 	opts := AgentOpts{
 		Addons: []string{"imap", "telegram", "feishu", "wechat", "whatsapp"},
 	}
@@ -129,7 +129,7 @@ func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := DefaultPreset()
+	p := codexPreset()
 
 	// First creation: only imap.
 	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
@@ -216,7 +216,7 @@ func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
 	data, _ := json.Marshal(legacy)
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
-	p := DefaultPreset()
+	p := codexPreset()
 	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
 		Addons: []string{"feishu"}, // should be ignored — legacy names take precedence
 	}); err != nil {
@@ -266,7 +266,7 @@ func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
 	data, _ := json.Marshal(legacy)
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
-	p := DefaultPreset()
+	p := codexPreset()
 	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{}); err != nil {
 		t.Fatal(err)
 	}

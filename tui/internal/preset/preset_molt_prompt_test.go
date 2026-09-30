@@ -26,7 +26,7 @@ func TestGenerateInitJSONOmitsMoltPrompt(t *testing.T) {
 	}
 
 	opts := DefaultAgentOpts()
-	if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,7 +1,7 @@
 ---
 name: preset-skill-claude
 description: "Use when revising the built-in claude TUI preset."
-version: 3.0.0
+version: 4.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
@@ -16,10 +16,12 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # claude preset revision
 
 Use this child for the named built-in claude preset. claudePreset in
-tui/internal/preset/preset.go:1440 uses canonical provider claude-code and
-the local Claude Code CLI's OAuth login, with model alias opus and no API-key
-env, base_url, web_search override, or LingTai vision capability. The editor
-also offers fable, sonnet, and haiku aliases.
+tui/internal/preset/preset.go uses canonical provider claude-code (shown as
+"claude-p" in the TUI) and the local Claude Code CLI's OAuth login, with model
+alias opus and no API-key env, base_url, web_search override, or LingTai
+vision capability. The editor also offers fable, sonnet, and haiku aliases.
+An Anthropic API key or an Anthropic-compatible endpoint is the separate
+`anthropic` family (`reference/anthropic/SKILL.md`).
 
 ## Template-specific settings
 
@@ -38,10 +40,10 @@ does not establish forwarding through LingTai's CLI adapter.
 
 Start at claudePreset in tui/internal/preset/preset.go. Revise the
 claude-code entries in providerModels in tui/internal/tui/preset_editor.go
-when CLI aliases change. There is intentionally no modelHasVision entry and
-no constructor vision capability; inspect only the model alias picker and
-fixed capability rendering if that contract changes. Follow the CLI-alias
-exemption in tui/CONTRACT.md.
+when CLI aliases change. There is intentionally no constructor vision
+capability, and the editor exposes no reasoning or service-tier row for this
+provider; inspect only the model alias picker and fixed capability rendering
+if that contract changes. Follow the CLI-alias exemption in tui/CONTRACT.md.
 
 ## Reviewed deterministic revision
 

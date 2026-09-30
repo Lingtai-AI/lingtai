@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -27,11 +26,11 @@ func testPresetEditorPreset() preset.Preset {
 		},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider":    "minimax",
-				"model":       "MiniMax-M3",
-				"api_compat":  "openai",
-				"base_url":    "https://api.minimax.io/v1",
-				"api_key_env": "MINIMAX_API_KEY",
+				"provider":    "openai",
+				"model":       "gpt-test",
+				"base_url":    "https://api.example.com/v1",
+				"api_key_env": "EXAMPLE_API_KEY",
+				"wire_api":    "chat_completions",
 			},
 			"capabilities": map[string]interface{}{
 				"file":       map[string]interface{}{},
@@ -110,80 +109,11 @@ func builtinPresetForEditorTest(t *testing.T, name string) preset.Preset {
 	return preset.Preset{}
 }
 
+// TestPresetEditorProviderModelLineupsPinRequestedDefaults pins the only two
+// curated catalogs: the Codex OAuth route and the Claude Code CLI aliases.
+// The openai and anthropic families point at arbitrary endpoints, so their
+// model row is free text.
 func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
-	if got := providerModels["deepseek"][0]; got != "deepseek-v4-pro" {
-		t.Fatalf("deepseek default picker model = %q, want deepseek-v4-pro", got)
-	}
-	// Zhipu carries two spellings of the SAME two generations: uppercase for
-	// the native CN/INTL rows, lowercase for OpenCode Go (which rejects the
-	// uppercase form). There is no standalone GLM-5 in the catalog, so no
-	// `glm-5` alias exists for one — the picker must not invent it.
-	wantZhipuModels := []string{"GLM-5.2", "GLM-5.1", "glm-5.2", "glm-5.1"}
-	if got := providerModels["zhipu"]; !reflect.DeepEqual(got, wantZhipuModels) {
-		t.Fatalf("zhipu provider models = %#v, want %#v", got, wantZhipuModels)
-	}
-	// Native CN MiniMax generations: M2.7 and M2.5, with their highspeed
-	// variants. OpenCode Go keeps the protected pre-PR list below.
-	wantMiniMaxModels := []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"}
-	if got := providerModels["minimax"]; !reflect.DeepEqual(got, wantMiniMaxModels) {
-		t.Fatalf("minimax provider models = %#v, want %#v", got, wantMiniMaxModels)
-	}
-	for _, model := range wantMiniMaxModels {
-		if modelHasVision[model] {
-			t.Fatalf("MiniMax native text model %s must remain text-only", model)
-		}
-	}
-	// Native MiMo curation keeps V2.5 and its text-only Pro variant. The
-	// deprecated V2 entries remain only on the protected OpenCode Go route.
-	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro"}
-	if got := providerModels["mimo"]; !reflect.DeepEqual(got, wantMiMoModels) {
-		t.Fatalf("mimo provider models = %#v, want %#v", got, wantMiMoModels)
-	}
-	if got := providerModels["grok"]; !reflect.DeepEqual(got, []string{"grok-4.5"}) {
-		t.Fatalf("grok provider models = %#v, want [grok-4.5]", got)
-	}
-	// Kimi must NOT gain a provider-global picker: only the exact native
-	// Kimi Code route is curated, while OpenCode Go and Custom stay free text
-	// so a typed off-list gateway or proxy id remains editable.
-	if models := providerModels["kimi"]; models != nil {
-		t.Fatalf("kimi must keep no provider-global model row, got %#v", models)
-	}
-	wantClaudeModels := []string{"opus", "fable", "sonnet", "haiku"}
-	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
-		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
-	}
-	wantNVIDIAModels := []string{
-		"nvidia/nemotron-3-ultra-550b-a55b",
-		"nvidia/nemotron-3-super-120b-a12b",
-		"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-		"deepseek-ai/deepseek-v4-pro-0813",
-		"deepseek-ai/deepseek-v4-flash-0731",
-		"moonshotai/kimi-k3",
-		"minimaxai/minimax-m3",
-		"mistralai/mistral-nemotron",
-		"openai/gpt-oss-20b",
-		"nvidia/llama-3.1-nemotron-ultra-253b-v1",
-	}
-	if got := providerModels["nvidia"]; !reflect.DeepEqual(got, wantNVIDIAModels) {
-		t.Fatalf("nvidia provider models = %#v, want %#v", got, wantNVIDIAModels)
-	}
-	if !modelHasVision["mimo-v2.5"] {
-		t.Fatal("MiMo picker must keep native vision for mimo-v2.5")
-	}
-	for _, model := range []string{"mimo-v2.5-pro"} {
-		if modelHasVision[model] {
-			t.Fatalf("MiMo %s has no verified image route; it must stay text-only (a name is not evidence)", model)
-		}
-	}
-	for _, model := range providerModels["zhipu"] {
-		if modelHasVision[model] {
-			t.Fatalf("Zhipu coding-plan model %s must remain text-only; GLM-4.6V uses the optional manual MCP path", model)
-		}
-	}
-	if modelHasVision["grok-4.5"] {
-		t.Fatal("grok-4.5 has no verified image-input route on OpenCode Go; it must stay text-only")
-	}
-
 	// GPT-6 Astra is documented but account/client rollout is not proven, so
 	// Sol remains the default-first entry. The named GPT-5.6 routes are one
 	// generation's variants.
@@ -193,264 +123,30 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if models := providerModels["codex"]; !reflect.DeepEqual(models, wantCodexModels) {
 		t.Fatalf("codex provider models = %#v, want %#v", models, wantCodexModels)
 	}
-	if _, ok := providerModels["codex-pool"]; ok {
-		t.Fatal("retired codex-pool provider must not have a model catalog")
+	wantClaudeModels := []string{"opus", "fable", "sonnet", "haiku"}
+	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
+		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
 	}
-	for _, model := range wantCodexModels {
-		if !modelHasVision[model] {
-			t.Fatalf("%s should be treated as vision-capable like the documented Codex lineup", model)
+	gotProviders := make([]string, 0, len(providerModels))
+	for provider := range providerModels {
+		gotProviders = append(gotProviders, provider)
+	}
+	sort.Strings(gotProviders)
+	if want := []string{"claude-code", "codex"}; !reflect.DeepEqual(gotProviders, want) {
+		t.Fatalf("curated catalogs = %#v, want only %#v", gotProviders, want)
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		if got := modelOptions(provider); got != nil {
+			t.Fatalf("%s must keep a free-text model row, got catalog %#v", provider, got)
 		}
 	}
-}
-
-func TestPresetEditorModelCatalogsAreExactByRoute(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		label    string
-		want     []string
-		freeText bool
-	}{
-		{
-			name:     "minimax native CN",
-			provider: "minimax",
-			label:    "CN",
-			want:     []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"},
-		},
-		{
-			name:     "minimax OpenCode Go protected list",
-			provider: "minimax",
-			label:    "OpenCode Go",
-			want:     []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
-		},
-		{
-			name:     "minimax INTL remains free text",
-			provider: "minimax",
-			label:    "INTL",
-			freeText: true,
-		},
-		{
-			name:     "mimo native",
-			provider: "mimo",
-			label:    "MiMo",
-			want:     []string{"mimo-v2.5", "mimo-v2.5-pro"},
-		},
-		{
-			name:     "mimo OpenCode Go protected list",
-			provider: "mimo",
-			label:    "OpenCode Go",
-			want:     []string{"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"},
-		},
-		{
-			name:     "mimo Custom remains free text",
-			provider: "mimo",
-			label:    "Custom",
-			freeText: true,
-		},
-		{
-			name:     "kimi native",
-			provider: "kimi",
-			label:    "Kimi Code",
-			want:     []string{"k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"},
-		},
-		{
-			name:     "kimi OpenCode Go remains free text",
-			provider: "kimi",
-			label:    "OpenCode Go",
-			freeText: true,
-		},
-		{
-			name:     "kimi Custom remains free text",
-			provider: "kimi",
-			label:    "Custom",
-			freeText: true,
-		},
-		{
-			name:     "zhipu protected mixed catalog",
-			provider: "zhipu",
-			label:    "OpenCode Go",
-			want:     []string{"GLM-5.2", "GLM-5.1", "glm-5.2", "glm-5.1"},
-		},
-		{
-			name:     "custom remains free text",
-			provider: "custom",
-			freeText: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			baseURL := ""
-			if tc.label != "" {
-				for _, region := range preset.ProviderRegionURLs[tc.provider] {
-					if region.Label == tc.label {
-						baseURL = region.URL
-						break
-					}
-				}
-			}
-			if tc.label != "" && tc.label != "Custom" && baseURL == "" {
-				t.Fatalf("%s route %q has no URL", tc.provider, tc.label)
-			}
-			got := modelOptions(tc.provider, baseURL)
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("modelOptions(%q, %q) = %#v, want %#v", tc.provider, baseURL, got, tc.want)
-			}
-
-			p := builtinPresetForEditorTest(t, tc.provider)
-			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-			m.llmMap()["base_url"] = baseURL
-			model := "typed-route-model"
-			if len(tc.want) > 0 {
-				model = tc.want[0]
-			}
-			m.llmMap()["model"] = model
-			m.cursor = editorFieldOrderIndex(t, feModel)
-			if gotPicker := m.isCyclable(feModel); gotPicker != !tc.freeText {
-				t.Fatalf("isCyclable(feModel) = %v, freeText=%v", gotPicker, tc.freeText)
-			}
-			if strip := m.modelRadioStrip(false, lipgloss.NewStyle()); (strip == "") != tc.freeText {
-				t.Fatalf("modelRadioStrip() empty = %v, freeText=%v; strip=%q", strip == "", tc.freeText, strip)
-			}
-			opened, _ := m.openInline()
-			if tc.freeText {
-				if opened.mode != emInline {
-					t.Fatalf("free-text route Enter mode = %v, want emInline", opened.mode)
-				}
-				opened.applyInline("edited-route-model")
-				if got := asString(opened.llmMap()["model"]); got != "edited-route-model" {
-					t.Fatalf("free-text route model = %q, want edited-route-model", got)
-				}
-			} else if opened.mode != emBrowse {
-				t.Fatalf("picker route Enter mode = %v, want emBrowse", opened.mode)
-			} else if got := asString(opened.llmMap()["model"]); got != tc.want[1] {
-				t.Fatalf("picker route model after Enter = %q, want %q", got, tc.want[1])
-			}
-		})
-	}
-}
-
-func TestPresetEditorRegionChangePreservesModelText(t *testing.T) {
-	tests := []struct {
-		provider string
-		steps    int
-	}{
-		{provider: "minimax", steps: 2}, // CN -> INTL -> OpenCode Go
-		{provider: "mimo", steps: 1},    // native -> OpenCode Go
-		{provider: "kimi", steps: 1},    // native -> OpenCode Go
-	}
-	for _, tc := range tests {
-		t.Run(tc.provider, func(t *testing.T) {
-			regions := preset.ProviderRegionURLs[tc.provider]
-			if len(regions) < 2 || regions[0].URL == "" || regions[1].URL == "" {
-				t.Fatalf("%s route table lacks two non-empty regions: %#v", tc.provider, regions)
-			}
-			m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, tc.provider), "en", nil, "", false)
-			m.llmMap()["base_url"] = regions[0].URL
-			m.llmMap()["model"] = "user-typed-model"
-			m.cursor = editorFieldOrderIndex(t, feBaseURL)
-			for i := 0; i < tc.steps; i++ {
-				m.cycleFocused(+1)
-			}
-			if got := asString(m.llmMap()["model"]); got != "user-typed-model" {
-				t.Fatalf("model after %s region change = %q, want preserved user text", tc.provider, got)
-			}
-		})
-	}
-}
-
-func TestPresetEditorRegionChangeReconcilesKnownRouteModels(t *testing.T) {
-	tests := []struct {
-		name       string
-		provider   string
-		startIndex int
-		direction  int
-		steps      int
-		model      string
-		wantModel  string
-		wantIndex  int
-	}{
-		{
-			name:       "MiniMax native-only model falls back to protected Go default",
-			provider:   "minimax",
-			startIndex: 0,
-			direction:  +1,
-			steps:      2,
-			model:      "MiniMax-M2.5",
-			wantModel:  "MiniMax-M3",
-			wantIndex:  2,
-		},
-		{
-			name:       "MiMo retired Go model falls back to native default",
-			provider:   "mimo",
-			startIndex: 1,
-			direction:  -1,
-			steps:      1,
-			model:      "mimo-v2-omni",
-			wantModel:  "mimo-v2.5",
-			wantIndex:  0,
-		},
-		{
-			name:       "Kimi native id is cleared on free-text Go route",
-			provider:   "kimi",
-			startIndex: 0,
-			direction:  +1,
-			steps:      1,
-			model:      "k3",
-			wantModel:  "",
-			wantIndex:  1,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			regions := preset.ProviderRegionURLs[tc.provider]
-			m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, tc.provider), "en", nil, "", false)
-			m.llmMap()["base_url"] = regions[tc.startIndex].URL
-			m.llmMap()["model"] = tc.model
-			m.cursor = editorFieldOrderIndex(t, feBaseURL)
-			for i := 0; i < tc.steps; i++ {
-				m.cycleFocused(tc.direction)
-			}
-			if got := asString(m.llmMap()["base_url"]); got != regions[tc.wantIndex].URL {
-				t.Fatalf("base_url = %q, want %q", got, regions[tc.wantIndex].URL)
-			}
-			if got := asString(m.llmMap()["model"]); got != tc.wantModel {
-				t.Fatalf("model = %q, want %q", got, tc.wantModel)
-			}
-		})
-	}
-}
-
-// TestModelHasVisionDeclaresEveryShippedModel is the F8 contract for the
-// native/default catalog: a shipped model that is absent from modelHasVision
-// reads as text-only through Go's zero value, which is an omission rather than
-// a declaration. Route-only gateway overrides intentionally have no global
-// modality entries. The map must not accumulate entries for models the
-// two-generation curation rule has retired.
-func TestModelHasVisionDeclaresEveryShippedModel(t *testing.T) {
-	shipped := map[string]bool{}
-	for provider, models := range providerModels {
-		// The Claude Code aliases name CLI tiers, not API model ids; vision
-		// there is a property of the resolved model, not the alias.
-		if strings.HasPrefix(provider, "claude") {
-			continue
-		}
-		// NVIDIA's bounded route-served snapshot does not assert a curated
-		// per-model vision inventory, so this completeness gate does not apply.
-		if provider == "nvidia" {
-			continue
-		}
-		for _, m := range models {
-			shipped[m] = true
-			if _, ok := modelHasVision[m]; !ok {
-				t.Errorf("providerModels[%q] ships %q with no modelHasVision entry — declare it false rather than relying on the zero value", provider, m)
-			}
-		}
-	}
-	for m := range modelHasVision {
-		if !shipped[m] {
-			t.Errorf("modelHasVision documents %q, which no provider ships any more — remove it with the id (SKILL.md, \"When you remove a retired model\")", m)
+	// Each template's default model is the first entry of its catalog.
+	for _, name := range []string{"codex", "claude"} {
+		p := builtinPresetForEditorTest(t, name)
+		llm := p.Manifest["llm"].(map[string]interface{})
+		provider := asString(llm["provider"])
+		if got, want := asString(llm["model"]), providerModels[provider][0]; got != want {
+			t.Fatalf("%s template model = %q, want catalog default %q", name, got, want)
 		}
 	}
 }
@@ -459,34 +155,23 @@ func TestModelHasVisionDeclaresEveryShippedModel(t *testing.T) {
 // regression test for the always-included-capabilities change: there is
 // no longer any editor control (checkbox, provider cycle, or model
 // switch) that can change a capability's provider or other config.
-// Committing a built-in preset with a non-default vision provider must
-// round-trip that provider (and any credential fields alongside it)
-// byte-for-byte, for every built-in that ships one.
+// Committing a built-in preset must round-trip its vision declaration
+// (the provider-inheriting "inherit" route) byte-for-byte.
 func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
-	tests := []struct {
-		name          string
-		current       string
-		currentKeyEnv string
-	}{
-		{name: "gemini", current: "gemini", currentKeyEnv: "GEMINI_API_KEY"},
-		{name: "codex", current: "codex"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := builtinPresetForEditorTest(t, tt.name)
+	for _, name := range []string{"codex", "openai", "anthropic"} {
+		t.Run(name, func(t *testing.T) {
+			p := builtinPresetForEditorTest(t, name)
 			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
+			if asString(m.llmMap()["model"]) == "" {
+				m.llmMap()["model"] = "test-model"
+			}
 
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
 			caps := commit.Preset.Manifest["capabilities"].(map[string]interface{})
 			vision := caps["vision"].(map[string]interface{})
-			if got := vision["provider"]; got != tt.current {
-				t.Fatalf("commit changed vision provider: got %#v, want %q", got, tt.current)
-			}
-			if tt.currentKeyEnv != "" {
-				if got := vision["api_key_env"]; got != tt.currentKeyEnv {
-					t.Fatalf("commit changed vision credential source: got %#v, want %q", got, tt.currentKeyEnv)
-				}
+			if !reflect.DeepEqual(vision, map[string]interface{}{"provider": "inherit"}) {
+				t.Fatalf("commit changed vision declaration: got %#v, want provider inherit", vision)
 			}
 		})
 	}
@@ -557,7 +242,7 @@ func TestPresetEditorShortTerminalDoesNotWrapRowsPastHeight(t *testing.T) {
 // an explicit replacement. The existing key is shown masked, Enter opens a
 // blank paste target, and commit emits APIKeySet only after the user edits.
 func TestPresetEditorAPIKeyEditableWhenAlreadyStored(t *testing.T) {
-	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	keys := map[string]string{"EXAMPLE_API_KEY": "sk-existing-value"}
 	p := testPresetEditorPreset()
 	p.Source = preset.SourceSaved
 	m := NewPresetEditorModel(p, "en", keys, "")
@@ -589,7 +274,7 @@ func TestPresetEditorAPIKeyEditableWhenAlreadyStored(t *testing.T) {
 }
 
 func TestPresetEditorAPIKeyUnchangedWhenStoredKeyUntouched(t *testing.T) {
-	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	keys := map[string]string{"EXAMPLE_API_KEY": "sk-existing-value"}
 	p := testPresetEditorPreset()
 	p.Source = preset.SourceSaved
 	m := NewPresetEditorModel(p, "en", keys, "")
@@ -609,7 +294,7 @@ func TestPresetEditorAPIKeyUnchangedWhenStoredKeyUntouched(t *testing.T) {
 }
 
 func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
-	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	keys := map[string]string{"EXAMPLE_API_KEY": "sk-existing-value"}
 	p := testPresetEditorPreset()
 	p.Source = preset.SourceSaved
 	m := NewPresetEditorModel(p, "en", keys, "")
@@ -643,7 +328,7 @@ func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
 }
 
 func TestPresetEditorTemplateDoesNotInheritStoredProviderKey(t *testing.T) {
-	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	keys := map[string]string{"EXAMPLE_API_KEY": "sk-existing-value"}
 	p := testPresetEditorPreset()
 	p.Source = preset.SourceTemplate
 	m := NewPresetEditorModel(p, "en", keys, "")
@@ -672,7 +357,7 @@ func TestPresetEditorTemplateDoesNotInheritStoredProviderKey(t *testing.T) {
 // presets/saved/. The emitted runtime-only Source must therefore agree with
 // that host write even when the committed name matches a built-in template.
 func TestPresetEditorCommitPathsIdentifySavedSource(t *testing.T) {
-	template := builtinPresetForEditorTest(t, "minimax")
+	template := builtinPresetForEditorTest(t, "codex")
 	template.Source = preset.SourceTemplate
 
 	tests := []struct {
@@ -692,7 +377,7 @@ func TestPresetEditorCommitPathsIdentifySavedSource(t *testing.T) {
 			cmd: func(t *testing.T) tea.Cmd {
 				m := NewPresetEditorModel(template, "en", nil, "")
 				m.mode = emClonePrompt
-				m.cloneNameInput.SetValue("minimax-copy")
+				m.cloneNameInput.SetValue("codex-copy")
 				_, cmd := m.updateClonePrompt(tea.KeyPressMsg{Code: tea.KeyEnter})
 				return cmd
 			},
@@ -780,7 +465,7 @@ func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
 func TestPresetEditorNoCapabilityFieldsInEditorFieldOrder(t *testing.T) {
 	wantOrder := []editorField{
 		feName, feSummary, feTier, feGains, feLoses,
-		feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
+		feProvider, feModel, feServiceTier, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 		feSave,
 	}
 	if !reflect.DeepEqual(editorFieldOrder, wantOrder) {
@@ -820,17 +505,13 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 
 // TestModelSwitchNeverTouchesCapabilities is the regression test for the
 // always-included-capabilities change: switching the LLM model — via
-// direct field edit (applyInline) or via cycling (cycleFocused), including
-// a switch from a vision-capable model to a cataloged text-only one and
-// back — must never add, remove, or modify any capability. The prior
-// syncCapsToModel behavior (dropping vision on text-only models, resetting
-// web_search's provider) is gone: no reachable model-switch path may
-// change a capability.
+// direct field edit (applyInline) or via cycling (cycleFocused) — and
+// switching provider must never add, remove, or modify any capability.
 func TestModelSwitchNeverTouchesCapabilities(t *testing.T) {
 	skillsPaths := []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
 	p := testPresetEditorPreset()
 	p.Manifest["capabilities"] = map[string]interface{}{
-		"web_search": map[string]interface{}{"provider": "zhipu"},
+		"web_search": map[string]interface{}{"provider": "duckduckgo"},
 		"vision":     map[string]interface{}{"provider": "inherit"},
 		"skills":     map[string]interface{}{"paths": skillsPaths},
 		"shell":      map[string]interface{}{"yolo": true},
@@ -838,28 +519,27 @@ func TestModelSwitchNeverTouchesCapabilities(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	before := deepCopyCaps(t, m.working.Manifest["capabilities"])
 
-	// mimo-v2.5-pro is a cataloged text-only model. Direct field edit
-	// (feModel + applyInline) must not touch capabilities even though the
-	// model no longer supports vision.
+	// Direct field edit (feModel + applyInline) must not touch capabilities.
 	m.cursor = editorFieldOrderIndex(t, feModel)
-	m.applyInline("mimo-v2.5-pro")
-	assertCapsUnchanged(t, "applyInline to text-only model", m, before)
+	m.applyInline("some-text-only-model")
+	assertCapsUnchanged(t, "applyInline model edit", m, before)
 
-	// Cycling the model field (feModel + cycleFocused) must not touch
-	// capabilities either, in either direction.
-	m.llmMap()["provider"] = "mimo"
-	m.llmMap()["base_url"] = preset.ProviderRegionURLs["mimo"][0].URL
-	m.llmMap()["model"] = "mimo-v2.5-pro"
-	m.cycleFocused(+1) // mimo-v2.5-pro -> mimo-v2.5 (vision-capable)
-	assertCapsUnchanged(t, "cycleFocused to vision-capable model", m, before)
-	m.cycleFocused(-1) // back to mimo-v2.5-pro
-	assertCapsUnchanged(t, "cycleFocused back to text-only model", m, before)
+	// Cycling a curated model row must not touch capabilities either, in
+	// either direction.
+	m.llmMap()["provider"] = "codex"
+	m.llmMap()["model"] = "gpt-5.6-sol"
+	m.cycleFocused(+1)
+	assertCapsUnchanged(t, "cycleFocused model forward", m, before)
+	m.cycleFocused(-1)
+	assertCapsUnchanged(t, "cycleFocused model back", m, before)
 
 	// Switching provider (which can also reset the model) must not touch
 	// capabilities.
 	m.cursor = editorFieldOrderIndex(t, feProvider)
-	m.cycleFocused(+1)
-	assertCapsUnchanged(t, "provider switch", m, before)
+	for i := 0; i < len(editorProviders); i++ {
+		m.cycleFocused(+1)
+		assertCapsUnchanged(t, "provider switch", m, before)
+	}
 }
 
 func deepCopyCaps(t *testing.T, caps interface{}) map[string]interface{} {
@@ -1044,39 +724,42 @@ func TestPresetEditorCodexThinkingDisplayAndCommitNormalization(t *testing.T) {
 	}
 }
 
-// Providers with a native, non-OpenAI/Anthropic kernel adapter (gemini,
-// claude-code) do not accept manifest.llm.thinking at all: the row stays
-// hidden and a stale value is stripped on commit.
+// claude-code has a CLI-specific effort vocabulary the editor does not
+// expose, and a legacy provider outside the four families has no thinking
+// scope: the row stays hidden and a stale value is stripped on commit.
 func TestPresetEditorThinkingHiddenAndRemovedForNonThinkingProvider(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
-	llm := m.working.Manifest["llm"].(map[string]interface{})
-	llm["provider"] = "gemini"
-	delete(llm, "api_compat")
-	llm["thinking"] = "low"
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
-	view := m.View()
+	for _, provider := range []string{"claude-code", "legacy-vendor"} {
+		t.Run(provider, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+			llm := m.working.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = provider
+			llm["thinking"] = "low"
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+			view := m.View()
 
-	if m.fieldVisible(feThinking) {
-		t.Fatalf("reasoning effort row should be hidden for a non-thinking provider")
-	}
-	if m.isCyclable(feThinking) {
-		t.Fatalf("reasoning effort row should not be cyclable for a non-thinking provider")
-	}
-	if strings.Contains(view, "Reasoning effort") || strings.Contains(view, "llm.thinking") {
-		t.Fatalf("non-thinking editor should not render thinking row; view:\n%s", view)
-	}
+			if m.fieldVisible(feThinking) {
+				t.Fatalf("reasoning effort row should be hidden for a non-thinking provider")
+			}
+			if m.isCyclable(feThinking) {
+				t.Fatalf("reasoning effort row should not be cyclable for a non-thinking provider")
+			}
+			if strings.Contains(view, "Reasoning effort") || strings.Contains(view, "llm.thinking") {
+				t.Fatalf("non-thinking editor should not render thinking row; view:\n%s", view)
+			}
 
-	m.cursor = editorFieldOrderIndex(t, feServiceTier)
-	m.normalizeCursor()
-	if editorFieldOrder[m.cursor] == feThinking {
-		t.Fatalf("cursor landed on hidden thinking field for non-thinking preset")
-	}
+			m.cursor = editorFieldOrderIndex(t, feThinking)
+			m.normalizeCursor()
+			if editorFieldOrder[m.cursor] == feThinking {
+				t.Fatalf("cursor landed on hidden thinking field for non-thinking preset")
+			}
 
-	_, cmd := m.commit()
-	commit := cmd().(PresetEditorCommitMsg)
-	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
-	if _, ok := committedLLM["thinking"]; ok {
-		t.Fatalf("non-thinking commit should remove llm.thinking; got %#v", committedLLM["thinking"])
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+			if _, ok := committedLLM["thinking"]; ok {
+				t.Fatalf("non-thinking commit should remove llm.thinking; got %#v", committedLLM["thinking"])
+			}
+		})
 	}
 }
 
@@ -1084,10 +767,10 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPresetWithThinking(nil, "low"), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
 
-	m.cycleFocused(+1) // codex -> custom in provider picker order.
+	m.cycleFocused(+1) // codex -> claude-code in provider picker order.
 	llm := m.working.Manifest["llm"].(map[string]interface{})
-	if got := llm["provider"]; got != "custom" {
-		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
+	if got := llm["provider"]; got != "claude-code" {
+		t.Fatalf("provider after cycling from codex = %#v, want claude-code", got)
 	}
 	if _, ok := llm["thinking"]; ok {
 		t.Fatalf("provider switch away from codex should remove llm.thinking; got %#v", llm["thinking"])
@@ -1101,11 +784,12 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 	}
 }
 
-func TestPresetEditorServiceTierAvailableForEveryBuiltin(t *testing.T) {
-	wantNames := []string{
-		"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok",
-		"nvidia", "openrouter", "codex", "claude", "custom",
-	}
+// TestPresetEditorServiceTierOnlyForOpenAIAndCodex pins the four templates
+// and the service-tier scope: normal/fast (fast is sent as priority) exists
+// for the openai and codex families only. The anthropic and claude templates
+// never show the row, and a stale value is dropped on commit.
+func TestPresetEditorServiceTierOnlyForOpenAIAndCodex(t *testing.T) {
+	wantNames := []string{"codex", "claude", "openai", "anthropic"}
 	gotNames := make([]string, 0, len(preset.BuiltinPresets()))
 	for _, p := range preset.BuiltinPresets() {
 		gotNames = append(gotNames, p.Name)
@@ -1114,124 +798,107 @@ func TestPresetEditorServiceTierAvailableForEveryBuiltin(t *testing.T) {
 		t.Fatalf("BuiltinPresets() names = %#v, want %#v", gotNames, wantNames)
 	}
 
-	for _, name := range wantNames {
-		t.Run(name, func(t *testing.T) {
-			m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, name), "en", nil, "", false)
-			// The custom template intentionally starts with an empty model; give
-			// this editor behavior test a valid user value before commit.
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"codex", true},
+		{"openai", true},
+		{"anthropic", false},
+		{"claude", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, tc.name), "en", nil, "", false)
+			// The openai/anthropic templates intentionally start with an empty
+			// model; give this editor behavior test a valid user value.
 			if asString(m.llmMap()["model"]) == "" {
 				m.llmMap()["model"] = "test-model"
 			}
 			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 			view := m.View()
 
-			if !m.fieldVisible(feServiceTier) {
-				t.Fatalf("service tier row should be visible for %s", name)
+			if got := m.fieldVisible(feServiceTier); got != tc.want {
+				t.Fatalf("service tier visible = %v for %s, want %v", got, tc.name, tc.want)
 			}
-			if !m.isCyclable(feServiceTier) {
-				t.Fatalf("service tier row should be cyclable for %s", name)
+			if got := m.isCyclable(feServiceTier); got != tc.want {
+				t.Fatalf("service tier cyclable = %v for %s, want %v", got, tc.name, tc.want)
 			}
-			if !strings.Contains(view, i18n.T("preset_editor.field_service_tier")) {
-				t.Fatalf("view missing service tier label for %s; view:\n%s", name, view)
-			}
-			for _, option := range serviceTierOptions {
-				if !strings.Contains(view, option) {
-					t.Fatalf("view missing service tier option %q for %s; view:\n%s", option, name, view)
-				}
+			if got := strings.Contains(view, i18n.T("preset_editor.field_service_tier")); got != tc.want {
+				t.Fatalf("view renders service tier = %v for %s, want %v; view:\n%s", got, tc.name, tc.want, view)
 			}
 
-			// The cursor must be able to reach the shared row directly after the
-			// model row, including free-text and CLI-backed built-ins.
+			if !tc.want {
+				m.llmMap()["service_tier"] = "fast"
+				_, cmd := m.commit()
+				committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+				if _, ok := committed["service_tier"]; ok {
+					t.Fatalf("%s commit must drop service_tier: %#v", tc.name, committed["service_tier"])
+				}
+				return
+			}
+
+			// The cursor reaches the row directly after the model row.
 			m.cursor = editorFieldOrderIndex(t, feModel)
 			m.moveCursor(+1)
 			if editorFieldOrder[m.cursor] != feServiceTier {
-				t.Fatalf("cursor after model = %v for %s, want feServiceTier", editorFieldOrder[m.cursor], name)
+				t.Fatalf("cursor after model = %v for %s, want feServiceTier", editorFieldOrder[m.cursor], tc.name)
 			}
 			if got := m.fieldString(feServiceTier); got != "normal" {
-				t.Fatalf("missing service tier displays %q for %s, want normal", got, name)
-			}
-
-			m.llmMap()["service_tier"] = "normal"
-			_, cmd := m.commit()
-			if cmd == nil {
-				t.Fatalf("explicit normal commit returned nil command for %s", name)
-			}
-			committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
-			if _, ok := committed["service_tier"]; ok {
-				t.Fatalf("explicit normal commit should omit service_tier for %s: %#v", name, committed["service_tier"])
+				t.Fatalf("missing service tier displays %q for %s, want normal", got, tc.name)
 			}
 
 			m.cycleFocused(+1)
 			if got := m.llmMap()["service_tier"]; got != "fast" {
-				t.Fatalf("normal -> fast stored %#v for %s, want string fast", got, name)
+				t.Fatalf("normal -> fast stored %#v for %s, want string fast", got, tc.name)
 			}
-			_, cmd = m.commit()
-			if cmd == nil {
-				t.Fatalf("fast commit returned nil command for %s", name)
-			}
-			committed = cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+			_, cmd := m.commit()
+			committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
 			if got := committed["service_tier"]; got != "fast" {
-				t.Fatalf("fast commit stored %#v for %s, want string fast", got, name)
+				t.Fatalf("fast commit stored %#v for %s, want string fast", got, tc.name)
 			}
 
 			m.cycleFocused(+1)
-			if got := m.fieldString(feServiceTier); got != "normal" {
-				t.Fatalf("fast -> normal displays %q for %s, want normal", got, name)
-			}
 			if _, ok := m.llmMap()["service_tier"]; ok {
-				t.Fatalf("fast -> normal kept service_tier for %s: %#v", name, m.llmMap()["service_tier"])
-			}
-			_, cmd = m.commit()
-			if cmd == nil {
-				t.Fatalf("normal commit returned nil command for %s", name)
-			}
-			committed = cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
-			if _, ok := committed["service_tier"]; ok {
-				t.Fatalf("normal commit should omit service_tier for %s: %#v", name, committed["service_tier"])
+				t.Fatalf("fast -> normal kept service_tier for %s: %#v", tc.name, m.llmMap()["service_tier"])
 			}
 
-			// Unknown legacy/provider-specific values are displayed as normal. Keep
-			// the old non-Codex preservation behavior until the user cycles the row;
-			// Codex retains its existing normalization to omission.
+			// Unknown legacy values display as normal and are dropped on commit.
 			m.llmMap()["service_tier"] = "provider-specific"
 			if got := m.fieldString(feServiceTier); got != "normal" {
-				t.Fatalf("unknown service tier displays %q for %s, want normal", got, name)
+				t.Fatalf("unknown service tier displays %q for %s, want normal", got, tc.name)
 			}
 			_, cmd = m.commit()
-			if cmd == nil {
-				t.Fatalf("unknown service tier commit returned nil command for %s", name)
-			}
 			committed = cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
-			_, saved := committed["service_tier"]
-			if name == "codex" {
-				if saved {
-					t.Fatalf("unknown Codex service tier should be omitted: %#v", committed["service_tier"])
-				}
-			} else if !saved || committed["service_tier"] != "provider-specific" {
-				t.Fatalf("unknown non-Codex service tier should be preserved for %s: %#v", name, committed["service_tier"])
+			if _, ok := committed["service_tier"]; ok {
+				t.Fatalf("unknown service tier should be omitted for %s: %#v", tc.name, committed["service_tier"])
 			}
 		})
 	}
 }
 
-func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
+// Switching between the two service-tier families keeps the selection;
+// switching to a family without service tiers drops it immediately.
+func TestPresetEditorProviderSwitchServiceTierScope(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset("fast"), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
-
-	m.cycleFocused(+1) // codex -> custom in provider picker order.
-	llm := m.working.Manifest["llm"].(map[string]interface{})
-	if got := llm["provider"]; got != "custom" {
-		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
+	m.cycleFocused(-1) // codex -> anthropic in picker order.
+	if got := m.llmMap()["provider"]; got != "anthropic" {
+		t.Fatalf("provider after cycling back from codex = %#v, want anthropic", got)
 	}
-	if got, _ := llm["service_tier"].(string); got != "fast" {
-		t.Fatalf("provider switch should preserve existing service_tier; got %#v", llm["service_tier"])
+	if _, ok := m.llmMap()["service_tier"]; ok {
+		t.Fatalf("anthropic must not keep service_tier; got %#v", m.llmMap()["service_tier"])
 	}
 
+	m = NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset("fast"), "en", nil, "", false)
+	m.switchProvider("codex", "openai")
+	if got, _ := m.llmMap()["service_tier"].(string); got != "fast" {
+		t.Fatalf("codex -> openai should keep fast; got %#v", m.llmMap()["service_tier"])
+	}
+	m.llmMap()["model"] = "gpt-test" // the curated Codex model was cleared
 	_, cmd := m.commit()
-	commit := cmd().(PresetEditorCommitMsg)
-	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
-	if got, _ := committedLLM["service_tier"].(string); got != "fast" {
-		t.Fatalf("non-codex commit after provider switch should preserve service_tier; got %#v", committedLLM["service_tier"])
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if got := committed["service_tier"]; got != "fast" {
+		t.Fatalf("openai commit service_tier = %#v, want fast", got)
 	}
 }
 
@@ -1429,44 +1096,47 @@ func TestPresetEditorSaveNotBlockedByCapabilityState(t *testing.T) {
 
 // TestPresetEditorSaveDoesNotProbeAPIKeyProvider is the regression test
 // for the reported (Jason, 2026-07-23) bug where every provider — Codex
-// and API-key providers such as DeepSeek alike — was rejected by a
-// save-time live-availability check even though the configured provider
-// worked. Save must only run local structural validation
-// (Preset.Validate) and must never make a live network call: base_url
-// points at a closed local port, so any HTTP attempt would fail/hang and
-// this test would time out or fail if commit() still probed.
+// and API-key providers alike — was rejected by a save-time
+// live-availability check even though the configured provider worked.
+// Save must only run local structural validation (Preset.Validate) and must
+// never make a live network call: base_url points at a closed local port, so
+// any HTTP attempt would fail/hang and this test would time out or fail if
+// commit() still probed.
 func TestPresetEditorSaveDoesNotProbeAPIKeyProvider(t *testing.T) {
 	unreachable := "http://127.0.0.1:1" // reserved port; connection refused instantly, never a real server
-	p := preset.Preset{
-		Name:        "deepseek-test",
-		Description: preset.PresetDescription{Summary: "DeepSeek editor test preset"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider":    "deepseek",
-				"model":       "deepseek-v4-pro",
-				"api_compat":  "openai",
-				"base_url":    unreachable,
-				"api_key_env": "DEEPSEEK_API_KEY",
-			},
-		},
-	}
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	m.apiKey = "sk-deepseek-test"
+	for _, provider := range []string{"openai", "anthropic"} {
+		t.Run(provider, func(t *testing.T) {
+			p := preset.Preset{
+				Name:        provider + "-test",
+				Description: preset.PresetDescription{Summary: "API-key editor test preset"},
+				Manifest: map[string]interface{}{
+					"llm": map[string]interface{}{
+						"provider":    provider,
+						"model":       "test-model",
+						"base_url":    unreachable,
+						"api_key_env": "EXAMPLE_API_KEY",
+					},
+				},
+			}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m.apiKey = "sk-test"
 
-	updated, cmd := m.commit()
-	if updated.saveErr != "" {
-		t.Fatalf("save must not be blocked by a pending/failed availability check; saveErr=%q", updated.saveErr)
-	}
-	if cmd == nil {
-		t.Fatalf("expected commit() to return the commit cmd immediately, not a pending validity-check cmd")
-	}
-	msg := cmd()
-	commit, ok := msg.(PresetEditorCommitMsg)
-	if !ok {
-		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must succeed without a live provider probe)", msg)
-	}
-	if commit.Preset.Manifest["llm"].(map[string]interface{})["provider"] != "deepseek" {
-		t.Fatalf("committed preset lost its provider: %#v", commit.Preset.Manifest["llm"])
+			updated, cmd := m.commit()
+			if updated.saveErr != "" {
+				t.Fatalf("save must not be blocked by a pending/failed availability check; saveErr=%q", updated.saveErr)
+			}
+			if cmd == nil {
+				t.Fatalf("expected commit() to return the commit cmd immediately, not a pending validity-check cmd")
+			}
+			msg := cmd()
+			commit, ok := msg.(PresetEditorCommitMsg)
+			if !ok {
+				t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must succeed without a live provider probe)", msg)
+			}
+			if commit.Preset.Manifest["llm"].(map[string]interface{})["provider"] != provider {
+				t.Fatalf("committed preset lost its provider: %#v", commit.Preset.Manifest["llm"])
+			}
+		})
 	}
 }
 
@@ -1516,205 +1186,175 @@ func renderedLineCount(s string) int {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// wire_api (OpenAI wire-format selector for custom+openai presets)
+// wire_api (wire-format selector for the openai family)
 // ─────────────────────────────────────────────────────────────────────────────
 
-func testCustomOpenAIPresetEditorPreset() preset.Preset {
+func testOpenAIPresetEditorPreset() preset.Preset {
 	return preset.Preset{
-		Name:        "custom-openai-test",
-		Description: preset.PresetDescription{Summary: "Custom OpenAI-compat test preset"},
+		Name:        "openai-test",
+		Description: preset.PresetDescription{Summary: "OpenAI-compatible test preset"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider":    "custom",
+				"provider":    "openai",
 				"model":       "gpt-oss-test",
-				"api_compat":  "openai",
 				"base_url":    "https://api.example.com/v1",
-				"api_key_env": "CUSTOM_API_KEY",
+				"api_key_env": "EXAMPLE_API_KEY",
 			},
 			"capabilities": map[string]interface{}{},
 		},
 	}
 }
 
-func TestPresetEditorWireAPIVisibleForCustomOpenAI(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testCustomOpenAIPresetEditorPreset(), "en", nil, "", false)
+func TestPresetEditorWireAPIVisibleForOpenAIFamily(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAIPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
 	if !m.fieldVisible(feWireAPI) {
-		t.Fatalf("wire_api row should be visible for custom+openai provider")
+		t.Fatalf("wire_api row should be visible for the openai family")
 	}
 	if !m.isCyclable(feWireAPI) {
-		t.Fatalf("wire_api should be cyclable for custom+openai provider")
+		t.Fatalf("wire_api should be cyclable for the openai family")
 	}
 	if !strings.Contains(view, "wire_api") {
-		t.Fatalf("custom+openai editor should render wire_api row; view:\n%s", view)
+		t.Fatalf("openai editor should render wire_api row; view:\n%s", view)
+	}
+	for _, option := range wireAPIOptions {
+		if !strings.Contains(view, option) {
+			t.Fatalf("openai editor should render wire option %q; view:\n%s", option, view)
+		}
 	}
 }
 
-func TestPresetEditorWireAPIHiddenOutsideCustomOpenAI(t *testing.T) {
-	// Built-in provider (minimax) with api_compat=openai: must NOT surface.
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
-	view := m.View()
-	if m.fieldVisible(feWireAPI) {
-		t.Fatalf("wire_api row should be hidden for non-custom provider")
-	}
-	if strings.Contains(view, "wire_api") {
-		t.Fatalf("minimax editor should not render wire_api row; view:\n%s", view)
-	}
-
-	// Custom with api_compat=anthropic: must NOT surface.
-	p := testCustomOpenAIPresetEditorPreset()
-	llm := p.Manifest["llm"].(map[string]interface{})
-	llm["api_compat"] = "anthropic"
-	m2 := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	if m2.fieldVisible(feWireAPI) {
-		t.Fatalf("wire_api row should be hidden for custom+anthropic")
-	}
-
-	// Custom with api_compat unset: must NOT surface.
-	p2 := testCustomOpenAIPresetEditorPreset()
-	llm2 := p2.Manifest["llm"].(map[string]interface{})
-	delete(llm2, "api_compat")
-	m3 := NewPresetEditorModelWithBuiltinFlag(p2, "en", nil, "", false)
-	if m3.fieldVisible(feWireAPI) {
-		t.Fatalf("wire_api row should be hidden for custom with no api_compat")
+func TestPresetEditorWireAPIHiddenOutsideOpenAIFamily(t *testing.T) {
+	for _, provider := range []string{"anthropic", "codex", "claude-code", "custom"} {
+		t.Run(provider, func(t *testing.T) {
+			p := testOpenAIPresetEditorPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = provider
+			llm["wire_api"] = "responses"
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+			if m.fieldVisible(feWireAPI) || m.isCyclable(feWireAPI) {
+				t.Fatalf("wire_api row should be hidden for %s", provider)
+			}
+			if strings.Contains(m.View(), "wire_api") {
+				t.Fatalf("%s editor should not render wire_api row", provider)
+			}
+			_, cmd := m.commit()
+			committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+			if _, ok := committed["wire_api"]; ok {
+				t.Fatalf("%s commit must drop wire_api; got %#v", provider, committed["wire_api"])
+			}
+		})
 	}
 }
 
 func TestPresetEditorWireAPICursorSkipsHiddenField(t *testing.T) {
-	// For a non-custom-openai preset, cursor navigation must skip the
-	// hidden feWireAPI and advance from feAPICompat to feBaseURL.
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
-	m.cursor = editorFieldOrderIndex(t, feAPICompat)
+	// For a non-openai preset, cursor navigation must skip the hidden
+	// feWireAPI (and feResponsesTransport) and advance to feBaseURL.
+	p := testOpenAIPresetEditorPreset()
+	p.Manifest["llm"].(map[string]interface{})["provider"] = "anthropic"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feThinking)
 	m.moveCursor(+1)
-	if editorFieldOrder[m.cursor] == feWireAPI {
-		t.Fatalf("cursor landed on hidden wire_api field for non-custom-openai preset")
-	}
 	if editorFieldOrder[m.cursor] != feBaseURL {
-		t.Fatalf("cursor after api_compat = %v, want feBaseURL", editorFieldOrder[m.cursor])
+		t.Fatalf("cursor after thinking = %v, want feBaseURL", editorFieldOrder[m.cursor])
 	}
 }
 
-func TestPresetEditorWireAPIDefaultsToAuto(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testCustomOpenAIPresetEditorPreset(), "en", nil, "", false)
-	if got := m.fieldString(feWireAPI); got != "auto" {
-		t.Fatalf("absent wire_api displays %q, want auto", got)
+func TestPresetEditorWireAPIDefaultsToChatCompletions(t *testing.T) {
+	for _, stored := range []interface{}{nil, "auto", "bogus"} {
+		p := testOpenAIPresetEditorPreset()
+		if stored != nil {
+			p.Manifest["llm"].(map[string]interface{})["wire_api"] = stored
+		}
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		if got := m.fieldString(feWireAPI); got != "chat_completions" {
+			t.Fatalf("wire_api %#v displays %q, want chat_completions", stored, got)
+		}
+		// Commit writes the default explicitly so the manifest never depends
+		// on a kernel-side default (and a legacy "auto" is not carried over).
+		_, cmd := m.commit()
+		committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+		if got := committed["wire_api"]; got != "chat_completions" {
+			t.Fatalf("wire_api %#v committed as %#v, want chat_completions", stored, got)
+		}
+	}
+	if got := asString(builtinPresetForEditorTest(t, "openai").Manifest["llm"].(map[string]interface{})["wire_api"]); got != "chat_completions" {
+		t.Fatalf("openai template wire_api = %q, want chat_completions", got)
 	}
 }
 
 func TestPresetEditorWireAPICycling(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testCustomOpenAIPresetEditorPreset(), "en", nil, "", false)
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAIPresetEditorPreset(), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feWireAPI)
-
-	// auto -> chat_completions
-	m.cycleFocused(+1)
-	if got := m.fieldString(feWireAPI); got != "chat_completions" {
-		t.Fatalf("cycling auto -> +1 = %q, want chat_completions", got)
-	}
-	llm := m.working.Manifest["llm"].(map[string]interface{})
-	if got, _ := llm["wire_api"].(string); got != "chat_completions" {
-		t.Fatalf("wire_api should be persisted as chat_completions, got %#v", llm["wire_api"])
-	}
 
 	// chat_completions -> responses
 	m.cycleFocused(+1)
 	if got := m.fieldString(feWireAPI); got != "responses" {
 		t.Fatalf("cycling chat_completions -> +1 = %q, want responses", got)
 	}
+	if got := m.llmMap()["wire_api"]; got != "responses" {
+		t.Fatalf("wire_api should be persisted as responses, got %#v", got)
+	}
 
-	// responses -> auto (absent)
+	// responses -> chat_completions, written explicitly.
 	m.cycleFocused(+1)
-	if got := m.fieldString(feWireAPI); got != "auto" {
-		t.Fatalf("cycling responses -> +1 = %q, want auto", got)
-	}
-	llm = m.working.Manifest["llm"].(map[string]interface{})
-	if _, ok := llm["wire_api"]; ok {
-		t.Fatalf("cycling to auto should delete wire_api key; got %#v", llm["wire_api"])
+	if got := m.llmMap()["wire_api"]; got != "chat_completions" {
+		t.Fatalf("cycling responses -> +1 stored %#v, want chat_completions", got)
 	}
 
-	// Reverse: auto -> responses
+	// Reverse wraps the two options.
 	m.cycleFocused(-1)
 	if got := m.fieldString(feWireAPI); got != "responses" {
-		t.Fatalf("cycling auto -> -1 = %q, want responses", got)
+		t.Fatalf("cycling chat_completions -> -1 = %q, want responses", got)
 	}
 }
 
-func TestPresetEditorWireAPICommitPersistsAndOmitsAuto(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testCustomOpenAIPresetEditorPreset(), "en", nil, "", false)
+func TestPresetEditorWireAPICommitPersistsSelection(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAIPresetEditorPreset(), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feWireAPI)
 
-	// Select responses and commit — should persist.
-	m.cycleFocused(+1) // auto -> chat_completions
 	m.cycleFocused(+1) // chat_completions -> responses
 	_, cmd := m.commit()
-	commit := cmd().(PresetEditorCommitMsg)
-	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	committedLLM := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
 	if got, _ := committedLLM["wire_api"].(string); got != "responses" {
 		t.Fatalf("committed wire_api=%#v, want responses", committedLLM["wire_api"])
 	}
 
-	// Cycle back to auto and commit — should omit the key entirely.
-	m.cycleFocused(+1) // responses -> auto
+	m.cycleFocused(+1) // responses -> chat_completions
 	_, cmd = m.commit()
-	commit = cmd().(PresetEditorCommitMsg)
-	committedLLM = commit.Preset.Manifest["llm"].(map[string]interface{})
-	if _, ok := committedLLM["wire_api"]; ok {
-		t.Fatalf("committing auto wire_api should omit the key; got %#v", committedLLM["wire_api"])
-	}
-}
-
-func TestPresetEditorWireAPICleanupOnScopeExit(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
-	llm := p.Manifest["llm"].(map[string]interface{})
-	llm["wire_api"] = "responses"
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-
-	// Switch api_compat away from openai while keeping provider=custom.
-	m.cursor = editorFieldOrderIndex(t, feAPICompat)
-	m.cycleFocused(+1) // openai -> anthropic
-	if _, ok := m.llmMap()["wire_api"]; ok {
-		t.Fatalf("leaving openai compat should remove wire_api immediately")
-	}
-	if m.fieldVisible(feWireAPI) {
-		t.Fatalf("wire_api should be hidden after api_compat leaves openai")
-	}
-
-	// Commit must strip the stale wire_api.
-	_, cmd := m.commit()
-	commit := cmd().(PresetEditorCommitMsg)
-	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
-	if _, ok := committedLLM["wire_api"]; ok {
-		t.Fatalf("commit after scope exit should remove wire_api; got %#v", committedLLM["wire_api"])
+	committedLLM = cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if got, _ := committedLLM["wire_api"].(string); got != "chat_completions" {
+		t.Fatalf("committed wire_api=%#v, want chat_completions", committedLLM["wire_api"])
 	}
 }
 
 func TestPresetEditorWireAPICleanupOnProviderSwitch(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
-	llm["wire_api"] = "chat_completions"
+	llm["wire_api"] = "responses"
+	llm["responses_transport"] = "websocket"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 
-	// Switch provider away from custom (custom is last in picker order,
-	// so cycling wraps to the first provider, minimax).
 	m.cursor = editorFieldOrderIndex(t, feProvider)
-	m.cycleFocused(+1)
-	if _, ok := m.llmMap()["wire_api"]; ok {
-		t.Fatalf("leaving the custom provider should remove wire_api immediately")
+	m.cycleFocused(+1) // openai -> anthropic
+	for _, key := range []string{"wire_api", "responses_transport"} {
+		if _, ok := m.llmMap()[key]; ok {
+			t.Fatalf("leaving the openai family should remove %s immediately", key)
+		}
 	}
 
-	// Commit must strip the stale wire_api.
 	_, cmd := m.commit()
-	commit := cmd().(PresetEditorCommitMsg)
-	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	committedLLM := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
 	if _, ok := committedLLM["wire_api"]; ok {
 		t.Fatalf("commit after provider switch should remove wire_api; got %#v", committedLLM["wire_api"])
 	}
 }
 
 func TestPresetEditorWireAPIEnterCyclesAndPreservesLegacyFlags(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["use_responses_api"] = true
 	llm["force_responses"] = true
@@ -1722,47 +1362,33 @@ func TestPresetEditorWireAPIEnterCyclesAndPreservesLegacyFlags(t *testing.T) {
 	m.cursor = editorFieldOrderIndex(t, feWireAPI)
 
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := m.fieldString(feWireAPI); got != "chat_completions" {
-		t.Fatalf("Enter on wire_api = %q, want chat_completions", got)
+	if got := m.fieldString(feWireAPI); got != "responses" {
+		t.Fatalf("Enter on wire_api = %q, want responses", got)
 	}
+	m.cycleFocused(+1) // responses -> chat_completions
 	for _, key := range []string{"use_responses_api", "force_responses"} {
 		if got := m.llmMap()[key]; got != true {
-			t.Fatalf("wire selection must preserve legacy %s=true, got %#v", key, got)
-		}
-	}
-
-	m.cycleFocused(+1) // chat_completions -> responses
-	m.cycleFocused(+1) // responses -> auto (canonical key omitted)
-	if _, ok := m.llmMap()["wire_api"]; ok {
-		t.Fatalf("auto should omit only canonical wire_api")
-	}
-	for _, key := range []string{"use_responses_api", "force_responses"} {
-		if got := m.llmMap()[key]; got != true {
-			t.Fatalf("auto must keep legacy delegation flag %s=true, got %#v", key, got)
+			t.Fatalf("wire selection must preserve unrelated %s=true, got %#v", key, got)
 		}
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// responses_transport (HTTP default / WebSocket v2 opt-in)
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestPresetEditorResponsesTransportVisibleOnlyForCustomResponses(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+func TestPresetEditorResponsesTransportVisibleOnlyForOpenAIResponses(t *testing.T) {
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 
 	if !m.fieldVisible(feResponsesTransport) || !m.isCyclable(feResponsesTransport) {
-		t.Fatal("Responses transport should be visible and cyclable for custom OpenAI Responses")
+		t.Fatal("Responses transport should be visible and cyclable for openai Responses")
 	}
 	if got := m.fieldString(feResponsesTransport); got != "http" {
 		t.Fatalf("absent responses_transport displays %q, want http", got)
 	}
 	view := m.View()
 	if !strings.Contains(view, "Transport") || !strings.Contains(view, "websocket") {
-		t.Fatalf("custom Responses editor did not render the transport choices; view:\n%s", view)
+		t.Fatalf("openai Responses editor did not render the transport choices; view:\n%s", view)
 	}
 
 	delete(llm, "wire_api")
@@ -1773,7 +1399,7 @@ func TestPresetEditorResponsesTransportVisibleOnlyForCustomResponses(t *testing.
 }
 
 func TestPresetEditorResponsesTransportCyclesAndCommits(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
@@ -1810,11 +1436,10 @@ func TestPresetEditorResponsesTransportCleansWhenScopeEnds(t *testing.T) {
 		field editorField
 	}{
 		{name: "provider", field: feProvider},
-		{name: "api compat", field: feAPICompat},
 		{name: "wire api", field: feWireAPI},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := testCustomOpenAIPresetEditorPreset()
+			p := testOpenAIPresetEditorPreset()
 			llm := p.Manifest["llm"].(map[string]interface{})
 			llm["wire_api"] = "responses"
 			llm["responses_transport"] = "websocket"
@@ -1823,16 +1448,16 @@ func TestPresetEditorResponsesTransportCleansWhenScopeEnds(t *testing.T) {
 			m.cursor = editorFieldOrderIndex(t, tc.field)
 			m.cycleFocused(+1)
 			if _, ok := m.llmMap()["responses_transport"]; ok {
-				t.Fatal("leaving custom Responses scope must remove responses_transport")
+				t.Fatal("leaving openai Responses scope must remove responses_transport")
 			}
 			if m.fieldVisible(feResponsesTransport) {
-				t.Fatal("transport must be hidden after leaving custom Responses scope")
+				t.Fatal("transport must be hidden after leaving openai Responses scope")
 			}
 		})
 	}
 
 	// Commit is a second fail-closed boundary for stale or explicit HTTP values.
-	p := testCustomOpenAIPresetEditorPreset()
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	llm["responses_transport"] = "http"
@@ -1844,42 +1469,38 @@ func TestPresetEditorResponsesTransportCleansWhenScopeEnds(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// custom OpenAI Responses reasoning effort
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestPresetEditorCustomResponsesThinkingShowsDefaultAndAllEfforts(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+func TestPresetEditorOpenAIResponsesThinkingShowsDefaultAndAllEfforts(t *testing.T) {
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 
 	if !m.fieldVisible(feThinking) || !m.isCyclable(feThinking) {
-		t.Fatal("thinking should be visible and cyclable for custom OpenAI Responses")
+		t.Fatal("thinking should be visible and cyclable for openai Responses")
 	}
 	if got := m.fieldString(feThinking); got != "default" {
 		t.Fatalf("absent custom thinking displays %q, want default", got)
 	}
-	if got := m.thinkingOptions(); !reflect.DeepEqual(got, customResponsesThinkingOptions) {
-		t.Fatalf("custom thinking options = %#v, want %#v", got, customResponsesThinkingOptions)
+	if got := m.thinkingOptions(); !reflect.DeepEqual(got, levelThinkingOptions) {
+		t.Fatalf("custom thinking options = %#v, want %#v", got, levelThinkingOptions)
 	}
 	view := m.View()
-	for _, effort := range customResponsesThinkingOptions {
+	for _, effort := range levelThinkingOptions {
 		if !strings.Contains(view, effort) {
 			t.Fatalf("custom thinking picker does not render %q; view:\n%s", effort, view)
 		}
 	}
 }
 
-func TestPresetEditorCustomResponsesThinkingCyclesAndOmitsDefault(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+func TestPresetEditorOpenAIResponsesThinkingCyclesAndOmitsDefault(t *testing.T) {
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feThinking)
 
-	for _, want := range customResponsesThinkingOptions[1:] {
+	for _, want := range levelThinkingOptions[1:] {
 		m.cycleFocused(+1)
 		if got := m.fieldString(feThinking); got != want {
 			t.Fatalf("custom thinking cycle = %q, want %q", got, want)
@@ -1905,65 +1526,34 @@ func TestPresetEditorCustomResponsesThinkingCyclesAndOmitsDefault(t *testing.T) 
 	}
 }
 
-// Leaving the thinking-capable scope entirely (api_compat cleared, so the
-// preset declares no OpenAI/Anthropic wire) strips the value and hides the
-// row. Switching wire_api does NOT: manifest.llm.thinking is accepted on
-// either OpenAI wire, so the level survives.
-func TestPresetEditorThinkingCleansWhenCompatScopeEnds(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
-	llm := p.Manifest["llm"].(map[string]interface{})
-	llm["wire_api"] = "responses"
-	llm["thinking"] = "xhigh"
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-
-	m.cursor = editorFieldOrderIndex(t, feAPICompat)
-	m.cycleFocused(-1) // openai -> "" (no declared wire compatibility)
-	if got := m.llmMap()["api_compat"]; got != "" {
-		t.Fatalf("api_compat after cycling = %#v, want empty", got)
-	}
-	if _, ok := m.llmMap()["thinking"]; ok {
-		t.Fatal("leaving the OpenAI/Anthropic compat scope must remove thinking")
-	}
-	if m.fieldVisible(feThinking) {
-		t.Fatal("thinking must be hidden after leaving the compat scope")
-	}
-}
-
 func TestPresetEditorThinkingSurvivesWireAPIChange(t *testing.T) {
-	p := testCustomOpenAIPresetEditorPreset()
+	p := testOpenAIPresetEditorPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["wire_api"] = "responses"
 	llm["thinking"] = "high"
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 
 	m.cursor = editorFieldOrderIndex(t, feWireAPI)
-	m.cycleFocused(+1) // responses -> auto (wraps)
-	if got := m.fieldString(feWireAPI); got != "auto" {
-		t.Fatalf("wire_api after cycling = %q, want auto", got)
+	m.cycleFocused(+1) // responses -> chat_completions
+	if got := m.fieldString(feWireAPI); got != "chat_completions" {
+		t.Fatalf("wire_api after cycling = %q, want chat_completions", got)
 	}
 	if got := m.llmMap()["thinking"]; got != "high" {
 		t.Fatalf("thinking after wire_api change = %#v, want high", got)
 	}
 	if !m.fieldVisible(feThinking) || !m.isCyclable(feThinking) {
-		t.Fatal("thinking must stay visible and cyclable on any OpenAI wire")
+		t.Fatal("thinking must stay visible and cyclable on either openai wire")
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// reasoning effort for every non-Codex thinking-capable provider
-// ─────────────────────────────────────────────────────────────────────────────
-
-// testLevelThinkingPreset builds a minimal preset for a provider that takes
-// the canonical THINKING_LEVELS ladder. A nil thinking omits the field.
-func testLevelThinkingPreset(provider, apiCompat string, thinking interface{}) preset.Preset {
+// testLevelThinkingPreset builds a minimal preset for a provider. A nil
+// thinking omits the field.
+func testLevelThinkingPreset(provider string, thinking interface{}) preset.Preset {
 	llm := map[string]interface{}{
 		"provider":    provider,
 		"model":       "test-model",
 		"base_url":    "https://api.example.com/v1",
 		"api_key_env": "TEST_API_KEY",
-	}
-	if apiCompat != "" {
-		llm["api_compat"] = apiCompat
 	}
 	if thinking != nil {
 		llm["thinking"] = thinking
@@ -1982,24 +1572,19 @@ func TestPresetEditorThinkingRowVisibleForThinkingCapableProviders(t *testing.T)
 	cases := []struct {
 		name      string
 		provider  string
-		compat    string
 		wantShown bool
 	}{
-		{name: "anthropic", provider: "anthropic", compat: "", wantShown: true},
-		{name: "custom anthropic compat", provider: "custom", compat: "anthropic", wantShown: true},
-		{name: "openai", provider: "openai", compat: "", wantShown: true},
-		// No wire_api anywhere in these manifests: the row must not depend on
-		// an explicit Responses selection.
-		{name: "deepseek openai compat", provider: "deepseek", compat: "openai", wantShown: true},
-		{name: "custom openai compat", provider: "custom", compat: "openai", wantShown: true},
-		{name: "minimax native", provider: "minimax", compat: "", wantShown: false},
-		{name: "gemini", provider: "gemini", compat: "", wantShown: false},
-		{name: "claude code", provider: "claude-code", compat: "", wantShown: false},
+		{name: "anthropic", provider: "anthropic", wantShown: true},
+		// No wire_api in this manifest: the row must not depend on an
+		// explicit Responses selection.
+		{name: "openai", provider: "openai", wantShown: true},
+		{name: "claude code", provider: "claude-code", wantShown: false},
+		{name: "legacy custom", provider: "custom", wantShown: false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, tc.compat, nil), "en", nil, "", false)
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, nil), "en", nil, "", false)
 			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 
 			if got := m.fieldVisible(feThinking); got != tc.wantShown {
@@ -2024,10 +1609,10 @@ func TestPresetEditorThinkingRowVisibleForThinkingCapableProviders(t *testing.T)
 			if got := m.thinkingValue(); got != "default" {
 				t.Fatalf("absent thinking displays %q, want default", got)
 			}
-			if got := m.thinkingOptions(); !reflect.DeepEqual(got, customResponsesThinkingOptions) {
-				t.Fatalf("thinking options = %#v, want %#v", got, customResponsesThinkingOptions)
+			if got := m.thinkingOptions(); !reflect.DeepEqual(got, levelThinkingOptions) {
+				t.Fatalf("thinking options = %#v, want %#v", got, levelThinkingOptions)
 			}
-			for _, effort := range customResponsesThinkingOptions {
+			for _, effort := range levelThinkingOptions {
 				if !strings.Contains(view, effort) {
 					t.Fatalf("thinking picker does not render %q; view:\n%s", effort, view)
 				}
@@ -2037,15 +1622,12 @@ func TestPresetEditorThinkingRowVisibleForThinkingCapableProviders(t *testing.T)
 }
 
 func TestPresetEditorLevelThinkingCyclesAndCommits(t *testing.T) {
-	for _, provider := range []struct{ name, compat string }{
-		{name: "anthropic", compat: ""},
-		{name: "deepseek", compat: "openai"},
-	} {
-		t.Run(provider.name, func(t *testing.T) {
-			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(provider.name, provider.compat, nil), "en", nil, "", false)
+	for _, provider := range []string{"anthropic", "openai"} {
+		t.Run(provider, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(provider, nil), "en", nil, "", false)
 			m.cursor = editorFieldOrderIndex(t, feThinking)
 
-			for _, want := range customResponsesThinkingOptions[1:] {
+			for _, want := range levelThinkingOptions[1:] {
 				m.cycleFocused(+1)
 				if got := m.fieldString(feThinking); got != want {
 					t.Fatalf("thinking cycle = %q, want %q", got, want)
@@ -2077,7 +1659,6 @@ func TestPresetEditorLevelThinkingSetPersistsThroughCommit(t *testing.T) {
 	cases := []struct {
 		name      string
 		provider  string
-		compat    string
 		set       string
 		wantSaved bool
 		wantValue string
@@ -2086,13 +1667,13 @@ func TestPresetEditorLevelThinkingSetPersistsThroughCommit(t *testing.T) {
 		{name: "anthropic none", provider: "anthropic", set: "none", wantSaved: true, wantValue: "none"},
 		{name: "anthropic default", provider: "anthropic", set: "default"},
 		{name: "anthropic invalid", provider: "anthropic", set: "turbo"},
-		{name: "openai compat xhigh", provider: "deepseek", compat: "openai", set: "xhigh", wantSaved: true, wantValue: "xhigh"},
-		{name: "openai compat default", provider: "deepseek", compat: "openai", set: "default"},
+		{name: "openai xhigh", provider: "openai", set: "xhigh", wantSaved: true, wantValue: "xhigh"},
+		{name: "openai default", provider: "openai", set: "default"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, tc.compat, "medium"), "en", nil, "", false)
+			m := NewPresetEditorModelWithBuiltinFlag(testLevelThinkingPreset(tc.provider, "medium"), "en", nil, "", false)
 			m.setThinking(tc.set)
 
 			wantDisplay := tc.wantValue
@@ -2147,19 +1728,24 @@ func TestNormalizeThinkingByProviderScope(t *testing.T) {
 			wantSaved: false,
 		},
 		{
-			name:      "openai compat invalid dropped",
-			llm:       map[string]interface{}{"provider": "deepseek", "api_compat": "openai", "thinking": "turbo"},
+			name:      "openai invalid dropped",
+			llm:       map[string]interface{}{"provider": "openai", "thinking": "turbo"},
 			wantSaved: false,
 		},
 		{
-			name:      "openai compat valid kept without wire_api",
-			llm:       map[string]interface{}{"provider": "deepseek", "api_compat": "openai", "thinking": "minimal"},
+			name:      "openai valid kept without wire_api",
+			llm:       map[string]interface{}{"provider": "openai", "thinking": "minimal"},
 			wantSaved: true,
 			wantValue: "minimal",
 		},
 		{
-			name:      "out of scope dropped",
-			llm:       map[string]interface{}{"provider": "gemini", "thinking": "high"},
+			name:      "claude-code dropped",
+			llm:       map[string]interface{}{"provider": "claude-code", "thinking": "high"},
+			wantSaved: false,
+		},
+		{
+			name:      "legacy api_compat no longer grants scope",
+			llm:       map[string]interface{}{"provider": "custom", "api_compat": "openai", "thinking": "high"},
 			wantSaved: false,
 		},
 		{
@@ -2273,7 +1859,8 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 		{name: "claude cli alias", provider: "claude_code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
 		{name: "claude agent sdk", provider: "claude-agent-sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
 		{name: "claude agent sdk alias", provider: "claude_agent_sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
-		{name: "other", provider: "minimax", readOnly: false},
+		{name: "openai", provider: "openai", readOnly: false},
+		{name: "anthropic", provider: "anthropic", readOnly: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2314,640 +1901,232 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 	}
 }
 
-// TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel covers the
-// deepseek preset's three base_url options: cycling DeepSeek API → OpenCode
-// adopts the OpenCode credential env-var, cycling to Custom clears base_url
-// (the free-text sentinel), and Enter on Custom/unknown URLs opens inline
-// edit while Enter on a known region URL stays a no-op.
-func TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
-	llm := m.llmMap()
-	if got, _ := llm["provider"].(string); got != "deepseek" {
-		t.Fatalf("test preset provider = %q, want deepseek", got)
-	}
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+// ─────────────────────────────────────────────────────────────────────────────
+// four provider families: provider cycle, switching, base_url
+// ─────────────────────────────────────────────────────────────────────────────
 
-	// DeepSeek API -> OpenCode: base_url switches and api_key_env follows.
-	m.cycleFocused(+1)
-	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("after first cycle base_url = %q, want OpenCode endpoint", llm["base_url"])
+func TestPresetEditorProviderCycleIsFourFamilies(t *testing.T) {
+	if want := []string{"openai", "anthropic", "codex", "claude-code"}; !reflect.DeepEqual(editorProviders, want) {
+		t.Fatalf("editorProviders = %#v, want %#v", editorProviders, want)
 	}
-	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("after first cycle api_key_env = %q, want OPENCODE_GO_API_KEY", llm["api_key_env"])
-	}
-
-	// OpenCode -> Custom: base_url clears (free-text sentinel); api_key_env
-	// is left untouched (the Custom option declares no env).
-	m.cycleFocused(+1)
-	if got, _ := llm["base_url"].(string); got != "" {
-		t.Fatalf("after second cycle base_url = %q, want empty (Custom sentinel)", llm["base_url"])
-	}
-	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("after second cycle api_key_env = %q, want untouched OPENCODE_GO_API_KEY", llm["api_key_env"])
-	}
-
-	// Cycling back to the first region restores DeepSeek API + its env.
-	m.cycleFocused(-1)
-	m.cycleFocused(-1)
-	if got, _ := llm["base_url"].(string); got != "https://api.deepseek.com" {
-		t.Fatalf("cycling back base_url = %q, want DeepSeek API endpoint", llm["base_url"])
-	}
-	if got, _ := llm["api_key_env"].(string); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("cycling back api_key_env = %q, want DEEPSEEK_API_KEY", llm["api_key_env"])
-	}
-
-	// Enter on a known region URL stays a no-op (←/→ cycle).
-	m2, _ := m.openInline()
-	if m2.mode == emInline {
-		t.Fatal("Enter on a known region URL must not open inline edit")
-	}
-
-	// Enter on the Custom (empty) URL opens free-text inline edit prefilled
-	// with the current value.
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
-	m.cycleFocused(+1) // DeepSeek API -> OpenCode
-	m.cycleFocused(+1) // OpenCode -> Custom (empty)
-	m3, _ := m.openInline()
-	if m3.mode != emInline {
-		t.Fatalf("Enter on Custom (empty base_url) mode = %v, want inline", m3.mode)
-	}
-
-	// Enter on an unknown (free-typed) URL also opens inline edit.
-	m4 := m
-	m4.llmMap()["base_url"] = "https://myhost.example/v1"
-	m5, _ := m4.openInline()
-	if m5.mode != emInline {
-		t.Fatalf("Enter on unknown base_url mode = %v, want inline", m5.mode)
-	}
-}
-
-// TestPresetEditorDeepseekTypedURLCycling covers the free-typed Custom URL
-// path: an off-list endpoint resolves to the Custom row, so cycling away
-// moves to the adjacent real option (never the wrong slot), and Enter still
-// opens inline edit.
-func TestPresetEditorDeepseekTypedURLCycling(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
-	llm := m.llmMap()
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-	// Simulate the user typing a custom endpoint on the Custom row.
-	llm["base_url"] = "https://myhost.example/v1"
-
-	// +1 from Custom lands on DeepSeek API (index 0), not OpenCode (1).
-	m.cycleFocused(+1)
-	if got, _ := llm["base_url"].(string); got != "https://api.deepseek.com" {
-		t.Fatalf("cycle +1 from typed URL base_url = %q, want DeepSeek API endpoint", llm["base_url"])
-	}
-	if got, _ := llm["api_key_env"].(string); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("cycle +1 from typed URL api_key_env = %q, want DEEPSEEK_API_KEY", llm["api_key_env"])
-	}
-
-	// -1 from a fresh typed URL lands on OpenCode Go (index 1).
-	llm["base_url"] = "https://myhost.example/v1"
-	m.cycleFocused(-1)
-	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("cycle -1 from typed URL base_url = %q, want OpenCode endpoint", llm["base_url"])
-	}
-	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("cycle -1 from typed URL api_key_env = %q, want OPENCODE_GO_API_KEY", llm["api_key_env"])
-	}
-
-	// Enter on the typed URL still opens inline edit.
-	llm["base_url"] = "https://myhost.example/v1"
-	m2, _ := m.openInline()
-	if m2.mode != emInline {
-		t.Fatalf("Enter on typed base_url mode = %v, want inline", m2.mode)
-	}
-}
-
-// TestPresetEditorDeepseekBaseURLStripRendering locks the radio strip's
-// three-state selection and the trailing typed-URL echo.
-func TestPresetEditorDeepseekBaseURLStripRendering(t *testing.T) {
-	newModel := func() PresetEditorModel {
-		return NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
-	}
-	style := lipgloss.NewStyle()
-
-	m := newModel()
-	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● OpenCode Go") || strings.Contains(strip, "● Custom") {
-		t.Fatalf("DeepSeek API strip = %q, want only DeepSeek API selected", strip)
-	}
-	m.llmMap()["base_url"] = "https://opencode.ai/zen/go/v1"
-	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● OpenCode Go") || strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● Custom") {
-		t.Fatalf("OpenCode strip = %q, want only OpenCode selected", strip)
-	}
-	m.llmMap()["base_url"] = ""
-	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● Custom") || strings.Contains(strip, "● DeepSeek API") || strings.Contains(strip, "● OpenCode Go") {
-		t.Fatalf("empty Custom strip = %q, want only Custom selected", strip)
-	}
-	m.llmMap()["base_url"] = "https://myhost.example/v1"
-	if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● Custom") || !strings.Contains(strip, "https://myhost.example/v1") {
-		t.Fatalf("typed Custom strip = %q, want Custom selected with endpoint echoed", strip)
-	}
-}
-
-// TestPresetEditorNoCustomRowOffListBaseURLStrip covers the providers that have
-// no Custom row (zhipu, minimax): an off-list base_url must select nothing and
-// echo the raw value, never claim a region the preset does not point at.
-func TestPresetEditorNoCustomRowOffListBaseURLStrip(t *testing.T) {
-	style := lipgloss.NewStyle()
-	for _, provider := range []string{"zhipu", "minimax"} {
-		m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, provider), "en", nil, "", false)
-		m.llmMap()["base_url"] = "https://my-proxy.example/v4"
-		strip := m.baseURLRadioStrip(false, style)
-		if strings.Contains(strip, "● ") {
-			t.Errorf("%s off-list strip = %q, want no filled dot", provider, strip)
-		}
-		if !strings.Contains(strip, "○ CN") || !strings.Contains(strip, "○ INTL") {
-			t.Errorf("%s off-list strip = %q, want both regions hollow", provider, strip)
-		}
-		if !strings.Contains(strip, "https://my-proxy.example/v4") {
-			t.Errorf("%s off-list strip = %q, want the raw endpoint echoed", provider, strip)
-		}
-
-		// The known region URLs still select normally.
-		m.llmMap()["base_url"] = preset.ProviderRegionURLs[provider][1].URL
-		if strip := m.baseURLRadioStrip(false, style); !strings.Contains(strip, "● INTL") {
-			t.Errorf("%s INTL strip = %q, want INTL selected", provider, strip)
-		}
-	}
-}
-
-// TestPresetEditorNoCustomRowOffListCyclingAndEnter checks the other two
-// selectedRegionIndex consumers agree with the strip when nothing is selected:
-// cycling enters the list at its edge (never indexing -1), and Enter opens
-// inline edit so the value is correctable from the editor.
-func TestPresetEditorNoCustomRowOffListCyclingAndEnter(t *testing.T) {
-	regions := preset.ProviderRegionURLs["zhipu"]
-
-	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "zhipu"), "en", nil, "", false)
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
-	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
-	m.cycleFocused(+1)
-	if got := m.fieldString(feBaseURL); got != regions[0].URL {
-		t.Errorf("cycle +1 from off-list = %q, want first region %q", got, regions[0].URL)
-	}
-
-	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
-	m.cycleFocused(-1)
-	if got := m.fieldString(feBaseURL); got != regions[len(regions)-1].URL {
-		t.Errorf("cycle -1 from off-list = %q, want last region %q", got, regions[len(regions)-1].URL)
-	}
-
-	m.llmMap()["base_url"] = "https://my-proxy.example/v4"
-	opened, _ := m.openInline()
-	if opened.mode != emInline {
-		t.Errorf("Enter on off-list base_url mode = %v, want emInline so the value is editable", opened.mode)
-	}
-}
-
-// TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv is the F3 regression:
-// a credential slot adopted from a base_url region must not follow the user
-// into the next provider.
-func TestPresetEditorProviderSwitchResetsAdoptedAPIKeyEnv(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
-	m.cycleFocused(+1) // DeepSeek API -> OpenCode Go
-	if got := asString(m.llmMap()["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("after base_url cycle api_key_env = %q, want OPENCODE_GO_API_KEY", got)
-	}
-
-	// Switch the provider until it lands on each region-table provider and
-	// assert the stale OpenCode slot is gone every time.
-	//
-	// Coverage here is bounded by cycleFocused's `opts` list, NOT by
-	// ProviderRegionURLs: kimi is a region-table provider but is not on the
-	// provider cycle (it is reached only by opening its own template), so it
-	// is deliberately never seen by this loop. See the feProvider comment in
-	// preset_editor.go.
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAIPresetEditorPreset(), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
-	for i := 0; i < 24; i++ {
+	for _, want := range []string{"anthropic", "codex", "claude-code", "openai"} {
 		m.cycleFocused(+1)
-		provider := asString(m.llmMap()["provider"])
-		regions, ok := preset.ProviderRegionURLs[provider]
-		if !ok {
-			continue
-		}
-		// The slot must match the row the switch lands on: the landing row's
-		// own declared Env wins over ProviderDefaultEnv when it has one. Only
-		// grok differs today — its regions[0] is OpenCode Go, so a switch to
-		// grok must adopt OPENCODE_GO_API_KEY, not GROK_API_KEY, or the user
-		// would be pointed at the Go endpoint holding a slot it does not use.
-		want := preset.ProviderDefaultEnv[provider]
-		if len(regions) > 0 && regions[0].Env != "" {
-			want = regions[0].Env
-		}
-		if got := asString(m.llmMap()["api_key_env"]); got != want {
-			t.Fatalf("after switch to %s api_key_env = %q, want %q (the slot declared by the landing base_url row, else the provider default)", provider, got, want)
-		}
-		if got := asString(m.llmMap()["base_url"]); got != regions[0].URL {
-			t.Fatalf("after switch to %s base_url = %q, want %q", provider, got, regions[0].URL)
+		if got := m.fieldString(feProvider); got != want {
+			t.Fatalf("provider cycle = %q, want %q", got, want)
 		}
 	}
-}
-
-// TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv pins the F3a
-// contract: cycling zhipu/minimax between CN and INTL must NOT rewrite
-// api_key_env. The host stamps region-suffixed slots (ZHIPU_INTL_1_API_KEY,
-// MINIMAX_CN_1_API_KEY) for saved presets, and those are separate accounts;
-// the base_url cycle only adopts an Env when the selected option declares one
-// (the OpenCode Go row, which is a genuinely distinct credential), never for
-// a plain CN<->INTL region toggle.
-func TestPresetEditorRegionCyclePreservesRegionSuffixedAPIKeyEnv(t *testing.T) {
-	for _, provider := range []string{"zhipu", "minimax"} {
-		regions := preset.ProviderRegionURLs[provider]
-		if len(regions) < 3 {
-			t.Fatalf("%s needs at least CN/INTL/OpenCode Go for the cycle test", provider)
-		}
-		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
-		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{"provider": provider, "model": "m",
-				"base_url":    regions[1].URL, // INTL
-				"api_key_env": slot}}}
-		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-		llm := m.llmMap()
-		m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-		// INTL -> CN (cycle backwards): slot must survive untouched.
+	for _, want := range []string{"claude-code", "codex", "anthropic", "openai"} {
 		m.cycleFocused(-1)
-		if got := asString(llm["base_url"]); got != regions[0].URL {
-			t.Fatalf("[%s] INTL->CN base_url = %q, want %q", provider, got, regions[0].URL)
+		if got := m.fieldString(feProvider); got != want {
+			t.Fatalf("reverse provider cycle = %q, want %q", got, want)
 		}
-		if got := asString(llm["api_key_env"]); got != slot {
-			t.Fatalf("[%s] INTL->CN api_key_env = %q, want preserved %q", provider, got, slot)
-		}
+	}
 
-		// CN -> INTL (cycle forward): still preserved.
-		m.cycleFocused(+1)
-		if got := asString(llm["base_url"]); got != regions[1].URL {
-			t.Fatalf("[%s] CN->INTL base_url = %q, want %q", provider, got, regions[1].URL)
-		}
-		if got := asString(llm["api_key_env"]); got != slot {
-			t.Fatalf("[%s] CN->INTL api_key_env = %q, want preserved %q", provider, got, slot)
-		}
-
-		// INTL -> OpenCode Go: adopts the OpenCode credential (distinct account).
-		m.cycleFocused(+1)
-		if got := asString(llm["base_url"]); got != regions[2].URL {
-			t.Fatalf("[%s] INTL->OpenCodeGo base_url = %q, want %q", provider, got, regions[2].URL)
-		}
-		if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-			t.Fatalf("[%s] INTL->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", provider, got)
-		}
-
-		// OpenCode Go -> INTL (back the way we came): the adopted slot must
-		// be handed back, not left stuck on the plain region row.
-		m.cycleFocused(-1)
-		if got := asString(llm["base_url"]); got != regions[1].URL {
-			t.Fatalf("[%s] OpenCodeGo->INTL base_url = %q, want %q", provider, got, regions[1].URL)
-		}
-		if got := asString(llm["api_key_env"]); got != slot {
-			t.Fatalf("[%s] OpenCodeGo->INTL api_key_env = %q, want restored %q", provider, got, slot)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	line := findLineContaining(t, m.View(), i18n.T("preset_editor.field_provider"))
+	for _, provider := range editorProviders {
+		if !strings.Contains(line, provider) {
+			t.Fatalf("provider row should list %q; got %q", provider, line)
 		}
 	}
 }
 
-// TestPresetEditorRegionCycleRoundTripRestoresAdoptedSlot is the F2 regression
-// (fable r4): the OpenCode Go row's Env adoption must be a two-way door.
-// zhipu/minimax CN and INTL declare no Env of their own, so before this fix
-// one extra → press past OpenCode Go wrapped around to CN and left the preset
-// pointing at bigmodel.cn while still resolving through OPENCODE_GO_API_KEY —
-// silently destroying the user's ZHIPU_INTL_1_API_KEY with no way back.
-// Walks the FULL round trip, wrap included: CN → INTL → OpenCode Go → CN.
-func TestPresetEditorRegionCycleRoundTripRestoresAdoptedSlot(t *testing.T) {
-	for _, provider := range []string{"zhipu", "minimax"} {
-		regions := preset.ProviderRegionURLs[provider]
-		if len(regions) != 3 {
-			t.Fatalf("%s wants exactly CN/INTL/OpenCode Go for the wrap test, got %d rows", provider, len(regions))
-		}
-		slot := strings.ToUpper(provider) + "_INTL_1_API_KEY"
-		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{"provider": provider, "model": "m",
-				"base_url":    regions[0].URL, // CN
-				"api_key_env": slot}}}
-		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-		llm := m.llmMap()
-		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+// TestPresetEditorProviderSwitchResetsRouteState walks one preset through
+// every family and checks that nothing route-specific leaks across.
+func TestPresetEditorProviderSwitchResetsRouteState(t *testing.T) {
+	p := testCodexPresetEditorPresetWithThinking("fast", "high")
+	p.Manifest["llm"].(map[string]interface{})["codex_auth_path"] = "codex-auth/work.json"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	llm := m.llmMap()
 
-		steps := []struct {
-			label   string
-			wantURL string
-			wantEnv string
-		}{
-			{"CN->INTL", regions[1].URL, slot},
-			{"INTL->OpenCodeGo", regions[2].URL, "OPENCODE_GO_API_KEY"},
-			// The wrap. This is the press the r3 test stopped one short of.
-			{"OpenCodeGo->CN (wrap)", regions[0].URL, slot},
-			// And round again, to prove the memo survives a second lap.
-			{"CN->INTL (lap 2)", regions[1].URL, slot},
-			{"INTL->OpenCodeGo (lap 2)", regions[2].URL, "OPENCODE_GO_API_KEY"},
-			{"OpenCodeGo->CN (wrap, lap 2)", regions[0].URL, slot},
-		}
-		for _, s := range steps {
-			m.cycleFocused(+1)
-			if got := asString(llm["base_url"]); got != s.wantURL {
-				t.Fatalf("[%s] %s base_url = %q, want %q", provider, s.label, got, s.wantURL)
-			}
-			if got := asString(llm["api_key_env"]); got != s.wantEnv {
-				t.Fatalf("[%s] %s api_key_env = %q, want %q", provider, s.label, got, s.wantEnv)
-			}
-		}
+	// codex -> openai: official endpoint, default key slot, curated Codex
+	// model cleared (Save then requires an explicit model), OAuth binding
+	// dropped, explicit Chat Completions wire.
+	m.switchProvider("codex", "openai")
+	if v, ok := llm["base_url"]; !ok || v != nil {
+		t.Fatalf("codex -> openai base_url = %#v (present=%v), want nil (official)", v, ok)
+	}
+	if got := llm["api_key_env"]; got != "OPENAI_API_KEY" {
+		t.Fatalf("codex -> openai api_key_env = %#v, want OPENAI_API_KEY", got)
+	}
+	if got := llm["model"]; got != "" {
+		t.Fatalf("codex -> openai model = %#v, want cleared", got)
+	}
+	if _, ok := llm["codex_auth_path"]; ok {
+		t.Fatalf("codex_auth_path must not survive leaving codex")
+	}
+	if _, ok := llm["thinking"]; ok {
+		t.Fatalf("thinking must restart from the new family's default")
+	}
+	if got := llm["wire_api"]; got != "chat_completions" {
+		t.Fatalf("openai wire_api = %#v, want chat_completions", got)
+	}
+	if _, cmd := m.commit(); cmd != nil {
+		t.Fatalf("an openai preset with no model must not save")
+	}
+
+	// openai -> anthropic keeps the user's endpoint and model; the previous
+	// family's default key slot is swapped for the new family's default.
+	llm["base_url"] = "https://gateway.example.com/anthropic"
+	llm["model"] = "vendor-model"
+	m.switchProvider("openai", "anthropic")
+	if got := llm["base_url"]; got != "https://gateway.example.com/anthropic" {
+		t.Fatalf("openai -> anthropic base_url = %#v, want the user's endpoint", got)
+	}
+	if got := llm["api_key_env"]; got != "ANTHROPIC_API_KEY" {
+		t.Fatalf("openai -> anthropic api_key_env = %#v, want ANTHROPIC_API_KEY", got)
+	}
+	if got := llm["model"]; got != "vendor-model" {
+		t.Fatalf("a typed model must survive openai -> anthropic, got %#v", got)
+	}
+	if _, ok := llm["wire_api"]; ok {
+		t.Fatalf("anthropic must not carry wire_api")
+	}
+
+	// A user-specific key slot survives a switch between API-key families.
+	llm["api_key_env"] = "GATEWAY_1_API_KEY"
+	m.switchProvider("anthropic", "openai")
+	if got := llm["api_key_env"]; got != "GATEWAY_1_API_KEY" {
+		t.Fatalf("user key slot = %#v, want GATEWAY_1_API_KEY kept", got)
+	}
+
+	// -> codex adopts the /codex route and its catalog default.
+	m.switchProvider("openai", "codex")
+	if got := llm["base_url"]; got != "https://chatgpt.com/backend-api/codex" {
+		t.Fatalf("-> codex base_url = %#v, want the Codex route", got)
+	}
+	if got := llm["api_key_env"]; got != "" {
+		t.Fatalf("-> codex api_key_env = %#v, want empty", got)
+	}
+	if got := llm["model"]; got != "gpt-5.6-sol" {
+		t.Fatalf("-> codex model = %#v, want gpt-5.6-sol", got)
+	}
+	if got := llm["thinking"]; got != "xhigh" {
+		t.Fatalf("-> codex thinking = %#v, want xhigh default", got)
+	}
+
+	// -> claude-code drops base_url and adopts its alias catalog.
+	m.switchProvider("codex", "claude-code")
+	if _, ok := llm["base_url"]; ok {
+		t.Fatalf("claude-code must not carry base_url, got %#v", llm["base_url"])
+	}
+	if got := llm["model"]; got != "opus" {
+		t.Fatalf("-> claude-code model = %#v, want opus", got)
+	}
+	if _, ok := llm["service_tier"]; ok {
+		t.Fatalf("claude-code must not carry service_tier")
 	}
 }
 
-// TestPresetEditorRegionCycleFallsBackToProviderDefaultEnv covers the branch
-// where there is nothing memoized to restore: the preset was already sitting
-// on OpenCode Go when the editor opened, so cycling off it has no prior slot
-// to hand back and must fall back to the provider default rather than leaving
-// OPENCODE_GO_API_KEY stuck on a bigmodel.cn / minimaxi.com endpoint.
-func TestPresetEditorRegionCycleFallsBackToProviderDefaultEnv(t *testing.T) {
-	for _, provider := range []string{"zhipu", "minimax"} {
-		regions := preset.ProviderRegionURLs[provider]
-		p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{"provider": provider, "model": "m",
-				"base_url":    regions[2].URL, // OpenCode Go
-				"api_key_env": "OPENCODE_GO_API_KEY"}}}
-		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-		llm := m.llmMap()
-		m.cursor = editorFieldOrderIndex(t, feBaseURL)
+// A saved preset from before the four-family model (e.g. provider "custom"
+// with api_compat) converts to openai with → while keeping its endpoint,
+// model, and key slot; the retired api_compat is dropped on commit.
+func TestPresetEditorLegacyProviderConvertsToOpenAI(t *testing.T) {
+	p := preset.Preset{
+		Name:        "my-relay",
+		Description: preset.PresetDescription{Summary: "legacy relay"},
+		Source:      preset.SourceSaved,
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider":    "custom",
+				"api_compat":  "openai",
+				"wire_api":    "auto",
+				"model":       "relay-model",
+				"base_url":    "https://relay.example.com/v1",
+				"api_key_env": "LLM_API_KEY",
+			},
+		},
+	}
+	m := NewPresetEditorModel(p, "en", nil, "")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	if line := findLineContaining(t, m.View(), i18n.T("preset_editor.field_provider")); !strings.Contains(line, "custom") {
+		t.Fatalf("a legacy provider must stay visible on the provider row; got %q", line)
+	}
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+	m.cycleFocused(+1)
+	llm := m.llmMap()
+	if got := llm["provider"]; got != "openai" {
+		t.Fatalf("legacy provider + → = %#v, want openai", got)
+	}
+	for key, want := range map[string]string{
+		"base_url":    "https://relay.example.com/v1",
+		"model":       "relay-model",
+		"api_key_env": "LLM_API_KEY",
+		"wire_api":    "chat_completions",
+	} {
+		if got := llm[key]; got != want {
+			t.Fatalf("converted %s = %#v, want %q", key, got, want)
+		}
+	}
 
-		m.cycleFocused(+1) // wraps to CN
-		if got := asString(llm["base_url"]); got != regions[0].URL {
-			t.Fatalf("[%s] OpenCodeGo->CN base_url = %q, want %q", provider, got, regions[0].URL)
-		}
-		want := preset.ProviderDefaultEnv[provider]
-		if got := asString(llm["api_key_env"]); got != want {
-			t.Fatalf("[%s] OpenCodeGo->CN api_key_env = %q, want provider default %q", provider, got, want)
-		}
+	_, cmd := m.commit()
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committed["api_compat"]; ok {
+		t.Fatalf("commit must drop the retired api_compat field: %#v", committed)
 	}
 }
 
-// TestPresetEditorRegionCycleRestoresFromOffListBaseURL is the residual edge of
-// F2 (fable r5): zhipu/minimax have no Custom sentinel row, so an off-list
-// base_url makes selectedRegionIndex return -1 and there is no "previous row"
-// to key the restore on. A preset that pairs such a URL with the adopted
-// OPENCODE_GO_API_KEY must still be healed on the first cycle — otherwise the
-// stale slot rides along onto CN and bigmodel.cn resolves through the OpenCode
-// account, which is the exact harm the F2 fix exists to prevent. The rule is
-// therefore about the STATE (is api_key_env a slot some region row declares?),
-// not about the row we came from.
-func TestPresetEditorRegionCycleRestoresFromOffListBaseURL(t *testing.T) {
-	for _, provider := range []string{"zhipu", "minimax"} {
-		regions := preset.ProviderRegionURLs[provider]
-		for _, tc := range []struct {
-			label string
-			memo  string
-			want  string
-		}{
-			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
-			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
-		} {
-			offList := "https://proxy.internal.example/v1"
-			if idx := selectedRegionIndex(regions, offList); idx >= 0 {
-				t.Fatalf("[%s] test setup wrong: %q resolves to region %d", provider, offList, idx)
-			}
-			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-				"llm": map[string]interface{}{"provider": provider, "model": "m",
-					"base_url":    offList,
-					"api_key_env": "OPENCODE_GO_API_KEY"}}}
-			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-			m.regionEnvBeforeAdopt = tc.memo
-			llm := m.llmMap()
-			m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-			m.cycleFocused(+1) // off-list -> CN (enters the list at its edge)
-			if got := asString(llm["base_url"]); got != regions[0].URL {
-				t.Fatalf("[%s/%s] base_url = %q, want CN %q", provider, tc.label, got, regions[0].URL)
-			}
-			if got := asString(llm["api_key_env"]); got != tc.want {
-				t.Fatalf("[%s/%s] api_key_env = %q, want restored %q — the adopted OpenCode slot must not ride along onto CN",
-					provider, tc.label, got, tc.want)
-			}
-			if m.regionEnvBeforeAdopt != "" {
-				t.Fatalf("[%s/%s] memo = %q after restore, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
-			}
-		}
+func TestPresetEditorCommitNeverWritesAPICompat(t *testing.T) {
+	p := testOpenAIPresetEditorPreset()
+	p.Manifest["llm"].(map[string]interface{})["api_compat"] = "openai"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	if strings.Contains(m.View(), "api_compat") {
+		t.Fatalf("editor must not render an api_compat row")
+	}
+	_, cmd := m.commit()
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committed["api_compat"]; ok {
+		t.Fatalf("commit wrote api_compat: %#v", committed)
 	}
 }
 
-// TestPresetEditorOpenCodeGoRowAdoptsAndRestoresForEveryProvider is the F5
-// coverage fix: the five hand-written cycle tests above are all hardcoded to
-// zhipu/minimax, so kimi, mimo and grok shipped an OpenCode Go row whose Env
-// adoption and restore nothing pinned. This one is generic — it reads the
-// table, so a provider that gains a Go row is covered the moment it is added.
-//
-// It walks the single transition that matters, in both directions: the row
-// immediately before OpenCode Go -> OpenCode Go -> back. The expected slot on
-// the way back follows the three documented rules, in order: the row's own
-// declared Env when it has one (deepseek's DeepSeek API row); an untouched
-// api_key_env on the Custom sentinel (pinned by
-// TestPresetEditorDeepseekRegionCycleRoundTrip — a free-typed endpoint keeps
-// whatever slot it actually uses); otherwise the memoized pre-adoption slot
-// (every Env-less native row).
-func TestPresetEditorOpenCodeGoRowAdoptsAndRestoresForEveryProvider(t *testing.T) {
-	covered := 0
-	for _, provider := range sortedRegionProviders() {
-		regions := preset.ProviderRegionURLs[provider]
-		ocg := -1
-		for i, r := range regions {
-			if r.URL == openCodeGoURL {
-				ocg = i
-				break
-			}
-		}
-		if ocg < 0 {
-			continue
-		}
-		covered++
+func TestPresetEditorBaseURLIsFreeTextForEveryFamily(t *testing.T) {
+	for _, provider := range editorProviders {
 		t.Run(provider, func(t *testing.T) {
-			from := (ocg - 1 + len(regions)) % len(regions)
-			// A host-stamped private slot, the thing the restore exists to
-			// hand back. Env-less rows carry one; an Env row overrides it.
-			slot := strings.ToUpper(provider) + "_7_API_KEY"
-			startEnv := regions[from].Env
-			if startEnv == "" {
-				startEnv = slot
-			}
-			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-				"llm": map[string]interface{}{"provider": provider, "model": "m",
-					"base_url":    regions[from].URL,
-					"api_key_env": startEnv}}}
+			p := testOpenAIPresetEditorPreset()
+			p.Manifest["llm"].(map[string]interface{})["provider"] = provider
 			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-			llm := m.llmMap()
 			m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-			m.cycleFocused(+1) // -> OpenCode Go
-			if got := asString(llm["base_url"]); got != openCodeGoURL {
-				t.Fatalf("[%s] +1 from %q base_url = %q, want the OpenCode Go row", provider, regions[from].Label, got)
+			if m.isCyclable(feBaseURL) {
+				t.Fatalf("base_url must not be an enum for %s", provider)
 			}
-			if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-				t.Fatalf("[%s] on OpenCode Go api_key_env = %q, want OPENCODE_GO_API_KEY", provider, got)
+			before := m.llmMap()["base_url"]
+			m.cycleFocused(+1)
+			if got := m.llmMap()["base_url"]; got != before {
+				t.Fatalf("←/→ on base_url changed it for %s: %#v -> %#v", provider, before, got)
 			}
-
-			wantBack := startEnv
-			switch {
-			case regions[from].Env != "":
-				wantBack = regions[from].Env
-			case regions[from].URL == "":
-				// Custom sentinel: documented to keep whatever slot is set.
-				wantBack = "OPENCODE_GO_API_KEY"
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if m.mode != emInline {
+				t.Fatalf("Enter on base_url must open inline edit for %s", provider)
 			}
-			m.cycleFocused(-1) // -> back where we came from
-			if got := asString(llm["base_url"]); got != regions[from].URL {
-				t.Fatalf("[%s] -1 base_url = %q, want %q", provider, got, regions[from].URL)
-			}
-			if got := asString(llm["api_key_env"]); got != wantBack {
-				t.Fatalf("[%s] -1 api_key_env = %q, want %q on the %q row",
-					provider, got, wantBack, regions[from].Label)
+			m.input.SetValue("http://127.0.0.1:8080/v1")
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if got := m.llmMap()["base_url"]; got != "http://127.0.0.1:8080/v1" {
+				t.Fatalf("typed base_url = %#v for %s", got, provider)
 			}
 		})
 	}
-	// Guards against the loop silently covering nothing if the table shape
-	// or the OpenCode Go URL ever changes.
-	if covered < 6 {
-		t.Fatalf("only %d providers offer an OpenCode Go row; want at least 6 (deepseek, zhipu, minimax, kimi, mimo, grok)", covered)
-	}
 }
 
-// sortedRegionProviders makes the generic table-driven tests deterministic —
-// Go map iteration order is randomized per run.
-func sortedRegionProviders() []string {
-	names := make([]string, 0, len(preset.ProviderRegionURLs))
-	for name := range preset.ProviderRegionURLs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// F1-r6 mirror: an off-list base_url paired with the adopted slot, then
-// cycle -1 (off-list -> OpenCode Go) and +1 (OpenCode Go -> CN wrap). The
-// memo write must NOT capture OPENCODE_GO_API_KEY itself on the way onto
-// the Env row (cur is already region-declared, so the write is skipped), and
-// the +1 restore must still hand back the original slot or provider default.
-func TestPresetEditorRegionCycleRestoresFromOffListBaseURLMirror(t *testing.T) {
-	for _, provider := range []string{"zhipu", "minimax"} {
-		regions := preset.ProviderRegionURLs[provider]
-		for _, tc := range []struct {
-			label string
-			memo  string
-			want  string
-		}{
-			{"no memo -> provider default", "", preset.ProviderDefaultEnv[provider]},
-			{"memoized slot", strings.ToUpper(provider) + "_INTL_1_API_KEY", strings.ToUpper(provider) + "_INTL_1_API_KEY"},
-		} {
-			offList := "https://proxy.internal.example/v1"
-			p := preset.Preset{Name: "my-" + provider, Source: preset.SourceSaved, Manifest: map[string]interface{}{
-				"llm": map[string]interface{}{"provider": provider, "model": "m",
-					"base_url":    offList,
-					"api_key_env": "OPENCODE_GO_API_KEY"}}}
+func TestPresetEditorEmptyBaseURLShowsOfficialDefault(t *testing.T) {
+	for provider, want := range map[string]string{
+		"openai":    preset.OpenAIDefaultBaseURL,
+		"anthropic": preset.AnthropicDefaultBaseURL,
+	} {
+		t.Run(provider, func(t *testing.T) {
+			p := testOpenAIPresetEditorPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = provider
+			llm["base_url"] = nil
 			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-			m.regionEnvBeforeAdopt = tc.memo
-			llm := m.llmMap()
-			m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-			m.cycleFocused(-1) // off-list -> OpenCode Go (Env row)
-			if got := asString(llm["base_url"]); got != regions[2].URL {
-				t.Fatalf("[%s/%s] base_url after -1 = %q, want OpenCode Go %q", provider, tc.label, got, regions[2].URL)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+			line := findLineContaining(t, m.View(), i18n.T("preset_editor.field_base_url"))
+			if !strings.Contains(line, want) {
+				t.Fatalf("empty %s base_url row should name the official endpoint %q; got %q", provider, want, line)
 			}
-			if m.regionEnvBeforeAdopt != tc.memo {
-				t.Fatalf("[%s/%s] memo = %q after -1, want %q -- the adopted slot must not memoize itself",
-					provider, tc.label, m.regionEnvBeforeAdopt, tc.memo)
-			}
-
-			m.cycleFocused(+1) // OpenCode Go -> CN (wrap)
-			if got := asString(llm["base_url"]); got != regions[0].URL {
-				t.Fatalf("[%s/%s] base_url after +1 = %q, want CN %q", provider, tc.label, got, regions[0].URL)
-			}
-			if got := asString(llm["api_key_env"]); got != tc.want {
-				t.Fatalf("[%s/%s] api_key_env after +1 = %q, want %q -- the OpenCode slot must not survive onto CN",
-					provider, tc.label, got, tc.want)
-			}
-			if m.regionEnvBeforeAdopt != "" {
-				t.Fatalf("[%s/%s] memo = %q after +1, want cleared", provider, tc.label, m.regionEnvBeforeAdopt)
-			}
-		}
-	}
-}
-
-// TestPresetEditorProviderSwitchClearsAdoptedSlotMemo pins the other half of the
-// same rule: the memo records a slot taken from THIS provider's region cycle, so
-// switching providers must drop it along with base_url and api_key_env. Left
-// behind, it could be handed back onto a provider it never belonged to.
-func TestPresetEditorProviderSwitchClearsAdoptedSlotMemo(t *testing.T) {
-	regions := preset.ProviderRegionURLs["zhipu"]
-	p := preset.Preset{Name: "my-zhipu", Source: preset.SourceSaved, Manifest: map[string]interface{}{
-		"llm": map[string]interface{}{"provider": "zhipu", "model": "m",
-			"base_url":    regions[2].URL, // OpenCode Go
-			"api_key_env": "OPENCODE_GO_API_KEY"}}}
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	m.regionEnvBeforeAdopt = "ZHIPU_INTL_1_API_KEY"
-	m.cursor = editorFieldOrderIndex(t, feProvider)
-
-	m.cycleFocused(+1)
-	if got := asString(m.llmMap()["provider"]); got == "zhipu" {
-		t.Fatal("provider cycle did not move off zhipu")
-	}
-	if m.regionEnvBeforeAdopt != "" {
-		t.Fatalf("memo = %q after provider switch, want cleared", m.regionEnvBeforeAdopt)
-	}
-}
-
-// TestPresetEditorDeepseekRegionCycleRoundTrip is the deepseek half of the F2
-// contract. deepseek's table has a Custom sentinel instead of a second real
-// region, and its first row declares DEEPSEEK_API_KEY, so the full lap is
-// DeepSeek API → OpenCode Go → Custom → DeepSeek API. Landing on Custom must
-// leave api_key_env alone (documented, intended: the user's free-typed
-// endpoint keeps whatever slot it actually uses), and the lap must end back
-// on DEEPSEEK_API_KEY.
-func TestPresetEditorDeepseekRegionCycleRoundTrip(t *testing.T) {
-	regions := preset.ProviderRegionURLs["deepseek"]
-	if len(regions) != 3 || regions[2].URL != "" {
-		t.Fatalf("deepseek table changed shape: %#v", regions)
-	}
-	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
-	llm := m.llmMap()
-	m.cursor = editorFieldOrderIndex(t, feBaseURL)
-
-	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("template api_key_env = %q, want DEEPSEEK_API_KEY", got)
-	}
-
-	m.cycleFocused(+1) // DeepSeek API -> OpenCode Go
-	if got := asString(llm["base_url"]); got != regions[1].URL {
-		t.Fatalf("->OpenCodeGo base_url = %q, want %q", got, regions[1].URL)
-	}
-	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", got)
-	}
-
-	m.cycleFocused(+1) // OpenCode Go -> Custom (sentinel: clears base_url, keeps the slot)
-	if got := asString(llm["base_url"]); got != "" {
-		t.Fatalf("->Custom base_url = %q, want cleared", got)
-	}
-	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("->Custom api_key_env = %q, want untouched OPENCODE_GO_API_KEY", got)
-	}
-
-	m.cycleFocused(+1) // Custom -> DeepSeek API (wrap): row declares its own slot
-	if got := asString(llm["base_url"]); got != regions[0].URL {
-		t.Fatalf("->DeepSeek API base_url = %q, want %q", got, regions[0].URL)
-	}
-	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("round trip ended on api_key_env = %q, want DEEPSEEK_API_KEY", got)
-	}
-
-	// And the reverse lap, so neither direction is a one-way door.
-	m.cycleFocused(-1) // DeepSeek API -> Custom
-	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("reverse ->Custom api_key_env = %q, want untouched DEEPSEEK_API_KEY", got)
-	}
-	m.cycleFocused(-1) // Custom -> OpenCode Go
-	if got := asString(llm["api_key_env"]); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("reverse ->OpenCodeGo api_key_env = %q, want OPENCODE_GO_API_KEY", got)
-	}
-	m.cycleFocused(-1) // OpenCode Go -> DeepSeek API
-	if got := asString(llm["api_key_env"]); got != "DEEPSEEK_API_KEY" {
-		t.Fatalf("reverse ->DeepSeek API api_key_env = %q, want DEEPSEEK_API_KEY", got)
+		})
 	}
 }

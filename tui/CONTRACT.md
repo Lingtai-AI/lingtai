@@ -14,7 +14,6 @@ related_files:
   - tui/purge_common.go
   - tui/internal/tui/layout.go
   - tui/internal/tui/props.go
-  - tui/internal/tui/setup.go
   - tui/internal/tui/preset_library.go
   - tui/internal/tui/preset_editor.go
   - tui/internal/tui/SKILL.md
@@ -24,19 +23,12 @@ related_files:
   - tui/internal/headless/preset_revision.go
   - tui/internal/headless/preset_revision_test.go
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/minimax/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/zhipu/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/mimo/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/deepseek/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/gemini/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/grok/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/subs-pool/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/openai/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/anthropic/SKILL.md
+  - tui/internal/tui/doctor.go
+  - tui/internal/tui/login.go
   - tui/main.go
   - tui/main_preset_revision_test.go
   - tui/internal/config/global_test.go
@@ -171,20 +163,54 @@ appears as the degraded state below.
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
    (R1), runtime/version (R1).
 
+## Provider families
+
+The TUI ships exactly four provider families, matching the providers the
+kernel accepts, with one built-in template each (`BuiltinPresets()`, in picker
+order): `codex` (ChatGPT OAuth; the first-run default), `claude` (provider
+`claude-code`, the local Claude Code CLI login), `openai` (any
+OpenAI-compatible endpoint), and `anthropic` (any Anthropic
+Messages-compatible endpoint). There are no per-vendor templates, region
+tables, or vendor-named providers; another vendor, subscription, gateway, or
+account pool (for example sub2api / subs-pool) is reached through `openai` or
+`anthropic` with that endpoint as `base_url`.
+
+- `base_url` is optional free text for every family. Empty means the official
+  endpoint for `openai` (`https://api.openai.com/v1`) and `anthropic`
+  (`https://api.anthropic.com`); `codex` keeps its `/backend-api/codex` route
+  and `claude-code` has none.
+- `api_key_env` defaults to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`; saving an
+  edited template stamps a fresh `<PROVIDER>_<N>_API_KEY` slot. `codex` and
+  `claude-code` carry no key slot.
+- `wire_api` exists only on `openai`: `chat_completions` (the default, always
+  written explicitly) or `responses`; `responses_transport` (`http` omitted
+  default, or `websocket`) only on the Responses wire.
+- The TUI never writes the retired `manifest.llm.api_compat` field: the
+  editor drops it on commit and `init.json` generation drops it from the
+  copied llm block. Existing files are not rewritten just to remove it.
+- Template capabilities never name a vendor: `web_search` uses DuckDuckGo and
+  `vision` inherits the agent's own provider (`codex`, `openai`,
+  `anthropic`); the `claude` template declares neither.
+- `/doctor` probes by family (openai: Bearer `GET {base_url}/models`;
+  anthropic: `x-api-key` + `anthropic-version` `GET {base_url}/v1/models`;
+  codex/claude-code: login-owned, no network call) and reports any other
+  provider as unsupported. Setup → Credentials derives an API key's endpoint
+  from the openai/anthropic preset that declares its env var and never
+  reports a stored key as failed merely because no endpoint is known.
+
 ## Preset editor service tier
 
-The preset editor exposes the same service-tier row for every provider in the
-12-name `BuiltinPresets()` catalog, including Codex, API-key providers,
-CLI-backed Claude, and Custom. Its vocabulary is exactly `normal | fast` and
-the row is always visible, cyclable, and cursor-reachable; the TUI does not
-probe provider support or reject either choice. Lower layers may ignore an
-unsupported tier.
+The preset editor exposes the service-tier row for the two families that
+accept it — `openai` and `codex` — and hides it for `anthropic` and
+`claude-code`. Its vocabulary is exactly `normal | fast` (the lower layer sends
+`fast` as `priority`); where shown, the row is cyclable and cursor-reachable,
+and the TUI does not probe endpoint support.
 
 Missing or `normal` `manifest.llm.service_tier` displays as `normal` and is
 omitted from the committed manifest. Selecting `fast` commits the string
-`"fast"` for every provider. Unknown legacy values display as `normal`; they
-retain the existing non-Codex preservation behavior unless the user cycles the
-row, while Codex continues to normalize unknown values to omission.
+`"fast"`. Unknown legacy values display as `normal` and are omitted on commit;
+a stale value on a family without service tiers is dropped on commit (and on a
+provider switch into such a family).
 
 ## Model list curation
 
@@ -196,52 +222,34 @@ only ever grows rots into one.
 **Two-generation rule.** For every model family, the TUI ships only the
 **latest two generations**. This binds:
 
-- `providerModels` (`tui/internal/tui/preset_editor.go`) — the canonical
-  native/default-route catalog for the ←/→ picker on the editor's model row;
-  every picker/display/free-text decision uses the exact
-  `modelOptions(provider, base_url)` lookup. A route override is present only
-  when evidence pins that exact endpoint; an uncurated route stays free text.
-  The protected OpenCode Go overrides for MiniMax and MiMo preserve their
-  pre-PR catalogs and are compatibility behavior, not native curation. When a
-  user changes routes, a known curated id that the destination picker cannot
-  serve falls back to that destination's first preserved option; arbitrary
-  off-list text is never rewritten. Kimi's free-text Go row instead clears a
-  known native Kimi id so the existing non-empty-model save gate requires an
-  explicit Go id.
+- `providerModels` (`tui/internal/tui/preset_editor.go`) — the curated
+  catalog for the ←/→ picker on the editor's model row, looked up by
+  `modelOptions(provider)`. Only the two subscription routes carry one: the
+  Codex OAuth catalog and the Claude Code CLI aliases. The `openai` and
+  `anthropic` families point at arbitrary endpoints, so their model row is
+  free text and their templates ship an empty model that Save requires the
+  user to fill in. When the user switches provider, a curated id the new
+  family cannot serve falls back to that family's first catalog entry, or is
+  cleared for a free-text family; arbitrary user text is never rewritten;
 - the default `model` of every built-in preset constructor
   (`tui/internal/preset/preset.go`), which for a picker-bearing provider must
-  itself be one of that provider's shipped ids;
-- `modelHasVision` (`tui/internal/tui/preset_editor.go`), which carries one
-  entry per id in the native/default `providerModels` catalog and no entry for
-  a retired one. Route-only override ids intentionally carry no global
-  modality claim: native vision metadata is not inferred for OpenCode Go.
-  bijection is what `TestModelHasVisionDeclaresEveryShippedModel` enforces,
-  minus two deliberate exemptions it names: `nvidia` (a gateway catalog whose
-  per-vendor vision facts we do not verify) and the `claude*` CLI-alias
-  spellings. The exemptions apply only to the *requirement* to carry an
-  entry — the reverse direction is not exempt: a `modelHasVision` entry for
-  an id no picker ships still fails the test. Adding an exemption is a change
-  to that test, not a silent omission;
-- Kimi has no provider-global `providerModels` entry, so its OpenCode Go and
-  Custom rows remain free text; only the exact native Kimi Code route uses a
-  route override picker. Gemini, OpenRouter, and Custom remain free text on
-  their uncurated routes. Their defaults are still explicit current values
-  (`k3`, `gemini-3.8-flash`, `z-ai/glm-5.3`, and Custom's empty model), but
-  route-only IDs do not enter the global vision bijection. These boundaries
-  preserve typed off-list model ids and are pinned by focused editor tests.
+  itself be the first of that provider's shipped ids.
+
+The TUI makes no per-model vision claim: templates declare `vision: inherit`
+and whether the configured model accepts images is a runtime fact.
 
 Reading of the rule:
 
 | Term | Meaning |
 |---|---|
-| family | one vendor's model line — `MiniMax-M*`, `GLM-*`, `mimo-v*`, `deepseek-v*`, `gpt-5.*`, `kimi-k*` |
-| generation | the version step within the family — `M2.7` vs `M2.5`; `GLM-5.2` vs `GLM-5.1`; `gpt-6` vs `gpt-5.6` |
-| **not** a generation | a variant inside one generation — `-highspeed`, `-pro`, `-flash`, `-mini`, `-Air`, the `gpt-5.6-sol/-terra/-luna` routes, or the same generation respelled for another endpoint (`GLM-5.2` / `glm-5.2`). All variants of a kept native generation stay; a protected gateway override is separately locked to its pre-PR list. |
-| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`), and gateway catalogs that list one current id per vendor (`nvidia`). The rule still applies per family inside such a list. Route-only overrides and uncurated free-text rows are outside the global `providerModels`/`modelHasVision` binding — see the fourth clause above. |
+| family | one model line in a curated catalog — the Codex `gpt-*` line |
+| generation | the version step within the family — `gpt-6` vs `gpt-5.6` |
+| **not** a generation | a variant inside one generation — `-mini`, the `gpt-5.6-sol/-terra/-luna` routes. All variants of a kept generation stay. |
+| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`). Free-text rows (`openai`, `anthropic`) have no catalog to curate. |
 
 **Standing obligation.** Adding a new generation is the same change that
-removes the third-newest one — from `providerModels`, from `modelHasVision`,
-and from any provider manual under
+removes the third-newest one — from `providerModels` and from any provider
+manual under
 `tui/internal/preset/skills/lingtai-preset-skill/reference/` that enumerates
 the lineup. Never rewrite `presets/saved/`: a user pinned to a retired id
 keeps working, the picker just stops offering it.
@@ -274,18 +282,19 @@ retirement cannot remove a referenced model.
 Named built-in preset revision guidance is one direct child per
 `BuiltinPresets()` name under
 `tui/internal/preset/skills/lingtai-preset-skill/reference/<name>/SKILL.md`.
-Those 12 children own provider-specific authoritative model lookup, gateway
-versus CLI/OAuth/catalog distinctions, exact TUI surfaces, and the reviewed
-revision procedure. The only other top-level child is the non-template
-external-endpoint recipe `reference/subs-pool/SKILL.md`: multi-account Codex
-pooling is not built into the TUI (there is no `codex-pool` template, provider,
-or pool file) and is reached through the external subs-pool proxy as an
-ordinary `custom` OpenAI-compatible Responses preset. The operation axis remains the five shared children:
+Those 4 family children own family-specific endpoint and credential facts,
+the Codex/CLI catalog distinctions, exact TUI surfaces, and the reviewed
+revision procedure. Multi-account pooling is not built into the TUI (there is
+no `codex-pool` template, provider, or pool file): the `openai` child owns the
+recipe for reaching an external pool such as sub2api / subs-pool as an
+`openai` Responses preset. The operation axis remains the five shared children:
 saved-presets, endpoint-capabilities, availability-save-gate,
 activation-session-refresh, and troubleshooting-migration. The deterministic
 production CLI adapter and pure engine remain shared at
 `tui/internal/headless/preset_revision.go` and
 `tui/internal/preset/revision.go`; they are not a sixth operation child.
+`wire_api` / `responses_transport` revisions are eligible only for `openai`
+Responses targets.
 
 Requested and observed Responses service-tier vocabularies are distinct;
 ordinary `service_tier` paths are request-side, and service-tier and reasoning

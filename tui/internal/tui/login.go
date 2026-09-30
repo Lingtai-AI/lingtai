@@ -32,6 +32,11 @@ const (
 	loginValid
 	loginInvalid
 	loginError
+	// loginUnverified: the key is stored but could not be checked — no
+	// openai/anthropic preset uses it (so there is no endpoint to ask), or
+	// the endpoint answered without a model listing. Neither valid nor
+	// invalid.
+	loginUnverified
 )
 
 type loginEntry struct {
@@ -40,8 +45,14 @@ type loginEntry struct {
 	Status   loginStatus
 	Detail   string // error detail
 	IsOAuth  bool
-	BaseURL  string
-	Key      string // raw key or access token
+	// Family is the provider family ("openai" / "anthropic") an API-key
+	// entry is probed as, taken from the first preset that uses its env var.
+	// Empty when no openai/anthropic preset uses the key.
+	Family string
+	// BaseURL is the endpoint probed for this entry. For an API-key entry an
+	// empty value means the family's official endpoint.
+	BaseURL string
+	Key     string // raw key or access token
 	// CodexPath is the absolute on-disk token file backing a Codex OAuth
 	// entry (legacy ~/.lingtai-tui/codex-auth.json or a per-account file
 	// under ~/.lingtai-tui/codex-auth/). Empty for non-codex entries. Each
@@ -177,16 +188,37 @@ func codexAccountDisplay(acct codexAccount) string {
 	return "OAuth — " + codexAccountName(acct)
 }
 
-// providerBaseURL returns the default API base URL for known providers.
-func providerBaseURL(provider string) string {
-	switch provider {
-	case "minimax":
-		return "https://api.minimaxi.com"
-	case "zhipu":
-		return "https://open.bigmodel.cn/api/coding/paas/v4"
-	default:
+// maskKey renders a stored key as its first and last four characters with
+// the middle starred out (fully starred when too short to reveal any).
+func maskKey(key string) string {
+	if key == "" {
 		return ""
 	}
+	if len(key) > 8 {
+		return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
+	}
+	return strings.Repeat("*", len(key))
+}
+
+// apiKeyProbeTarget finds the endpoint a stored API key is used against.
+// Config.Keys is keyed by env-var name, so the endpoint comes from the presets
+// that declare that name as manifest.llm.api_key_env: the first openai- or
+// anthropic-family preset in List order (saved presets first, then templates)
+// wins. ok is false when no such preset exists; the credentials page then
+// shows the key as stored-but-unverified rather than guessing an endpoint.
+func apiKeyProbeTarget(envName string, presets []preset.Preset) (family, baseURL string, ok bool) {
+	for _, p := range presets {
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		if llm == nil || asString(llm["api_key_env"]) != envName {
+			continue
+		}
+		provider := asString(llm["provider"])
+		if provider != preset.ProviderOpenAI && provider != preset.ProviderAnthropic {
+			continue
+		}
+		return provider, asString(llm["base_url"]), true
+	}
+	return "", "", false
 }
 
 // ---------------------------------------------------------------------------
@@ -203,9 +235,10 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 	}
 
 	// 1. Read orchestrator's active provider/model.
-	provider, model, _, _, _, _ := readLLMConfig(orchDir)
-	m.activePreset = provider
-	m.activeModel = model
+	if active, err := readLLMConfig(orchDir); err == nil {
+		m.activePreset = active.Provider
+		m.activeModel = active.Model
+	}
 
 	// 2. Enumerate every stored Codex OAuth account — the legacy
 	// single-account file plus any per-account files under codex-auth/.
@@ -224,18 +257,22 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 		})
 	}
 
-	// 3. Read config.Keys for API-key-based providers.
+	// 3. Read config.Keys for API-key-based providers. Keys are stored by
+	// env-var name; each is probed against the endpoint of the preset that
+	// uses it (see apiKeyProbeTarget).
 	cfg, _ := config.LoadConfig(globalDir)
-	for prov, key := range cfg.Keys {
-		if key == "" || prov == "codex" {
+	presets, _ := preset.List()
+	for envName, key := range cfg.Keys {
+		if key == "" || envName == "codex" {
 			continue
 		}
-		base := providerBaseURL(prov)
+		family, base, _ := apiKeyProbeTarget(envName, presets)
 		m.entries = append(m.entries, loginEntry{
-			Provider: prov,
+			Provider: envName,
 			Display:  maskKey(key),
 			Status:   loginChecking,
 			IsOAuth:  false,
+			Family:   family,
 			BaseURL:  base,
 			Key:      key,
 		})
@@ -277,15 +314,23 @@ func checkHealth(e loginEntry) loginHealthMsg {
 		out.Detail = detail
 		return out
 	}
-	if e.BaseURL == "" || e.Key == "" {
-		return mk(loginInvalid, "no endpoint")
+	if e.Key == "" {
+		return mk(loginInvalid, "no key")
 	}
 
 	var url string
+	var headers map[string]string
 	if e.IsOAuth {
+		if e.BaseURL == "" {
+			return mk(loginInvalid, "no endpoint")
+		}
 		url = strings.TrimRight(e.BaseURL, "/") + "/codex/models?client_version=1.0.0"
+		headers = map[string]string{"Authorization": "Bearer " + e.Key}
 	} else {
-		url = strings.TrimRight(e.BaseURL, "/") + "/models"
+		if e.Family == "" {
+			return mk(loginUnverified, "not used by an openai/anthropic preset")
+		}
+		url, headers = familyModelsRequest(e.Family, e.BaseURL, e.Key)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -293,7 +338,9 @@ func checkHealth(e loginEntry) loginHealthMsg {
 	if err != nil {
 		return mk(loginError, "connection error")
 	}
-	req.Header.Set("Authorization", "Bearer "+e.Key)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -307,6 +354,11 @@ func checkHealth(e loginEntry) loginHealthMsg {
 		return mk(loginValid, "")
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return mk(loginInvalid, "invalid credentials")
+	case !e.IsOAuth && (resp.StatusCode == 404 || resp.StatusCode == 405):
+		// The endpoint answered but has no model listing (common on
+		// compatible gateways); the key was not rejected, but not proven
+		// either.
+		return mk(loginUnverified, "endpoint has no model list")
 	default:
 		return mk(loginError, fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
@@ -991,6 +1043,8 @@ func (m LoginModel) View() string {
 				icon = lipgloss.NewStyle().Foreground(ColorSuspended).Render("✗")
 			case loginError:
 				icon = lipgloss.NewStyle().Foreground(ColorStuck).Render("✗")
+			case loginUnverified:
+				icon = StyleSubtle.Render("•")
 			}
 
 			// Provider name padded to 10 chars.
@@ -1011,6 +1065,8 @@ func (m LoginModel) View() string {
 					detailStyle = lipgloss.NewStyle().Foreground(ColorSuspended)
 				case loginError:
 					detailStyle = lipgloss.NewStyle().Foreground(ColorStuck)
+				case loginUnverified:
+					detailStyle = StyleSubtle
 				default:
 					detailStyle = lipgloss.NewStyle().Foreground(ColorStuck)
 				}

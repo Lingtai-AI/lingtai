@@ -441,7 +441,7 @@ type kanbanLLMConfig struct {
 	Endpoint     string
 	ServiceTier  string
 	Thinking     string
-	APICompat    string
+	WireAPI      string
 	APIKeyEnv    string
 	Streaming    string
 	ContextLimit string
@@ -577,7 +577,7 @@ func resolveKanbanLLMConfig(agentRaw, initRaw map[string]any) kanbanLLMConfig {
 		Endpoint:     endpoint,
 		ServiceTier:  resolvedKanbanLLMText(agentRaw, initRaw, "service_tier", kanbanLLMSettingLimit),
 		Thinking:     resolvedKanbanLLMText(agentRaw, initRaw, "thinking", kanbanLLMSettingLimit),
-		APICompat:    resolvedKanbanLLMText(agentRaw, initRaw, "api_compat", kanbanLLMSettingLimit),
+		WireAPI:      resolvedKanbanLLMText(agentRaw, initRaw, "wire_api", kanbanLLMSettingLimit),
 		APIKeyEnv:    manifestLLMScalar(initRaw, "api_key_env", kanbanLLMIdentityLimit),
 		Streaming:    manifestLLMScalar(initRaw, "streaming", kanbanLLMSettingLimit),
 		ContextLimit: resolvedKanbanLLMScalar(agentRaw, initRaw, "context_limit", kanbanLLMSettingLimit),
@@ -984,7 +984,7 @@ func (m PropsModel) renderDetail() string {
 
 	appendSection(i18n.T("props.detail_llm_configuration"))
 	appendDetailRow(i18n.T("props.base_url"), llm.BaseURL)
-	appendDetailRow(i18n.T("props.api_compat"), llm.APICompat)
+	appendDetailRow(i18n.T("props.wire_api"), llm.WireAPI)
 	appendDetailRow(i18n.T("props.api_key_env"), llm.APIKeyEnv)
 	appendDetailRow(i18n.T("props.streaming"), llm.Streaming)
 	appendDetailRow(i18n.T("props.context_limit"), llm.ContextLimit)

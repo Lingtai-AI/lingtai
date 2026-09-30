@@ -73,7 +73,7 @@ func TestGenerateInitJSON_WritesMaxAedAttempts(t *testing.T) {
 		// Explicit value round-trips.
 		opts := DefaultAgentOpts()
 		opts.MaxAedAttempts = 7
-		if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+		if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		// JSON numbers decode as float64.
@@ -84,7 +84,7 @@ func TestGenerateInitJSON_WritesMaxAedAttempts(t *testing.T) {
 		// Zero-value opt normalizes to the default (never written as 0).
 		zeroOpts := DefaultAgentOpts()
 		zeroOpts.MaxAedAttempts = 0
-		if err := GenerateInitJSONWithOpts(DefaultPreset(), "bob", "bob", lingtaiDir, globalDir, zeroOpts); err != nil {
+		if err := GenerateInitJSONWithOpts(codexPreset(), "bob", "bob", lingtaiDir, globalDir, zeroOpts); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		if v, ok := readManifest("bob")["max_aed_attempts"].(float64); !ok || int(v) != DefaultMaxAedAttempts {
@@ -94,7 +94,7 @@ func TestGenerateInitJSON_WritesMaxAedAttempts(t *testing.T) {
 		// Out-of-range opt is clamped to the ceiling.
 		bigOpts := DefaultAgentOpts()
 		bigOpts.MaxAedAttempts = 5000
-		if err := GenerateInitJSONWithOpts(DefaultPreset(), "carol", "carol", lingtaiDir, globalDir, bigOpts); err != nil {
+		if err := GenerateInitJSONWithOpts(codexPreset(), "carol", "carol", lingtaiDir, globalDir, bigOpts); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		if v, ok := readManifest("carol")["max_aed_attempts"].(float64); !ok || int(v) != MaxMaxAedAttempts {

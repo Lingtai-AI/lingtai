@@ -109,14 +109,14 @@ func TestGetPresetProvider(t *testing.T) {
 		wantProv string
 	}{
 		{
-			name: "minimax preset",
+			name: "openai preset",
 			preset: preset.Preset{
-				Name: "minimax",
+				Name: "openai",
 				Manifest: map[string]interface{}{
-					"llm": map[string]interface{}{"provider": "minimax"},
+					"llm": map[string]interface{}{"provider": "openai"},
 				},
 			},
-			wantProv: "minimax",
+			wantProv: "openai",
 		},
 		{
 			name: "custom preset",
@@ -129,12 +129,12 @@ func TestGetPresetProvider(t *testing.T) {
 			wantProv: "custom",
 		},
 		{
-			name: "missing llm, defaults to minimax",
+			name: "missing llm, defaults to codex",
 			preset: preset.Preset{
 				Name:     "empty",
 				Manifest: map[string]interface{}{},
 			},
-			wantProv: "minimax",
+			wantProv: "codex",
 		},
 	}
 

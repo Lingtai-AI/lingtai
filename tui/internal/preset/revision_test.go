@@ -570,3 +570,30 @@ func TestPlanRevisionRejectsNonStringReasoningAndServiceTierReplacements(t *test
 		})
 	}
 }
+
+// wire_api / responses_transport revisions are scoped to the openai provider
+// family on a direct-bound Responses route — the only family that has a wire
+// selector in the four-family model.
+func TestValidateChangeSemanticsScopesWireAPIToOpenAIResponses(t *testing.T) {
+	target := RevisionTarget{
+		ProviderID: ProviderOpenAI,
+		Route: RouteContract{
+			API:       "responses",
+			Transport: "http",
+			Binding:   RouteBinding{Mode: RouteBindingDirect},
+		},
+	}
+	for _, path := range []string{"/manifest/llm/wire_api", "/manifest/llm/responses_transport"} {
+		change := RevisionChange{Path: path, Kind: ChangeReplace, NewValue: json.RawMessage(`"responses"`)}
+		if err := validateChangeSemantics(target, change, nil); err != nil {
+			t.Fatalf("%s on openai Responses target: %v", path, err)
+		}
+		for _, provider := range []string{"custom", ProviderAnthropic, ProviderCodex} {
+			other := target
+			other.ProviderID = provider
+			if err := validateChangeSemantics(other, change, nil); err == nil {
+				t.Fatalf("%s on provider %q must be rejected", path, provider)
+			}
+		}
+	}
+}

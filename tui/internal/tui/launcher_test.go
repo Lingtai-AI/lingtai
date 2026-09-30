@@ -297,8 +297,8 @@ func buildDraftModel(t *testing.T) (FirstRunModel, string, string) {
 // Create regression where draft mode deliberately skipped Bootstrap to remain
 // pure, then populated its picker only from the not-yet-created templates/
 // directory. A truly fresh HOME must still expose every compiled template as a
-// template (including ordinary API-key and custom paths) without materializing
-// anything on disk before the user confirms the project.
+// template (the OAuth/CLI families and both API-key families) without
+// materializing anything on disk before the user confirms the project.
 func TestDraftFirstRun_FreshHomeOffersBuiltinsWithoutWriting(t *testing.T) {
 	m, home, _ := buildDraftModel(t)
 
@@ -311,7 +311,7 @@ func TestDraftFirstRun_FreshHomeOffersBuiltinsWithoutWriting(t *testing.T) {
 	for _, p := range m.presets {
 		byName[p.Name] = p
 	}
-	for _, name := range []string{"minimax", "zhipu", "mimo", "deepseek", "custom"} {
+	for _, name := range []string{"codex", "claude", "openai", "anthropic"} {
 		p, ok := byName[name]
 		if !ok {
 			t.Errorf("fresh draft picker is missing compiled preset %q", name)
@@ -1596,8 +1596,8 @@ func TestPresetModelName_ReadsManifestLLMModel(t *testing.T) {
 
 // TestPresetCapabilitiesSummary_ListsConfiguredCapabilities proves the
 // helper lists exactly the capability names present in
-// manifest.capabilities, sorted, comma-joined — never the full
-// AllCapabilities list, never a placeholder.
+// manifest.capabilities, sorted, comma-joined — never a fixed capability
+// list, never a placeholder.
 func TestPresetCapabilitiesSummary_ListsConfiguredCapabilities(t *testing.T) {
 	p := preset.Preset{
 		Manifest: map[string]interface{}{

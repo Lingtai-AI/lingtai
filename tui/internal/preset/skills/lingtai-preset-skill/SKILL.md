@@ -1,7 +1,7 @@
 ---
 name: lingtai-preset-skill
-description: "Use when asking about built-in TUI presets or their shared operations."
-version: 3.1.0
+description: "Use when asking about built-in TUI presets, the four provider families, or their shared operations."
+version: 4.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
@@ -12,19 +12,10 @@ related_files:
   - tui/internal/preset/revision.go
   - tui/internal/headless/preset_revision.go
   - tui/main.go
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/minimax/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/zhipu/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/mimo/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/deepseek/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/gemini/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/kimi/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/grok/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/nvidia/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/subs-pool/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/openai/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/anthropic/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/availability-save-gate/SKILL.md
@@ -35,76 +26,44 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # Built-in preset router
 
+LingTai ships exactly four provider families, one built-in template each.
 This router covers exactly the names returned by `BuiltinPresets()` in
-`tui/internal/preset/preset.go`, plus one external-endpoint recipe
-(`subs-pool`) that is not a template. It covers TUI-owned template presets
-only, not arbitrary saved presets. Route a named-preset revision to the direct
-child with the matching name under `reference/<name>/SKILL.md`. That child owns the
-provider's official latest-model lookup, route distinctions, exact TUI surfaces,
-vision/capability facts, and named-preset revision instructions.
+`tui/internal/preset/preset.go`. It covers TUI-owned template presets only,
+not arbitrary saved presets. Route a named-preset question or revision to the
+direct child with the matching name under `reference/<name>/SKILL.md`. That
+child owns the family's endpoint/credential facts, exact TUI surfaces, and
+named-preset revision instructions.
 
-## Direct children: the 12 BuiltinPresets names
+There are no per-vendor templates. Any other vendor, subscription, gateway,
+or account pool is reached through the `openai` or `anthropic` family pointed
+at that vendor's compatible endpoint (`base_url`) — never through a
+vendor-named provider, which the kernel rejects.
 
-| Name | Direct child | Route hint |
-|---|---|---|
-| minimax | reference/minimax/SKILL.md | MiniMax regional Anthropic route |
-| zhipu | reference/zhipu/SKILL.md | Zhipu/Z.AI coding plan |
-| mimo | reference/mimo/SKILL.md | Xiaomi MiMo OpenAI-compatible route |
-| deepseek | reference/deepseek/SKILL.md | DeepSeek text route |
-| gemini | reference/gemini/SKILL.md | Google native multimodal route |
-| kimi | reference/kimi/SKILL.md | Kimi Code and Go gateway |
-| grok | reference/grok/SKILL.md | Grok through OpenCode Go |
-| nvidia | reference/nvidia/SKILL.md | NVIDIA NIM/API Catalog gateway |
-| openrouter | reference/openrouter/SKILL.md | OpenRouter gateway |
-| codex | reference/codex/SKILL.md | ChatGPT OAuth Codex route |
-| claude | reference/claude/SKILL.md | Claude Code CLI/OAuth aliases |
-| custom | reference/custom/SKILL.md | user-supplied compatible endpoint |
+## Direct children: the 4 BuiltinPresets names
+
+| Name | Provider | Direct child | Route hint |
+|---|---|---|---|
+| codex | `codex` | reference/codex/SKILL.md | ChatGPT-account (Codex OAuth) route; the first-run default |
+| claude | `claude-code` | reference/claude/SKILL.md | local Claude Code CLI login ("claude-p") |
+| openai | `openai` | reference/openai/SKILL.md | any OpenAI-compatible endpoint, Chat Completions or Responses; also account pools such as sub2api / subs-pool |
+| anthropic | `anthropic` | reference/anthropic/SKILL.md | any Anthropic Messages-compatible endpoint |
 
 ```yaml
-- name: preset-skill-minimax
-  location: reference/minimax/SKILL.md
-- name: preset-skill-zhipu
-  location: reference/zhipu/SKILL.md
-- name: preset-skill-mimo
-  location: reference/mimo/SKILL.md
-- name: preset-skill-deepseek
-  location: reference/deepseek/SKILL.md
-- name: preset-skill-gemini
-  location: reference/gemini/SKILL.md
-- name: preset-skill-kimi
-  location: reference/kimi/SKILL.md
-- name: preset-skill-grok
-  location: reference/grok/SKILL.md
-- name: preset-skill-nvidia
-  location: reference/nvidia/SKILL.md
-- name: preset-skill-openrouter
-  location: reference/openrouter/SKILL.md
 - name: preset-skill-codex
   location: reference/codex/SKILL.md
 - name: preset-skill-claude
   location: reference/claude/SKILL.md
-- name: preset-skill-custom
-  location: reference/custom/SKILL.md
+- name: preset-skill-openai
+  location: reference/openai/SKILL.md
+- name: preset-skill-anthropic
+  location: reference/anthropic/SKILL.md
 ```
 
-## External endpoint recipe: not a template
-
-| Name | Child | Route hint |
-|---|---|---|
-| subs-pool | reference/subs-pool/SKILL.md | multi-account Codex pooling via the external subs-pool proxy (a `custom` Responses preset) |
-
-```yaml
-- name: preset-skill-subs-pool
-  location: reference/subs-pool/SKILL.md
-```
-
-Account pooling is not built into the TUI or kernel; route pooling questions
-to this child instead of a template.
-
-Do not merge gateway catalogs, CLI/OAuth aliases, and native provider catalogs.
-`custom` has no universal latest model: inspect its configured endpoint and
-provider evidence. The exact constructor in `preset.go` is always the first
-source to inspect; picker, capability, and vision surfaces are listed by each
+Do not merge the Codex OAuth catalog, the Claude CLI aliases, and an
+arbitrary endpoint's served models. `openai` and `anthropic` have no universal
+model: the model is free text and must be checked against the configured
+endpoint. The exact constructor in `preset.go` is always the first source to
+inspect; picker, capability, and credential surfaces are listed by each
 direct child.
 
 ## Shared operation children: five unchanged mechanics
@@ -112,7 +71,7 @@ direct child.
 | Question | Child |
 |---|---|
 | Saved templates/presets, load/save/delete, and bootstrap ordering | reference/operations/saved-presets/SKILL.md |
-| Endpoint, API compatibility, provider/model/capability declarations, and Codex OAuth quota | reference/operations/endpoint-capabilities/SKILL.md |
+| Endpoint, provider/model/capability declarations, and Codex OAuth quota | reference/operations/endpoint-capabilities/SKILL.md |
 | Whether Save calls a provider and where availability is diagnosed | reference/operations/availability-save-gate/SKILL.md |
 | Activation, session state, and what refresh switches | reference/operations/activation-session-refresh/SKILL.md |
 | Bounded troubleshooting and migration routing | reference/operations/troubleshooting-migration/SKILL.md |
@@ -151,16 +110,17 @@ requires a new explicit output directory. The pure engine at
 tui/internal/preset/revision.go validates the typed target state, route
 bindings, evidence, expected old values, and input/post-image hashes, then
 splices only owned JSON bytes while preserving unowned bytes. Review the JSON
-plan and diagnostics before apply. The amendment documents this production
-mechanism and does not change any current built-in model, picker, capability,
-or endpoint value.
+plan and diagnostics before apply.
 
 ## Boundaries and maintenance
 
-Provider children record only reviewed facts and official lookup paths; a
+Family children record only reviewed facts and official lookup paths; a
 failed direct route is not permission to switch providers, guess credentials,
 or auto-load an MCP. Saved presets may change provider, model, endpoint,
-credentials, or capabilities, so inspect their actual manifest.
+credentials, or capabilities, so inspect their actual manifest. A saved preset
+that still names a retired vendor provider (`custom`, `deepseek`, `minimax`,
+...) must be moved to one of the four families — see
+`reference/operations/troubleshooting-migration/SKILL.md`.
 
 When `BuiltinPresets()` gains a new template name, add exactly one matching
 direct child and catalog row in the same PR. When a new cross-cutting mechanic is added, extend the five-operation catalog rather than adding a revision

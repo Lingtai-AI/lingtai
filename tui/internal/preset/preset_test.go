@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestList_EmptyDir(t *testing.T) {
 
 func TestSaveAndLoad_Roundtrip(t *testing.T) {
 	withTempPresets(t, func() {
-		p := DefaultPreset()
+		p := codexPreset()
 		if err := Save(p); err != nil {
 			t.Fatalf("Save() error: %v", err)
 		}
@@ -232,20 +233,56 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 12 {
-			t.Fatalf("expected 12 presets, got %d", len(presets))
-		}
-		names := map[string]bool{}
+		var names []string
 		for _, p := range presets {
-			names[p.Name] = true
+			names = append(names, p.Name)
 			if p.Source != SourceTemplate {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "codex", "claude", "custom"} {
-			if !names[want] {
-				t.Errorf("missing preset %q", want)
+		// List returns templates in BuiltinPresets() order: codex (the
+		// first-run default) first.
+		want := []string{"codex", "claude", "openai", "anthropic"}
+		if strings.Join(names, ",") != strings.Join(want, ",") {
+			t.Fatalf("template list = %v, want %v", names, want)
+		}
+	})
+}
+
+// TestRefreshTemplates_PrunesRetiredVendorTemplates pins the upgrade path from
+// the per-vendor template era: a retired template file (e.g. minimax.json,
+// custom.json) left in templates/ is deleted on the next refresh, while a
+// user's saved preset with the same name is never touched.
+func TestRefreshTemplates_PrunesRetiredVendorTemplates(t *testing.T) {
+	withTempPresets(t, func() {
+		if err := os.MkdirAll(TemplatesDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(SavedDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		retired := []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "custom"}
+		legacy := []byte(`{"name":"x","description":{"summary":"legacy"},"manifest":{"llm":{"provider":"custom","model":"m"}}}`)
+		for _, name := range retired {
+			if err := os.WriteFile(filepath.Join(TemplatesDir(), name+".json"), legacy, 0o644); err != nil {
+				t.Fatal(err)
 			}
+		}
+		savedPath := filepath.Join(SavedDir(), "minimax.json")
+		if err := os.WriteFile(savedPath, legacy, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := RefreshTemplates(); err != nil {
+			t.Fatalf("RefreshTemplates() error: %v", err)
+		}
+		for _, name := range retired {
+			if _, err := os.Stat(filepath.Join(TemplatesDir(), name+".json")); !os.IsNotExist(err) {
+				t.Errorf("retired template %s.json survived refresh (err=%v)", name, err)
+			}
+		}
+		if data, err := os.ReadFile(savedPath); err != nil || string(data) != string(legacy) {
+			t.Fatalf("saved preset must be untouched by refresh: data=%q err=%v", data, err)
 		}
 	})
 }
@@ -290,8 +327,8 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 	legacyCodexRef := writeCodexPresetWithAuthPath(t, legacyCodexDir, "codex", "")
 	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "")
 	claudeUnderscoreRef := writePresetFile(t, dir, "claude_agent_sdk", "claude_agent_sdk", "")
-	customRef := writePresetFile(t, dir, "custom", "custom", "")
-	keyedRef := writePresetFile(t, dir, "minimax", "minimax", "FOO_API_KEY")
+	customRef := writePresetFile(t, dir, "openai-nokey", "openai", "")
+	keyedRef := writePresetFile(t, dir, "openai-keyed", "openai", "FOO_API_KEY")
 	missingRef := filepath.Join(dir, "nope.json")
 
 	keysWith := map[string]string{"FOO_API_KEY": "placeholder-value"}
@@ -317,7 +354,7 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 		{"claude-code with CLI auth", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
 		{"claude_agent_sdk alias with CLI auth", claudeUnderscoreRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
 		{"claude-code ignores codex OAuth", claudeRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, false},
-		{"keyless non-codex is invalid", customRef, keysEmpty, AuthState{}, true, false},
+		{"keyless API-key family is invalid", customRef, keysEmpty, AuthState{}, true, false},
 		{"keyed with key present", keyedRef, keysWith, AuthState{}, true, true},
 		{"keyed with key absent", keyedRef, keysEmpty, AuthState{}, true, false},
 		{"missing file", missingRef, keysEmpty, AuthState{}, false, false},
@@ -623,7 +660,7 @@ func TestResolveRefs_CodexExplicitAuthNeverUsesAggregateBool(t *testing.T) {
 
 func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	withTempPresets(t, func() {
-		p := DefaultPreset()
+		p := codexPreset()
 		tmpDir := t.TempDir()
 		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
 		os.MkdirAll(lingtaiDir, 0o755)
@@ -676,18 +713,11 @@ func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
 		preset    Preset
 		wantModel string
 	}{
-		{"minimax", minimaxPreset(), "MiniMax-M2.7"},
-		{"zhipu", zhipuPreset(), "GLM-5.2"},
-		{"mimo", mimoPreset(), "mimo-v2.5"},
-		{"deepseek", deepseekPreset(), "deepseek-v4-pro"},
-		{"gemini", geminiPreset(), "gemini-3.8-flash"},
-		{"kimi", kimiPreset(), "k3"},
-		{"grok", grokPreset(), "grok-4.5"},
-		{"nvidia", nvidiaPreset(), "nvidia/nemotron-3-ultra-550b-a55b"},
-		{"openrouter", openrouterPreset(), "z-ai/glm-5.3"},
 		{"codex", codexPreset(), "gpt-5.6-sol"},
 		{"claude", claudePreset(), "opus"},
-		{"custom", customPreset(), ""},
+		// The two bring-your-own-endpoint families have no universal model.
+		{"openai", openaiPreset(), ""},
+		{"anthropic", anthropicPreset(), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -699,6 +729,85 @@ func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
 				t.Fatalf("%s default model = %q, want %q", tc.name, got, tc.wantModel)
 			}
 		})
+	}
+}
+
+// TestBuiltinPresetsAreTheFourProviderFamilies pins the template inventory to
+// exactly one template per provider family the kernel accepts, and the
+// manifest shape of each.
+func TestBuiltinPresetsAreTheFourProviderFamilies(t *testing.T) {
+	want := []struct {
+		name, provider, apiKeyEnv string
+	}{
+		{"codex", ProviderCodex, ""},
+		{"claude", ProviderClaudeCode, ""},
+		{"openai", ProviderOpenAI, "OPENAI_API_KEY"},
+		{"anthropic", ProviderAnthropic, "ANTHROPIC_API_KEY"},
+	}
+	got := BuiltinPresets()
+	if len(got) != len(want) {
+		t.Fatalf("BuiltinPresets() has %d templates, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		p := got[i]
+		if p.Name != w.name {
+			t.Fatalf("BuiltinPresets()[%d] = %q, want %q", i, p.Name, w.name)
+		}
+		if !IsBuiltin(w.name) {
+			t.Errorf("IsBuiltin(%q) = false, want true", w.name)
+		}
+		llm := p.Manifest["llm"].(map[string]interface{})
+		if got := llm["provider"]; got != w.provider {
+			t.Errorf("%s provider = %#v, want %q", w.name, got, w.provider)
+		}
+		if got := llm["api_key_env"]; got != w.apiKeyEnv {
+			t.Errorf("%s api_key_env = %#v, want %q", w.name, got, w.apiKeyEnv)
+		}
+		if got := DefaultAPIKeyEnv(w.provider); got != w.apiKeyEnv {
+			t.Errorf("DefaultAPIKeyEnv(%q) = %q, want %q", w.provider, got, w.apiKeyEnv)
+		}
+		if _, ok := llm["api_compat"]; ok {
+			t.Errorf("%s template must not write the retired api_compat field", w.name)
+		}
+		if p.Description.Summary == "" {
+			t.Errorf("%s template has an empty summary", w.name)
+		}
+	}
+	for _, retired := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter", "custom"} {
+		if IsBuiltin(retired) {
+			t.Errorf("IsBuiltin(%q) = true, want false (per-vendor templates are retired)", retired)
+		}
+	}
+}
+
+func TestFamilyTemplatesEndpointFields(t *testing.T) {
+	openai := openaiPreset().Manifest["llm"].(map[string]interface{})
+	if v, ok := openai["base_url"]; !ok || v != nil {
+		t.Fatalf("openai template base_url = %#v (present=%v), want nil (official endpoint)", v, ok)
+	}
+	if got := openai["wire_api"]; got != WireAPIChatCompletions {
+		t.Fatalf("openai template wire_api = %#v, want chat_completions", got)
+	}
+	anthropic := anthropicPreset().Manifest["llm"].(map[string]interface{})
+	if v, ok := anthropic["base_url"]; !ok || v != nil {
+		t.Fatalf("anthropic template base_url = %#v (present=%v), want nil (official endpoint)", v, ok)
+	}
+	if _, ok := anthropic["wire_api"]; ok {
+		t.Fatalf("anthropic template must not carry wire_api")
+	}
+	if got := DefaultBaseURL(ProviderOpenAI); got != "https://api.openai.com/v1" {
+		t.Fatalf("DefaultBaseURL(openai) = %q", got)
+	}
+	if got := DefaultBaseURL(ProviderAnthropic); got != "https://api.anthropic.com" {
+		t.Fatalf("DefaultBaseURL(anthropic) = %q", got)
+	}
+	for _, provider := range []string{ProviderCodex, ProviderClaudeCode, "custom", ""} {
+		if got := DefaultBaseURL(provider); got != "" {
+			t.Fatalf("DefaultBaseURL(%q) = %q, want empty", provider, got)
+		}
+		if got := DefaultAPIKeyEnv(provider); got != "" {
+			t.Fatalf("DefaultAPIKeyEnv(%q) = %q, want empty", provider, got)
+		}
 	}
 }
 
@@ -804,7 +913,7 @@ func TestClaudePresetIsBuiltin(t *testing.T) {
 
 func TestDelete_RemovesFile(t *testing.T) {
 	withTempPresets(t, func() {
-		p := DefaultPreset()
+		p := codexPreset()
 		Save(p)
 		if err := Delete(p.Name); err != nil {
 			t.Fatalf("Delete() error: %v", err)
@@ -821,7 +930,7 @@ func TestHasAny(t *testing.T) {
 		if HasAny() {
 			t.Error("HasAny() = true, want false on empty dir")
 		}
-		Save(DefaultPreset())
+		Save(codexPreset())
 		if !HasAny() {
 			t.Error("HasAny() = false, want true after save")
 		}
@@ -834,7 +943,7 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
 	os.MkdirAll(lingtaiDir, 0o755)
 
-	p := minimaxPreset()
+	p := openaiPreset()
 	if err := GenerateInitJSON(p, "alice", "alice", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
@@ -854,7 +963,7 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("manifest.preset block missing")
 	}
-	// Templates resolve to presets/templates/<name>.json; minimaxPreset()
+	// Templates resolve to presets/templates/<name>.json; openaiPreset()
 	// is a template per IsBuiltin, even without Source set.
 	wantRef := "~/.lingtai-tui/presets/templates/" + p.Name + ".json"
 	if active, _ := preset["active"].(string); active != wantRef {
@@ -892,107 +1001,45 @@ func TestAutoEnvVarName(t *testing.T) {
 		want     string
 	}{
 		{
-			name:   "minimax CN, no existing → _1_",
-			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
-			want:   "MINIMAX_CN_1_API_KEY",
+			name:   "openai, no existing → _1_",
+			preset: pp("openai", ""),
+			want:   "OPENAI_1_API_KEY",
 		},
 		{
-			name:   "minimax INTL, no existing",
-			preset: pp("minimax", "https://api.minimax.io/anthropic"),
-			want:   "MINIMAX_INTL_1_API_KEY",
+			name:   "anthropic, no existing → _1_",
+			preset: pp("anthropic", ""),
+			want:   "ANTHROPIC_1_API_KEY",
 		},
 		{
-			name:     "minimax CN with _1_ taken → gap-fill _2_",
-			preset:   pp("minimax", "https://api.minimaxi.com/anthropic"),
-			existing: map[string]string{"MINIMAX_CN_1_API_KEY": "k"},
-			want:     "MINIMAX_CN_2_API_KEY",
-		},
-		{
-			name:   "minimax CN with _1_ and _2_ taken, _3_ free",
-			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
-			existing: map[string]string{
-				"MINIMAX_CN_1_API_KEY": "k",
-				"MINIMAX_CN_2_API_KEY": "k",
-			},
-			want: "MINIMAX_CN_3_API_KEY",
+			name:     "openai with _1_ taken → gap-fill _2_",
+			preset:   pp("openai", "https://gateway.example.com/v1"),
+			existing: map[string]string{"OPENAI_1_API_KEY": "k"},
+			want:     "OPENAI_2_API_KEY",
 		},
 		{
 			name:   "gap fill: _1_ taken, _2_ free, _3_ taken → returns _2_",
-			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
+			preset: pp("anthropic", ""),
 			existing: map[string]string{
-				"MINIMAX_CN_1_API_KEY": "k",
-				"MINIMAX_CN_3_API_KEY": "k",
+				"ANTHROPIC_1_API_KEY": "k",
+				"ANTHROPIC_3_API_KEY": "k",
 			},
-			want: "MINIMAX_CN_2_API_KEY",
+			want: "ANTHROPIC_2_API_KEY",
 		},
 		{
-			name:   "deepseek has no region",
-			preset: pp("deepseek", "https://api.deepseek.com"),
-			want:   "DEEPSEEK_1_API_KEY",
-		},
-		// The OpenCode Go row is a distinct account on a shared endpoint,
-		// not a CN/INTL split. It must not borrow a region suffix — the
-		// substring classifier would otherwise call opencode.ai "CN" for
-		// zhipu and "INTL" for minimax, stamping a slot that lies about
-		// the endpoint it unlocks.
-		{
-			name:   "zhipu OpenCode Go gets no region suffix",
-			preset: pp("zhipu", "https://opencode.ai/zen/go/v1"),
-			want:   "ZHIPU_1_API_KEY",
-		},
-		{
-			name:   "minimax OpenCode Go gets no region suffix",
-			preset: pp("minimax", "https://opencode.ai/zen/go/v1"),
-			want:   "MINIMAX_1_API_KEY",
+			// The endpoint never changes the slot name: there is no region
+			// suffix in the four-family model.
+			name:   "base_url does not add a suffix",
+			preset: pp("anthropic", "https://api.minimaxi.com/anthropic"),
+			want:   "ANTHROPIC_1_API_KEY",
 		},
 		{
 			name:   "non-numeric existing entries (e.g. legacy) ignored",
-			preset: pp("deepseek", "https://api.deepseek.com"),
+			preset: pp("openai", ""),
 			existing: map[string]string{
-				"DEEPSEEK_API_KEY":      "legacy",
-				"DEEPSEEK_PROD_API_KEY": "legacy",
+				"OPENAI_API_KEY":      "legacy",
+				"OPENAI_PROD_API_KEY": "legacy",
 			},
-			want: "DEEPSEEK_1_API_KEY",
-		},
-		{
-			name:   "zhipu CN default",
-			preset: pp("zhipu", "https://open.bigmodel.cn/api/coding/paas/v4"),
-			want:   "ZHIPU_CN_1_API_KEY",
-		},
-		{
-			name:   "zhipu INTL via api.z.ai",
-			preset: pp("zhipu", "https://api.z.ai/api/coding/paas/v4"),
-			want:   "ZHIPU_INTL_1_API_KEY",
-		},
-		// The prefix comes from the PROVIDER name, never from
-		// ProviderDefaultEnv. mimo is the case that makes the difference
-		// visible and the case a manual got wrong: ProviderDefaultEnv["mimo"]
-		// is XIAOMI_API_KEY, but the stamped slot is MIMO_1_API_KEY. kimi is
-		// the same shape (KIMI_CODE_API_KEY -> KIMI_1_API_KEY).
-		{
-			name:   "kimi native row → provider-derived prefix",
-			preset: pp("kimi", "https://api.kimi.com/coding/v1"),
-			want:   "KIMI_1_API_KEY",
-		},
-		{
-			name:   "mimo native row → MIMO_, not XIAOMI_",
-			preset: pp("mimo", "https://api.xiaomimimo.com/v1"),
-			want:   "MIMO_1_API_KEY",
-		},
-		{
-			name:   "kimi OpenCode Go gets no region suffix",
-			preset: pp("kimi", "https://opencode.ai/zen/go/v1"),
-			want:   "KIMI_1_API_KEY",
-		},
-		{
-			name:   "mimo OpenCode Go gets no region suffix",
-			preset: pp("mimo", "https://opencode.ai/zen/go/v1"),
-			want:   "MIMO_1_API_KEY",
-		},
-		{
-			name:   "grok Custom row → GROK_, not the OpenCode slot",
-			preset: pp("grok", "https://proxy.internal.example/v1"),
-			want:   "GROK_1_API_KEY",
+			want: "OPENAI_1_API_KEY",
 		},
 		{
 			name:   "no provider → empty",
@@ -1011,125 +1058,57 @@ func TestAutoEnvVarName(t *testing.T) {
 	}
 }
 
-func TestMiniMaxPresetCapabilitiesUseApiKeyEnv(t *testing.T) {
-	p := minimaxPreset()
-	manifest := p.Manifest
-	caps, ok := manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("manifest.capabilities missing or wrong type: %T", manifest["capabilities"])
-	}
-	for _, name := range []string{"web_search"} {
-		capCfg, ok := caps[name].(map[string]interface{})
+// TestFamilyTemplateCapabilities pins the template capability defaults: no
+// per-vendor capability providers — web_search uses DuckDuckGo and vision
+// inherits the agent's own provider — for every template that can serve
+// them. The claude template stays skills-only.
+func TestFamilyTemplateCapabilities(t *testing.T) {
+	for _, p := range BuiltinPresets() {
+		caps, ok := p.Manifest["capabilities"].(map[string]interface{})
 		if !ok {
-			t.Fatalf("capability %s missing or wrong type: %T", name, caps[name])
+			t.Fatalf("%s manifest.capabilities missing or wrong type: %T", p.Name, p.Manifest["capabilities"])
 		}
-		if provider, _ := capCfg["provider"].(string); provider != "minimax" {
-			t.Errorf("%s.provider = %v, want minimax", name, capCfg["provider"])
+		if _, ok := caps["skills"]; !ok {
+			t.Errorf("%s must keep the skills default", p.Name)
 		}
-		if env, _ := capCfg["api_key_env"].(string); env != "MINIMAX_API_KEY" {
-			t.Errorf("%s.api_key_env = %v, want MINIMAX_API_KEY", name, capCfg["api_key_env"])
+		if p.Name == "claude" {
+			if len(caps) != 1 {
+				t.Errorf("claude capabilities = %#v, want skills only", caps)
+			}
+			continue
 		}
-	}
-	if _, ok := caps["vision"]; ok {
-		t.Fatal("minimax native text preset must not expose stock vision")
+		if got := caps["web_search"]; !reflect.DeepEqual(got, map[string]interface{}{"provider": "duckduckgo"}) {
+			t.Errorf("%s web_search = %#v, want duckduckgo", p.Name, got)
+		}
+		if got := caps["vision"]; !reflect.DeepEqual(got, map[string]interface{}{"provider": "inherit"}) {
+			t.Errorf("%s vision = %#v, want inherit", p.Name, got)
+		}
 	}
 }
 
-func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
-	p := customPreset()
+// TestGenerateInitJSONStripsRetiredAPICompat proves init.json generation never
+// writes the retired manifest.llm.api_compat field, even from a legacy saved
+// preset that still carries it.
+func TestGenerateInitJSONStripsRetiredAPICompat(t *testing.T) {
+	tmp := t.TempDir()
+	lingtaiDir := filepath.Join(tmp, ".lingtai")
+	globalDir := filepath.Join(tmp, "global")
+	p := openaiPreset()
 	llm := p.Manifest["llm"].(map[string]interface{})
-	if got, _ := llm["provider"].(string); got != "custom" {
-		t.Fatalf("custom preset provider = %q, want custom", got)
+	llm["model"] = "test-model"
+	llm["api_compat"] = "openai"
+	if err := GenerateInitJSON(p, "alice", "alice", lingtaiDir, globalDir); err != nil {
+		t.Fatalf("GenerateInitJSON: %v", err)
 	}
-	if got, _ := llm["api_compat"].(string); got != "openai" {
-		t.Fatalf("custom preset api_compat = %q, want openai", got)
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := llm["wire_api"]; ok {
-		t.Fatalf("custom preset should omit wire_api so kernel/editor default to auto")
+	if strings.Contains(string(data), "api_compat") {
+		t.Fatalf("generated init.json carries api_compat:\n%s", data)
 	}
-}
-
-// TestProviderRegionURLTablesAreExact pins the full base_url option table for
-// every provider that offers one — order, Label, URL and Env. Order matters
-// beyond cosmetics: entry [0] is the template default (preset.go's
-// ProviderRegionURLs[...][0].URL), so a reorder silently repoints new presets
-// at a different region. The OpenCode Go row must stay byte-identical across
-// every provider that offers it so one OPENCODE_GO_API_KEY serves all of them.
-func TestProviderRegionURLTablesAreExact(t *testing.T) {
-	openCodeGo := RegionURL{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"}
-
-	tests := []struct {
-		provider string
-		want     []RegionURL
-	}{
-		{"deepseek", []RegionURL{
-			{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
-			openCodeGo,
-			{Label: "Custom", URL: ""},
-		}},
-		{"zhipu", []RegionURL{
-			{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
-			{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
-			openCodeGo,
-		}},
-		{"minimax", []RegionURL{
-			{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
-			{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
-			openCodeGo,
-		}},
-		// kimi and mimo had free-text base_url before they gained a region
-		// table, so both carry the Custom sentinel: a two-row table with no
-		// Custom row makes Enter on the base_url row a no-op and removes the
-		// only in-editor path to a proxy/relay endpoint.
-		{"kimi", []RegionURL{
-			{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
-			openCodeGo,
-			{Label: "Custom", URL: ""},
-		}},
-		{"mimo", []RegionURL{
-			{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
-			openCodeGo,
-			{Label: "Custom", URL: ""},
-		}},
-		// grok is the only provider whose entry [0] — the template default —
-		// is the OpenCode Go row: there is no verified native xAI route, so
-		// the Go subscription is the whole product.
-		{"grok", []RegionURL{
-			openCodeGo,
-			{Label: "Custom", URL: ""},
-		}},
-	}
-
-	if len(ProviderRegionURLs) != len(tests) {
-		t.Errorf("ProviderRegionURLs has %d providers, this test pins %d — add the new one here", len(ProviderRegionURLs), len(tests))
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.provider, func(t *testing.T) {
-			// Every region-table provider must remain a shipped builtin —
-			// deepseek in particular, after the opencode-go preset was
-			// folded into it as an OpenCode Go base_url option.
-			found := false
-			for _, p := range BuiltinPresets() {
-				if p.Name == tc.provider {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("%s preset missing from BuiltinPresets", tc.provider)
-			}
-
-			regions, ok := ProviderRegionURLs[tc.provider]
-			if !ok || len(regions) != len(tc.want) {
-				t.Fatalf("ProviderRegionURLs[%s] = %#v, want %d entries", tc.provider, regions, len(tc.want))
-			}
-			for i, w := range tc.want {
-				if regions[i] != w {
-					t.Errorf("ProviderRegionURLs[%s][%d] = %#v, want %#v", tc.provider, i, regions[i], w)
-				}
-			}
-		})
+	if !strings.Contains(string(data), `"wire_api": "chat_completions"`) {
+		t.Fatalf("generated init.json lost wire_api:\n%s", data)
 	}
 }
 
@@ -1199,72 +1178,25 @@ func TestResolvePresetWithAuthPreservesKeyedAndLocalBehavior(t *testing.T) {
 	}
 }
 
-// TestValidateRequiresBaseURLForRegionProviders is the F2 regression: the
-// editor's Custom sentinel clears base_url, and nothing forces the user to
-// type one, so Validate must refuse a region-table preset with no endpoint.
-func TestValidateRequiresBaseURLForRegionProviders(t *testing.T) {
-	presetWith := func(provider, baseURL string) Preset {
-		llm := map[string]interface{}{"provider": provider, "model": "some-model"}
-		if baseURL != "" {
-			llm["base_url"] = baseURL
-		}
-		return Preset{
-			Name:        provider,
-			Description: PresetDescription{Summary: "test preset"},
-			Manifest:    map[string]interface{}{"llm": llm},
-		}
-	}
-	// explicitlyEmpty pins the base_url to "" (the shape the editor's Custom
-	// sentinel writes) — always a violation for a region-table provider.
-	explicitlyEmpty := func(provider string) Preset {
-		p := presetWith(provider, "")
-		p.Manifest["llm"].(map[string]interface{})["base_url"] = ""
-		return p
-	}
-
-	for provider := range ProviderRegionURLs {
-		// Explicitly empty is rejected for every region-table provider: the
-		// Custom sentinel path can produce this and the preset would have no
-		// endpoint at all.
-		if errs := explicitlyEmpty(provider).Validate(); len(errs) == 0 {
-			t.Errorf("%s with explicitly empty base_url validated clean, want a base_url violation", provider)
-		}
-		// Absent base_url is tolerated only where regionSuffix assigns a
-		// default region (zhipu → CN, minimax → INTL); deepseek, kimi, mimo
-		// and grok have no region fallback, so an absent endpoint is still a
-		// violation there. kimi and mimo joined that set when they gained a
-		// region table — a base_url-less kimi/mimo preset that validated on
-		// an older TUI must gain an explicit endpoint to save again.
-		wantAbsentViolation := regionSuffix(provider, "") == ""
-		if errs := presetWith(provider, "").Validate(); (len(errs) == 0) == wantAbsentViolation {
-			t.Errorf("%s with absent base_url errs=%v, wantAbsentViolation=%v", provider, errs, wantAbsentViolation)
-		}
-		if errs := presetWith(provider, ProviderRegionURLs[provider][0].URL).Validate(); len(errs) != 0 {
-			t.Errorf("%s with its default endpoint = %v, want no violations", provider, errs)
-		}
-		if errs := presetWith(provider, "https://my-proxy.example/v1").Validate(); len(errs) != 0 {
-			t.Errorf("%s with an off-list endpoint = %v, want no violations", provider, errs)
-		}
-	}
-
-	// Providers with no region table have no endpoint requirement — the kernel
-	// adapter supplies its own (gemini, claude) or the user does (custom).
-	if errs := presetWith("gemini", "").Validate(); len(errs) != 0 {
-		t.Errorf("gemini with no base_url = %v, want no violations", errs)
-	}
-
-	// Every shipped builtin that has a region table must carry an endpoint,
-	// so the templates themselves cannot trip the new rule. (Builtins are not
-	// wholesale Validate-clean: `custom` deliberately ships an empty model for
-	// the user to fill in.)
-	for _, p := range BuiltinPresets() {
-		llm, _ := p.Manifest["llm"].(map[string]interface{})
-		provider, _ := llm["provider"].(string)
-		if _, ok := ProviderRegionURLs[provider]; !ok {
-			continue
-		}
-		if s, _ := llm["base_url"].(string); s == "" {
-			t.Errorf("builtin %s has provider %q with a region table but no base_url", p.Name, provider)
+// TestValidateAcceptsEmptyBaseURLForEveryFamily: base_url is optional in the
+// four-family model — openai/anthropic fall back to the official endpoint and
+// codex/claude-code own their routes — so an empty or absent endpoint is never
+// a structural violation.
+func TestValidateAcceptsEmptyBaseURLForEveryFamily(t *testing.T) {
+	for _, provider := range []string{ProviderOpenAI, ProviderAnthropic, ProviderCodex, ProviderClaudeCode} {
+		for _, baseURL := range []interface{}{nil, "", "https://gateway.example.com/v1"} {
+			llm := map[string]interface{}{"provider": provider, "model": "some-model"}
+			if baseURL != nil {
+				llm["base_url"] = baseURL
+			}
+			p := Preset{
+				Name:        provider,
+				Description: PresetDescription{Summary: "test preset"},
+				Manifest:    map[string]interface{}{"llm": llm},
+			}
+			if errs := p.Validate(); len(errs) != 0 {
+				t.Errorf("%s with base_url %#v = %v, want no violations", provider, baseURL, errs)
+			}
 		}
 	}
 }

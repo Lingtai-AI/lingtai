@@ -572,8 +572,8 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 		if v := asString(llm["base_url"]); v != "" {
 			b.WriteString(kv("base_url", v))
 		}
-		if v := asString(llm["api_compat"]); v != "" {
-			b.WriteString(kv("api_compat", v))
+		if v := asString(llm["wire_api"]); v != "" {
+			b.WriteString(kv("wire_api", v))
 		}
 		if v := asString(llm["api_key_env"]); v != "" {
 			b.WriteString(kv("api_key_env", v))

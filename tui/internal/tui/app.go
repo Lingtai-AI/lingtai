@@ -683,15 +683,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 
-	case SetupDoneMsg:
-		// During first-run, forward to firstrun model (needs to create default preset)
-		if a.currentView == appViewFirstRun {
-			updated, cmd := a.firstRun.Update(msg)
-			a.firstRun = updated
-			return a, cmd
-		}
-		return a.switchToView("mail")
-
 	case UsePresetMsg:
 		// Create agent from preset
 		process.InitProject(a.projectDir)
@@ -2325,8 +2316,7 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 // grant. label identifies the account in the banner without leaking secrets.
 // Token material is written 0600 and never logged. The actual expiry check,
 // refresh call, and atomic write-back live in ensureFreshCodexTokens
-// (oauth.go), shared with the save-time Codex eligibility probe
-// (codex_model_probe.go) so both agree on staleness/revocation handling.
+// (oauth.go).
 func validateOneCodexAuthFile(authPath, label string) string {
 	raw, err := os.ReadFile(authPath)
 	if err != nil {

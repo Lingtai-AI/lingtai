@@ -1,9 +1,9 @@
 ---
 name: dj
 description: Nested swiss-knife reference for composing one music track that resonates with a project journal entry, on demand. Walks the user's saved presets to find a usable media-creation provider (MiniMax, etc.), reads the journal at ~/.lingtai-tui/brief/projects/<hash>/journal.md, picks a genre that fits the day, generates the audio, and saves it next to the journal under music/ with an index entry. Read this when the user asks for music for a journal day, a project's vibe, session mood, or a specific generated genre — decline honestly when no usable provider is configured.
-version: 1.1.0
+version: 1.1.1
 tags: [media-creation, music, journal, on-demand]
-last_changed_at: "2026-07-18T00:00:00Z"
+last_changed_at: "2026-09-29T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -56,7 +56,7 @@ grep -E '^[A-Z0-9_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1
 **Step D — decide.**
 
 - **Any usable provider exists** → pick one (prefer the user's stated provider; otherwise pick whichever matches a current preset they're using; otherwise pick the first). Load its skill, follow its instructions, compose.
-- **No usable provider** → reply plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. For MiniMax, suggest concretely: "save a MiniMax preset via the TUI preset library and paste your `sk-cp-…` key — this will populate that preset's slot in `~/.lingtai-tui/.env` and unlock the `minimax-cli` skill." **Do not produce a fake track. Do not pretend.**
+- **No usable provider** → reply plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. For MiniMax, suggest concretely: "save an `anthropic` preset via the TUI preset library with `base_url` set to MiniMax's Anthropic-compatible endpoint and paste your `sk-cp-…` key — this will populate that preset's slot in `~/.lingtai-tui/.env` and unlock the `minimax-cli` skill." **Do not produce a fake track. Do not pretend.**
 
 ## Genre palette
 

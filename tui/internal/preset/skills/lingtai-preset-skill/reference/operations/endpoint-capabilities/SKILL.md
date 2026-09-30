@@ -1,11 +1,11 @@
 ---
 name: preset-skill-op-endpoint-capabilities
-description: Base URL / API-compat / provider / model / capability declaration shape versus credentials and live probes; includes proven Codex OAuth quota inspection with exact agent query routing and dated official-vs-measured context-window evidence.
-version: 1.1.1
+description: Base URL / wire / provider / model / capability declaration shape versus credentials and live probes; includes proven Codex OAuth quota inspection with exact agent query routing and dated official-vs-measured context-window evidence.
+version: 2.0.0
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
-  - tui/internal/tui/model_validity.go
+  - tui/internal/tui/doctor.go
   - tui/internal/preset/preset_skill_router_test.go
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
@@ -18,27 +18,35 @@ instead of re-explaining the shape every time.
 
 ## Declaration fields (non-credential)
 
-- **`provider`** — the kernel adapter name (`minimax`, `zhipu`, `codex`,
-  `custom`, ...). Selects which adapter class handles the request; not
-  itself a credential.
-- **`model`** — the exact model string sent to the provider. Some
-  providers (`gemini`, `claude-code`) use a native alias or model id
-  with no override surface; others (`custom`) leave it empty until
-  configured.
-- **`base_url`** — the endpoint the adapter calls. Native adapters
-  (`gemini`, `claude-code`) omit it entirely; OpenAI-compatible and
-  gateway providers set it explicitly or leave it `nil` for
-  provider-resolved defaults (`openrouter`).
-- **`api_compat`** — when present (`"openai"`), tells the kernel to route
-  through the OpenAI-compatible client shape rather than a native adapter.
-  Absence does not mean "unsupported" — native adapters (`gemini`) simply
-  don't need it.
+- **`provider`** — one of the four families the kernel accepts: `openai`,
+  `anthropic`, `codex`, `claude-code`. It selects the adapter; it is not
+  itself a credential. Vendor-named providers (`custom`, `deepseek`,
+  `minimax`, `openrouter`, ...) are rejected by the kernel; other vendors are
+  reached through `openai`/`anthropic` with their compatible `base_url`.
+- **`model`** — the exact model string sent to the endpoint. `codex` and
+  `claude-code` use curated picker catalogs (Codex OAuth models, Claude CLI
+  aliases); `openai` and `anthropic` are free text because the endpoint is
+  arbitrary.
+- **`base_url`** — the endpoint the adapter calls. Optional for `openai`
+  (official `https://api.openai.com/v1`, SDK-style with its own version path)
+  and `anthropic` (official `https://api.anthropic.com`, `/v1/...` appended);
+  `codex` uses its `/backend-api/codex` route; `claude-code` has none.
+- **`wire_api`** — `openai` family only: `chat_completions` (default,
+  written explicitly) or `responses`; `responses_transport` (`http` default,
+  or `websocket`) applies only to the Responses wire. The retired
+  `api_compat` field is no longer read by the kernel and is never written by
+  the TUI.
+- **`thinking` / `service_tier`** — standard reasoning effort for `openai`
+  and `anthropic` (`none`..`xhigh`, omitted = kernel default); Codex keeps its
+  `low`..`xhigh` ladder with an explicit `xhigh` default. `service_tier`
+  (`fast` → priority) applies to `openai` and `codex` only.
 - **`capabilities.vision` / `capabilities.web_search` / `capabilities.skills`**
   — opt-in capability declarations, not proof the underlying model actually
-  performs an image/search call correctly. A capability being wired only
-  means the kernel *will attempt* the corresponding route with the
-  declared provider/credential; whether the live call succeeds is a
-  runtime fact, not a manifest fact.
+  performs an image/search call correctly. Templates declare
+  `web_search: duckduckgo` and `vision: inherit` (the agent's own provider and
+  credentials) rather than any per-vendor capability provider. A capability
+  being wired only means the kernel *will attempt* the corresponding route;
+  whether the live call succeeds is a runtime fact, not a manifest fact.
 
 ## Distinct from credentials and live probes
 
@@ -48,7 +56,7 @@ These declaration fields answer "what will be called and how" — they are
 - **Credentials** — `api_key_env` (env-var name, not a value),
   `codex_auth_path` (which bound OAuth token file, not its contents), or
   local CLI login state (`claude-code`). See `ResolveRefsWithAuth`
-  (`tui/internal/preset/preset.go:748-829`) for how credential *validity*
+  (`tui/internal/preset/preset.go`) for how credential *validity*
   (not the declaration) is judged per-provider — keyed providers check
   `existingKeys[envName]`, `codex` checks OAuth state
   (per-account when `AuthState.CodexAuthDir` is set, else the global

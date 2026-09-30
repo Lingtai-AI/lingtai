@@ -1,7 +1,7 @@
 ---
 name: preset-skill-op-activation-session-refresh
 description: How a saved preset becomes the running default, first-run/setup choice semantics, propagation, and what /refresh actually switches.
-version: 1.0.2
+version: 1.0.3
 last_changed_at: "2026-09-29T00:00:00Z"
 related_files:
   - tui/internal/tui/firstrun.go
@@ -12,15 +12,15 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # Activation / session refresh
 
-Evidence: `tui/internal/tui/firstrun.go:3634-3818`,
-`tui/internal/tui/firstrun.go:4516`,
-`tui/internal/tui/firstrun.go:4598`, `tui/internal/tui/app.go:980-1029`,
-`tui/internal/tui/app.go:1249-1351`, `tui/internal/tui/app.go:1416-1500`, and
-`tui/internal/tui/app.go:1711-1737`.
+Evidence: `tui/internal/tui/firstrun.go:2889-3073`,
+`tui/internal/tui/firstrun.go:3615`,
+`tui/internal/tui/firstrun.go:3697`, `tui/internal/tui/app.go:971-1020`,
+`tui/internal/tui/app.go:1240-1342`, `tui/internal/tui/app.go:1407-1491`, and
+`tui/internal/tui/app.go:1702-1728`.
 
 ## The agent-preset page is saved-only
 
-`enterAgentPresets()` (`firstrun.go:3644-3745`) lists only **saved**
+`enterAgentPresets()` (`firstrun.go:2899-3000`) lists only **saved**
 presets (`Source == SourceSaved` via `preset.IsTemplate`), never raw
 templates. A built-in template isn't "endorsed" onto this surface until
 the user has edited and saved it — which materializes a saved preset. See
@@ -33,7 +33,7 @@ The wizard defaults to "nothing allowed except the one the user's cursor
 was on when they entered this step" — the schema invariant is that
 `default` must be a member of `allowed`, and the default row is always
 forced into `presetAllowed`. `allowedPresetRefs()`
-(`firstrun.go:3787-3802`) writes the default preset first, then the rest
+(`firstrun.go:3042-3057`) writes the default preset first, then the rest
 of the user-checked rows in row order, into
 `manifest.preset.{default,allowed}`.
 
@@ -41,10 +41,10 @@ of the user-checked rows in row order, into
 
 Re-running `/setup` on an agent that already has an `init.json` hydrates
 `presetAllowed`/`presetDefaultIdx` from the **existing**
-`manifest.preset.{default,allowed}` (`firstrun.go:3686-3742`) rather than
+`manifest.preset.{default,allowed}` (`firstrun.go:2945-2997`) rather than
 resetting to "nothing allowed" — so re-running setup only changes what the
 user explicitly changes. Path comparison is normalized (`~/...` vs
-absolute) via `presetRefMatches` (`firstrun.go:3759-3780`) so the same file
+absolute) via `presetRefMatches` (`firstrun.go:3014-3035`) so the same file
 referenced two different ways still matches. A preset the wizard's cursor
 now points at, but which isn't in the existing allowed list (e.g. just
 created in the editor), is auto-checked so it doesn't silently stay
@@ -52,8 +52,8 @@ unauthorized — the user can still uncheck it.
 
 ## Propagation is best-effort, network-wide
 
-`propagatePresetPolicyToNetwork()` (`firstrun.go:3813-3818`; call sites at
-`firstrun.go:4527` and `firstrun.go:4609`) treats `/setup`
+`propagatePresetPolicyToNetwork()` (`firstrun.go:3068-3073`; call sites at
+`firstrun.go:3615` and `firstrun.go:3697`) treats `/setup`
 as a network-wide preset-policy reset: the wizard's chosen
 `{default, allowed}` surface is pushed to every other agent in the
 project, not just the one being edited. This is **best-effort** — failures
@@ -62,7 +62,7 @@ already succeeded.
 
 ## `/refresh` — three forms, one thing they don't do
 
-`app.go:980-1029` handles three `/refresh` invocations:
+`app.go:971-1020` handles three `/refresh` invocations:
 
 - **`/refresh all`** — for every non-human agent, attempts a best-effort
   reset of `manifest.preset.active` to that agent's configured

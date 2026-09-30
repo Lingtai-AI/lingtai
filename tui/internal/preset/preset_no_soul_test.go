@@ -20,7 +20,7 @@ func genInit(t *testing.T, opts AgentOpts) (manifest map[string]interface{}, glo
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
@@ -67,11 +67,11 @@ func TestGenerateInitJSON_PreservesRetiredEnvLinesByteForByte(t *testing.T) {
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatalf("mkdir global: %v", err)
 	}
-	seed := "# keep me\nMINIMAX_API_KEY=secret\nLINGTAI_SOUL_FLOW_ENABLED=1\n"
+	seed := "# keep me\nOPENAI_API_KEY=secret\nLINGTAI_SOUL_FLOW_ENABLED=1\n"
 	if err := os.WriteFile(config.EnvFilePath(globalDir), []byte(seed), 0o600); err != nil {
 		t.Fatalf("seed .env: %v", err)
 	}
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	got, err := os.ReadFile(config.EnvFilePath(globalDir))
@@ -115,7 +115,7 @@ func TestGenerateInitJSON_OldAgentKeepsLegacySoulFieldsInert(t *testing.T) {
 		t.Fatalf("seed legacy init.json: %v", err)
 	}
 
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(agentDir, "init.json"))

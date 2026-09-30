@@ -58,20 +58,10 @@ var wantOperations = map[string]bool{
 	"troubleshooting-migration":  true,
 }
 
-// wantExternalRecipes is the fixed set of top-level reference/<name>/ children
-// that are NOT BuiltinPresets() templates: external-endpoint recipes a user
-// configures through an ordinary saved preset (subs-pool is reached as a
-// custom OpenAI-compatible Responses endpoint). Like wantOperations, there is
-// no runtime source list for them, so this literal is the single source of
-// truth. A recipe name must never collide with a template name.
-var wantExternalRecipes = map[string]bool{
-	"subs-pool": true,
-}
-
 // TestPresetSkillRouter_BuiltinBijection keeps the source preset list, the
 // embedded direct-provider manuals, the parent router, and extracted utility
-// tree aligned. Top-level children are exactly the 12 BuiltinPresets() names
-// plus wantExternalRecipes — nested operation children live under
+// tree aligned. Top-level children are exactly the 4 BuiltinPresets() names
+// (one per provider family) — nested operation children live under
 // reference/operations/ and are validated separately by
 // TestPresetSkillRouter_OperationBijection so a provider directory can never
 // silently absorb an operation, or vice versa.
@@ -81,13 +71,7 @@ func TestPresetSkillRouter_BuiltinBijection(t *testing.T) {
 		if want[p.Name] {
 			t.Errorf("BuiltinPresets() contains duplicate name %q", p.Name)
 		}
-		if wantExternalRecipes[p.Name] {
-			t.Errorf("BuiltinPresets() name %q collides with an external recipe child", p.Name)
-		}
 		want[p.Name] = true
-	}
-	for name := range wantExternalRecipes {
-		want[name] = true
 	}
 
 	children := map[string]bool{}
@@ -338,18 +322,10 @@ func TestPresetSkillRouter_OperationBijection(t *testing.T) {
 // page itself.
 func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	wantProviders := []string{
-		"minimax",
-		"zhipu",
-		"mimo",
-		"deepseek",
-		"gemini",
-		"kimi",
-		"grok",
-		"nvidia",
-		"openrouter",
 		"codex",
 		"claude",
-		"custom",
+		"openai",
+		"anthropic",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
@@ -379,31 +355,45 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	}
 }
 
-// TestPresetSkillRouter_SubsPoolContract checks the subs-pool recipe points at
-// the external project and carries the minimal custom Responses manifest.llm
-// shape, and that the retired built-in pool is not routed as a template.
-func TestPresetSkillRouter_SubsPoolContract(t *testing.T) {
-	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/subs-pool/SKILL.md")
+// TestPresetSkillRouter_OpenAIPoolRecipeContract checks the openai child owns
+// the subscription/account-pool recipe: an external pool (sub2api /
+// subs-pool) reached as an openai-family Responses endpoint, with no retired
+// provider, api_compat field, or pool template. It also pins that the retired
+// per-vendor, custom, codex-pool, and subs-pool children are gone.
+func TestPresetSkillRouter_OpenAIPoolRecipeContract(t *testing.T) {
+	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/openai/SKILL.md")
 	if err != nil {
-		t.Fatalf("read subs-pool manual: %v", err)
+		t.Fatalf("read openai manual: %v", err)
 	}
 	body := string(data)
 	for _, want := range []string{
+		"sub2api",
 		"https://github.com/Lingtai-AI/subs-pool",
-		`"provider": "custom"`,
-		`"api_compat": "openai"`,
+		`"provider": "openai"`,
 		`"wire_api": "responses"`,
 		`"base_url": "http://127.0.0.1:<port>/v1"`,
 		`"api_key_env"`,
 		"local access key",
 		"README",
+		"https://api.openai.com/v1",
+		"chat_completions",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("subs-pool manual missing %q", want)
+			t.Errorf("openai manual missing %q", want)
 		}
 	}
-	if _, err := fs.Stat(skillsFS, "skills/lingtai-preset-skill/reference/codex-pool"); err == nil {
-		t.Error("retired reference/codex-pool child must not be embedded")
+	for _, mustNot := range []string{`"provider": "custom"`, `"api_compat"`} {
+		if strings.Contains(body, mustNot) {
+			t.Errorf("openai manual still describes the retired %s shape", mustNot)
+		}
+	}
+	for _, retired := range []string{
+		"codex-pool", "subs-pool", "custom",
+		"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "grok", "nvidia", "openrouter",
+	} {
+		if _, err := fs.Stat(skillsFS, "skills/lingtai-preset-skill/reference/"+retired); err == nil {
+			t.Errorf("retired reference/%s child must not be embedded", retired)
+		}
 	}
 	parentData, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
 	if err != nil {
@@ -455,10 +445,10 @@ func TestPresetSkillRouter_SavedAndAvailabilitySourceContracts(t *testing.T) {
 	for _, want := range []string{
 		"Save is structural-only",
 		"never makes a live provider/model network call",
-		"Codex and API-key providers like",
-		"DeepSeek",
+		"Codex and Claude Code logins",
 		"not been replaced by another probe",
 		"`/doctor`",
+		"by provider family",
 	} {
 		if !strings.Contains(gate, want) {
 			t.Errorf("availability-save-gate manual missing %q", want)
@@ -664,41 +654,32 @@ func TestPresetSkillRouter_AllBundledMaintenance(t *testing.T) {
 	}
 }
 
+// TestBuiltinPresetVisionWiring pins the template capability contract: no
+// per-vendor vision provider. Every template that can serve images declares
+// vision as "inherit" (the agent's own provider and credentials); the claude
+// template declares none.
 func TestBuiltinPresetVisionWiring(t *testing.T) {
-	presets := map[string]Preset{}
 	for _, p := range BuiltinPresets() {
-		presets[p.Name] = p
-	}
-
-	geminiCaps, ok := presets["gemini"].Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatal("gemini capabilities has unexpected type")
-	}
-	geminiVision, ok := geminiCaps["vision"].(map[string]interface{})
-	if !ok {
-		t.Fatal("gemini must expose a vision capability")
-	}
-	if got := geminiVision["provider"]; got != "gemini" {
-		t.Fatalf("gemini vision provider = %#v, want gemini", got)
-	}
-	if got := geminiVision["api_key_env"]; got != "GEMINI_API_KEY" {
-		t.Fatalf("gemini vision api_key_env = %#v, want GEMINI_API_KEY", got)
-	}
-
-	zhipuCaps, ok := presets["zhipu"].Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatal("zhipu capabilities has unexpected type")
-	}
-	if _, ok := zhipuCaps["vision"]; ok {
-		t.Fatal("zhipu must not expose a default vision capability for text-only GLM-5.2")
-	}
-
-	openrouterCaps, ok := presets["openrouter"].Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatal("openrouter capabilities has unexpected type")
-	}
-	if _, ok := openrouterCaps["vision"]; ok {
-		t.Fatal("openrouter stock template must not expose a default vision capability")
+		caps, ok := p.Manifest["capabilities"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s capabilities has unexpected type", p.Name)
+		}
+		vision, hasVision := caps["vision"].(map[string]interface{})
+		if p.Name == "claude" {
+			if hasVision {
+				t.Fatalf("claude template must not expose a vision capability: %#v", vision)
+			}
+			continue
+		}
+		if !hasVision {
+			t.Fatalf("%s must expose a vision capability", p.Name)
+		}
+		if got := vision["provider"]; got != "inherit" {
+			t.Fatalf("%s vision provider = %#v, want inherit", p.Name, got)
+		}
+		if len(vision) != 1 {
+			t.Fatalf("%s vision carries per-vendor fields: %#v", p.Name, vision)
+		}
 	}
 }
 
@@ -712,33 +693,16 @@ func TestPresetVisionManualContracts(t *testing.T) {
 		return string(data)
 	}
 
-	gemini := readChild(t, "gemini")
-	for _, want := range []string{"gemini-3-flash-preview", "GEMINI_API_KEY", "explicit LingTai `vision` capability"} {
-		if !strings.Contains(gemini, want) {
-			t.Errorf("gemini manual missing %q", want)
+	// Compare on whitespace-normalized prose so re-wrapping a paragraph does
+	// not break the contract.
+	oneLine := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for _, name := range []string{"openai", "anthropic", "codex"} {
+		if body := oneLine(readChild(t, name)); !strings.Contains(body, "vision inheriting the agent's own") {
+			t.Errorf("%s manual does not document the inherited vision route", name)
 		}
 	}
-
-	zhipu := readChild(t, "zhipu")
-	for _, want := range []string{"GLM-5.2", "@z_ai/mcp-server", "GLM-4.6V", "ZHIPU_API_KEY", "Z_AI_API_KEY", "Z_AI_MODE", "5-hour prompt pool"} {
-		if !strings.Contains(zhipu, want) {
-			t.Errorf("zhipu manual missing %q", want)
-		}
-	}
-
-	openrouter := readChild(t, "openrouter")
-	for _, want := range []string{"stock template is text-only", "explicitly adds\n`capabilities.vision`", "only then may the vision tool attempt"} {
-		if !strings.Contains(openrouter, want) {
-			t.Errorf("openrouter manual missing %q", want)
-		}
-	}
-	if strings.Contains(openrouter, "route by default") {
-		t.Fatal("openrouter manual must not claim the stock text-only template routes vision by default")
-	}
-
-	retiredModel := strings.Join([]string{"mimo", "v2", "flash"}, "-")
-	if mimo := readChild(t, "mimo"); strings.Contains(mimo, retiredModel) {
-		t.Fatalf("mimo manual still mentions retired model %q", retiredModel)
+	if claude := oneLine(readChild(t, "claude")); !strings.Contains(claude, "or LingTai vision capability") {
+		t.Errorf("claude manual does not state it has no LingTai vision capability")
 	}
 }
 

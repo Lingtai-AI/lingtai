@@ -84,7 +84,7 @@ const (
 	// from embedded data on every launch.
 	SourceTemplate
 	// SourceSaved means the preset lives under presets/saved/. User-
-	// owned; never touched by Bootstrap/SeedMissingBuiltins.
+	// owned; never touched by Bootstrap/RefreshTemplates.
 	SourceSaved
 )
 
@@ -209,9 +209,10 @@ func listFromDir(dir string, src PresetSource) ([]Preset, error) {
 }
 
 // List returns saved presets first (alphabetical), then templates in
-// the canonical product order. Each preset carries a Source field
-// recording which directory it came from — callers should prefer
-// p.Source over name-matching when asking "is this a template?".
+// BuiltinPresets() order (any stray template file not in that list sorts
+// last, alphabetically). Each preset carries a Source field recording which
+// directory it came from — callers should prefer p.Source over name-matching
+// when asking "is this a template?".
 func List() ([]Preset, error) {
 	saved, err := listFromDir(SavedDir(), SourceSaved)
 	if err != nil {
@@ -225,13 +226,22 @@ func List() ([]Preset, error) {
 	sort.Slice(saved, func(i, j int) bool {
 		return saved[i].Name < saved[j].Name
 	})
-	templateOrder := map[string]int{
-		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "grok": 5, "nvidia": 6, "openrouter": 7,
-		"codex": 8, "claude": 9, "custom": 10,
+	templateOrder := map[string]int{}
+	for i, p := range BuiltinPresets() {
+		templateOrder[p.Name] = i
 	}
-	sort.Slice(templates, func(i, j int) bool {
-		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
+	rank := func(name string) int {
+		if i, ok := templateOrder[name]; ok {
+			return i
+		}
+		return len(templateOrder)
+	}
+	sort.SliceStable(templates, func(i, j int) bool {
+		ri, rj := rank(templates[i].Name), rank(templates[j].Name)
+		if ri != rj {
+			return ri < rj
+		}
+		return templates[i].Name < templates[j].Name
 	})
 
 	return append(saved, templates...), nil
@@ -375,38 +385,9 @@ func (p Preset) Validate() []error {
 		if s, _ := llm["model"].(string); s == "" {
 			errs = append(errs, fmt.Errorf("manifest.llm.model must be non-empty"))
 		}
-		// A provider with a region table reaches its API through an explicit
-		// endpoint — there is no implicit default in the kernel adapter. The
-		// editor's Custom sentinel deliberately clears base_url so Enter opens
-		// a blank inline edit, and nothing forces the user to type one (Esc
-		// leaves it empty), so without this check two arrow presses and a save
-		// persist a preset with no endpoint at all.
-		//
-		// Only an explicitly EMPTY value is a violation. A preset that simply
-		// omits the key (hand-edited or recipe-imported saved presets, or the
-		// pre-region-table wizard shape) is tolerated when regionSuffix can
-		// assign a default region (zhipu → CN, minimax → INTL): AutoEnvVarName
-		// stamps a slot for it, so such a preset remains well-defined. A
-		// region-table provider without a region fallback (deepseek, kimi,
-		// mimo, grok) still needs an explicit endpoint, so an absent key stays
-		// a violation there. kimi and mimo joined that set when they gained a
-		// region table — a base_url-less kimi/mimo preset that validated on an
-		// older TUI must gain an explicit endpoint to save again.
-		// The editor's Custom sentinel is the only path that writes an
-		// explicit "", and that is always rejected.
-		if provider, _ := llm["provider"].(string); provider != "" {
-			if _, hasRegions := ProviderRegionURLs[provider]; hasRegions {
-				if v, present := llm["base_url"]; present {
-					if s, _ := v.(string); s == "" {
-						errs = append(errs, fmt.Errorf(
-							"manifest.llm.base_url must be non-empty for provider %q", provider))
-					}
-				} else if regionSuffix(provider, "") == "" {
-					errs = append(errs, fmt.Errorf(
-						"manifest.llm.base_url must be non-empty for provider %q", provider))
-				}
-			}
-		}
+		// base_url is optional for every family: the openai and anthropic
+		// families fall back to their official endpoints when it is empty,
+		// and codex/claude-code own their own routes.
 		if v, ok := llm["context_limit"]; ok && v != nil {
 			// JSON unmarshals numbers as float64; accept int-valued floats.
 			switch n := v.(type) {
@@ -526,17 +507,6 @@ func Delete(name string) error {
 	return err
 }
 
-// EnsureDefault is now a no-op kept for callers that haven't been
-// updated. Templates are unconditionally rewritten by RefreshTemplates
-// on every Bootstrap, and saved presets are user territory — there is
-// nothing to "ensure default" anymore.
-func EnsureDefault() error { return nil }
-
-// SeedMissingBuiltins is replaced by RefreshTemplates. Kept as a thin
-// alias so old callers (lingtai-claude-code, codex-plugin) that import
-// the preset package don't break on upgrade.
-func SeedMissingBuiltins() error { return RefreshTemplates() }
-
 // RefreshTemplates rewrites templates/ from BuiltinPresets() wholesale.
 // Called from Bootstrap on every TUI launch. Deletes any *.json file
 // in templates/ that's no longer in BuiltinPresets() so a TUI upgrade
@@ -572,167 +542,87 @@ func RefreshTemplates() error {
 	return nil
 }
 
-// RegionURL pairs a human-readable label with an API base URL.
-// Env, when non-empty, is the api_key_env slot the option implies (e.g.
-// "DEEPSEEK_API_KEY") and is applied to the preset when the option is
-// selected. Empty Env means "don't touch api_key_env"; the editor
-// restores the slot it memoized when cycling back off an Env row.
-//
-// Env is deliberately present ONLY where a region genuinely implies a
-// distinct credential (DeepSeek API vs OpenCode Go on deepseek, and the
-// OpenCode Go row on zhipu/minimax/kimi/mimo/grok, are separate accounts).
-// The plain native rows (zhipu/minimax CN and INTL, Kimi Code, MiMo) declare
-// none: their slots are region-suffixed and host-stamped
-// (ZHIPU_INTL_1_API_KEY, MINIMAX_CN_1_API_KEY, KIMI_1_API_KEY via
-// AutoEnvVarName), and a flat Env on those rows would overwrite that slot
-// on every base_url cycle. Their provider default lives in
-// ProviderDefaultEnv instead.
-//
-// The Custom sentinel (empty URL) declares no Env either, and the editor
-// additionally leaves api_key_env untouched when landing on it: the user is
-// about to type their own endpoint and keeps whatever slot that endpoint
-// actually uses. Note the consequence for a preset arriving from an Env row —
-// the shared OpenCode Go slot carries over until the user changes it.
-type RegionURL struct {
-	Label string // user-facing option name, e.g. "CN", "INTL", "DeepSeek API", "Custom"
-	URL   string
-	Env   string // optional credential env-var name; empty = leave api_key_env alone
+// Provider family names. These four are the only manifest.llm.provider
+// values the kernel accepts; every other vendor is reached through the openai
+// or anthropic family pointed at that vendor's compatible endpoint (or an
+// external pool such as sub2api / subs-pool).
+const (
+	// ProviderOpenAI is any OpenAI-compatible endpoint (Chat Completions or
+	// Responses, selected by manifest.llm.wire_api).
+	ProviderOpenAI = "openai"
+	// ProviderAnthropic is any Anthropic Messages-compatible endpoint.
+	ProviderAnthropic = "anthropic"
+	// ProviderCodex is the ChatGPT-OAuth Codex backend.
+	ProviderCodex = "codex"
+	// ProviderClaudeCode is the local Claude Code CLI login (shown as
+	// "claude-p" in the TUI).
+	ProviderClaudeCode = "claude-code"
+)
+
+// Official endpoints the two API-key families fall back to when a preset
+// leaves manifest.llm.base_url empty. The kernel applies the same defaults;
+// the TUI only needs them to probe an endpoint (/doctor, credentials page).
+const (
+	OpenAIDefaultBaseURL    = "https://api.openai.com/v1"
+	AnthropicDefaultBaseURL = "https://api.anthropic.com"
+)
+
+// Wire formats an openai-family preset can select through
+// manifest.llm.wire_api. Chat Completions is the default.
+const (
+	WireAPIChatCompletions = "chat_completions"
+	WireAPIResponses       = "responses"
+)
+
+// DefaultAPIKeyEnv returns the api_key_env slot a fresh preset of the given
+// provider family declares: OPENAI_API_KEY / ANTHROPIC_API_KEY for the two
+// API-key families, "" for the OAuth/CLI families and anything else.
+func DefaultAPIKeyEnv(provider string) string {
+	switch provider {
+	case ProviderOpenAI:
+		return "OPENAI_API_KEY"
+	case ProviderAnthropic:
+		return "ANTHROPIC_API_KEY"
+	}
+	return ""
 }
 
-// ProviderRegionURLs maps provider names to their regional endpoint
-// options. Providers not in this map have a single endpoint (or none)
-// and their base_url is free-text in the editor. The first entry is
-// the default for new presets. An entry with an empty URL is the free-text
-// "Custom" sentinel: selecting it clears base_url so the editor opens an
-// inline edit for any user-typed endpoint. At most one entry per provider
-// may carry an empty URL.
-var ProviderRegionURLs = map[string][]RegionURL{
-	"deepseek": {
-		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
-		// OpenCode Go is scoped to DeepSeek models served through the OpenCode Go
-		// subscription (provider stays "deepseek"); other Go models are reached via
-		// a Custom preset.
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
-	},
-	"zhipu": {
-		{Label: "CN", URL: "https://open.bigmodel.cn/api/coding/paas/v4"},
-		{Label: "INTL", URL: "https://api.z.ai/api/coding/paas/v4"},
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-	},
-	"minimax": {
-		{Label: "CN", URL: "https://api.minimaxi.com/anthropic"},
-		{Label: "INTL", URL: "https://api.minimax.io/anthropic"},
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-	},
-	// OpenCode Go serves the Kimi K-series (kimi-k3, kimi-k2.7-code, ...)
-	// under lowercase model ids; the native Kimi Code endpoint serves the
-	// current subscription model `k3`. Kimi had free-text base_url
-	// before it gained this table, so it carries the Custom sentinel too —
-	// a region table without one removes the only in-editor path to a
-	// corporate proxy or relay.
-	"kimi": {
-		{Label: "Kimi Code", URL: "https://api.kimi.com/coding/v1"},
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
-	},
-	// OpenCode Go serves the MiMo V2 family alongside Xiaomi's own endpoint.
-	// Custom sentinel for the same reason as kimi above.
-	"mimo": {
-		{Label: "MiMo", URL: "https://api.xiaomimimo.com/v1"},
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
-	},
-	// grok is the one provider whose DEFAULT row is OpenCode Go: the TUI has
-	// no native xAI route (no verified api.x.ai endpoint/model pairing), so
-	// `grok-4.5` is reached only through the Go subscription. Entry [0]
-	// therefore declares OPENCODE_GO_API_KEY and grokPreset() ships that same
-	// slot; ProviderDefaultEnv["grok"] holds the provider-generic fallback
-	// name (see ProviderDefaultEnv below).
-	"grok": {
-		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
-		{Label: "Custom", URL: ""}, // empty URL = free text sentinel
-	},
+// DefaultBaseURL returns the official endpoint an API-key family uses when
+// base_url is empty, or "" for providers that have no such fallback.
+func DefaultBaseURL(provider string) string {
+	switch provider {
+	case ProviderOpenAI:
+		return OpenAIDefaultBaseURL
+	case ProviderAnthropic:
+		return AnthropicDefaultBaseURL
+	}
+	return ""
 }
 
-// ProviderDefaultEnv maps each provider to its provider-generic api_key_env
-// fallback slot. Consulted on provider switch only; it
-// must not be read from a region cycle, so zhipu/minimax region rows declare
-// no Env (see RegionURL) and their CN<->INTL cycling preserves whatever
-// region-suffixed slot the host stamped (ZHIPU_INTL_1_API_KEY etc.).
-//
-// Values match each builtin preset's declared api_key_env ("" = OAuth/CLI
-// providers with no key slot, or a generic placeholder the user replaces).
-//
-// grok is the single deliberate exception: grokPreset() declares
-// OPENCODE_GO_API_KEY because its default (and only non-Custom) endpoint IS
-// OpenCode Go, so an existing Go user needs no second copy of the key. The
-// entry below is the provider-generic fallback name; the editor adopts the
-// landing row's slot on a switch. Keeping the two different is what makes
-// usesRegionDeclaredEnv treat the Go slot as a cross-provider account worth
-// preserving across a save, instead of as this template's own shared slot.
-var ProviderDefaultEnv = map[string]string{
-	"minimax":    "MINIMAX_API_KEY",
-	"zhipu":      "ZHIPU_API_KEY",
-	"mimo":       "XIAOMI_API_KEY",
-	"deepseek":   "DEEPSEEK_API_KEY",
-	"gemini":     "GEMINI_API_KEY",
-	"kimi":       "KIMI_CODE_API_KEY",
-	"grok":       "GROK_API_KEY",
-	"nvidia":     "NVIDIA_API_KEY",
-	"openrouter": "OPENROUTER_API_KEY",
-	"claude":     "",            // OAuth / CLI login
-	"codex":      "",            // OAuth
-	"custom":     "LLM_API_KEY", // generic placeholder, user replaces
-}
-
-// BuiltinPresets returns the built-in presets.
+// BuiltinPresets returns the built-in templates, one per provider family.
+// Order is the picker order: codex first (the first-run default), then the
+// Claude Code CLI login, then the two bring-your-own-endpoint families.
 func BuiltinPresets() []Preset {
 	return []Preset{
-		minimaxPreset(),
-		zhipuPreset(),
-		mimoPreset(),
-		deepseekPreset(),
-		geminiPreset(),
-		kimiPreset(),
-		grokPreset(),
-		nvidiaPreset(),
-		openrouterPreset(),
 		codexPreset(),
 		claudePreset(),
-		customPreset(),
+		openaiPreset(),
+		anthropicPreset(),
 	}
-}
-
-// builtinNames is the set of built-in template names. Used by m030 to
-// classify legacy files in presets/ during the directory split, and by
-// IsBuiltin (which exists for callers that only have a Name, not a
-// loaded Preset).
-// Legacy provider spellings remain recognized for flat-layout migration.
-var builtinNames = map[string]bool{
-	"minimax":          true,
-	"zhipu":            true,
-	"mimo":             true,
-	"deepseek":         true,
-	"gemini":           true,
-	"kimi":             true,
-	"grok":             true,
-	"nvidia":           true,
-	"openrouter":       true,
-	"codex":            true,
-	"codex_oauth":      true,
-	"claude":           true,
-	"claude-agent-sdk": true,
-	"claude_agent_sdk": true,
-	"custom":           true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.
 // Prefer IsTemplate(p) when you have a loaded Preset — that uses the
 // directory-of-origin and is robust against a user saving a preset
-// under a name that happens to match a template.
+// under a name that happens to match a template. (The frozen m030
+// migration keeps its own historical name list; it does not call this.)
 func IsBuiltin(name string) bool {
-	return builtinNames[name]
+	for _, p := range BuiltinPresets() {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // IsTemplate reports whether the given preset was loaded from the
@@ -808,9 +698,9 @@ func ClassifyCredentialFamily(provider string) CredentialFamily {
 
 // ResolvedRef is a credential-aware view of one preset reference.
 type ResolvedRef struct {
-	// Ref is the original input string (e.g. "~/.lingtai-tui/presets/templates/mimo.json").
+	// Ref is the original input string (e.g. "~/.lingtai-tui/presets/templates/codex.json").
 	Ref string
-	// Name is the preset's filename stem (e.g. "mimo"). Empty when Ref
+	// Name is the preset's filename stem (e.g. "codex"). Empty when Ref
 	// is malformed.
 	Name string
 	// Source is SourceTemplate when the resolved path lives under a
@@ -1147,26 +1037,6 @@ func SavedCount(presets []Preset) int {
 	return n
 }
 
-// CountSavedByProvider returns the number of saved presets whose provider matches.
-func CountSavedByProvider(presets []Preset, provider string) int {
-	n := 0
-	for _, p := range presets {
-		if p.Source != SourceSaved {
-			continue
-		}
-		llm, ok := p.Manifest["llm"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if prov, _ := llm["provider"].(string); prov == provider {
-			n++
-		}
-	}
-	return n
-}
-
-func e() map[string]interface{} { return map[string]interface{}{} }
-
 // skillsDefault returns the default skills capability config — two Tier 1
 // paths: the network-shared skills shelf (resolved relative to the agent dir)
 // and the TUI's per-user utilities directory. Users can edit init.json to
@@ -1184,230 +1054,24 @@ func skillsDefault() map[string]interface{} {
 	}
 }
 
-// openAICompatNoVisionPreset builds the manifest shape shared by
-// OpenAI-compatible built-ins that do not wire a vision capability:
-// an `api_compat: "openai"` LLM with an explicit base_url and a
-// key sourced from api_key_env, plus the default DuckDuckGo web_search
-// and skills capabilities. Some exact routes are text-only; Kimi Code is
-// evidence-qualified as multimodal, but its coding endpoint/model mapping
-// is not pinned tightly enough to expose built-in vision yet. Providers
-// with a verified direct vision route build their Preset literally instead.
-func openAICompatNoVisionPreset(name, summary, model, apiKeyEnv, baseURL string, tier string) Preset {
-	desc := PresetDescription{Summary: summary}
-	if tier != "" {
-		desc.Tier = tier
-	}
-	return Preset{
-		Name:        name,
-		Description: desc,
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": name, "model": model,
-				"api_key": nil, "api_key_env": apiKeyEnv,
-				"base_url": baseURL, "api_compat": "openai",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-func minimaxPreset() Preset {
-	mm := map[string]interface{}{
-		"provider":    "minimax",
-		"api_key_env": "MINIMAX_API_KEY",
-	}
-	return Preset{
-		Name:        "minimax",
-		Description: PresetDescription{Summary: "MiniMax M2.7 — Anthropic-compatible text and tool use"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "minimax", "model": "MiniMax-M2.7",
-				"api_key": nil, "api_key_env": "MINIMAX_API_KEY",
-				"base_url": ProviderRegionURLs["minimax"][0].URL,
-			},
-			// Core caps (knowledge, skills, shell, avatar, daemon, mcp,
-			// read/write/edit/glob/grep + psyche/email intrinsics) are
-			// default-on in the kernel — only overrides and opt-in caps
-			// belong here. See lingtai-kernel capabilities.CORE_DEFAULTS.
-			"capabilities": map[string]interface{}{
-				"web_search": mm,
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-func zhipuPreset() Preset {
-	zp := map[string]interface{}{"provider": "zhipu"}
-	return Preset{
-		Name:        "zhipu",
-		Description: PresetDescription{Summary: "Zhipu GLM Coding Plan — OpenAI-compatible"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "zhipu", "model": "GLM-5.2",
-				"api_key": nil, "api_key_env": "ZHIPU_API_KEY",
-				"base_url": ProviderRegionURLs["zhipu"][0].URL, "api_compat": "openai",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": zp,
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-func mimoPreset() Preset {
-	// mimo-v2.5 is the sweet spot: 1M context, vision-capable, supports tool
-	// calls and thinking mode. The current text-only sibling is mimo-v2.5-pro;
-	// retired V2 model IDs are not exposed by the TUI picker. Vision uses the
-	// first-class MiMoVisionService (kernel: services/vision/mimo.py).
-	mp := map[string]interface{}{
-		"provider": "mimo",
-		"model":    "mimo-v2.5",
-	}
-	return Preset{
-		Name:        "mimo",
-		Description: PresetDescription{Summary: "Xiaomi MiMo V2.5 — OpenAI-compatible, 1M context, vision + tools"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "mimo", "model": "mimo-v2.5",
-				"api_key": nil, "api_key_env": "XIAOMI_API_KEY",
-				"base_url": ProviderRegionURLs["mimo"][0].URL, "api_compat": "openai",
-			},
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"vision":     mp,
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-func deepseekPreset() Preset {
-	// DeepSeek's public API is text-only — no media generation. For audio
-	// analysis (transcription, music critique), use the `listen` skill; for
-	// media creation, register the MiniMax-Media MCP server via the
-	// `mcp-manual` skill (kernel `mcp` capability).
-	return openAICompatNoVisionPreset(
-		"deepseek",
-		"DeepSeek V4 Pro — OpenAI-compatible, 1M context window, tool calls",
-		"deepseek-v4-pro", "DEEPSEEK_API_KEY", ProviderRegionURLs["deepseek"][0].URL, "")
-}
-
-func geminiPreset() Preset {
-	// Gemini 3.8 Flash (Google) — multimodal model with native vision,
-	// tool calling, and streaming. Uses Google's own Gemini adapter in
-	// the kernel (not OpenAI-compat), so no base_url or api_compat.
-	gm := map[string]interface{}{
-		"provider":    "gemini",
-		"api_key_env": "GEMINI_API_KEY",
-	}
-	return Preset{
-		Name:        "gemini",
-		Description: PresetDescription{Summary: "Gemini 3.8 Flash — Google's multimodal model, tool calls, vision", Tier: "3"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "gemini", "model": "gemini-3.8-flash",
-				"api_key": nil, "api_key_env": "GEMINI_API_KEY",
-			},
-			// Gemini is multimodal/vision-capable — image inputs are
-			// handled natively by the model. For audio analysis use the
-			// `listen` skill; for media creation register a provider's
-			// MCP server via `mcp-manual`.
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"vision":     gm,
-				"skills":     skillsDefault(),
-			},
-		},
-	}
-}
-
-func kimiPreset() Preset {
-	// Kimi Code (Moonshot 月之暗面) — OpenAI-compatible coding API.
-	// Subscription-based (no per-token billing); current model `k3`.
-	// Tool calling supported. The kernel auto-sets User-Agent
-	// "LingTai-Agent/1.0" for the `kimi` provider per Kimi's ToS — UA
-	// spoofing risks account suspension. The model family has multimodal
-	// evidence, but the exact coding endpoint/model image-input mapping is not
-	// pinned tightly enough to wire a built-in vision capability yet.
-	return openAICompatNoVisionPreset(
-		"kimi",
-		"Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling",
-		"k3", "KIMI_CODE_API_KEY", ProviderRegionURLs["kimi"][0].URL, "3")
-}
-
-func grokPreset() Preset {
-	// Grok (xAI) reached through the OpenCode Go subscription — the only
-	// route this TUI has verified for it. `grok-4.5` is the id the Go
-	// endpoint's model list serves; no native api.x.ai endpoint/model pairing
-	// has been checked, so none is shipped (a user with an xAI key selects
-	// the Custom base_url row, or clones the `custom` template).
-	//
-	// api_key_env is OPENCODE_GO_API_KEY rather than a grok-specific slot
-	// because the shipped endpoint IS OpenCode Go: someone who already
-	// configured that shared account for deepseek/zhipu/minimax/kimi/mimo
-	// gets a working grok preset without pasting the key a second time. The
-	// provider-generic GROK_API_KEY stays in ProviderDefaultEnv as the
-	// fallback name, separate from the slot a switch adopts.
-	//
-	// Text-only: the Go endpoint's image-input mapping for grok-4.5 is not
-	// pinned, so no vision capability is wired.
-	return openAICompatNoVisionPreset(
-		"grok",
-		"Grok (xAI) — OpenAI-compatible via OpenCode Go",
-		"grok-4.5", ProviderRegionURLs["grok"][0].Env, ProviderRegionURLs["grok"][0].URL, "3")
-}
-
-func nvidiaPreset() Preset {
-	// NVIDIA NIM / NVIDIA API Catalog (build.nvidia.com) — an
-	// OpenAI-compatible /chat/completions gateway hosting a large catalog
-	// of open-weight models (Llama, Qwen, Kimi, GPT-OSS, Nemotron, ...) at
-	// no per-token cost on the free developer tier. Default model is the
-	// bounded stable agent snapshot's Nemotron 3 Ultra route; users clone this
-	// preset to switch among the curated IDs in the TUI picker. Provider is the
-	// generic "nvidia" string routed through the kernel's OpenAI-compatible
-	// client via api_compat=openai + the explicit base_url. Text-only — no
-	// media generation; use `listen` for audio, `mcp-manual` for media.
-	//
-	// NOTE: the kernel must register the "nvidia" provider with
-	// prompt_cache_key disabled — NVIDIA NIM rejects that OpenAI-only field
-	// with HTTP 400. See lingtai-kernel llm/_register.py.
-	return openAICompatNoVisionPreset(
-		"nvidia",
-		"NVIDIA NIM — bounded route-served stable agent snapshot, tool calls",
-		"nvidia/nemotron-3-ultra-550b-a55b", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1", "")
-}
-
-func openrouterPreset() Preset {
-	return Preset{
-		Name:        "openrouter",
-		Description: PresetDescription{Summary: "OpenRouter — GLM 5.3 gateway route (interactive, non-batch)"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "openrouter", "model": "z-ai/glm-5.3",
-				"api_key": nil, "api_key_env": "OPENROUTER_API_KEY",
-				"base_url": nil,
-			},
-			// OpenRouter is a text-only /chat/completions gateway — no media
-			// generation. For audio analysis use the `listen` skill; for
-			// media creation register a provider's MCP server via `mcp-manual`.
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
+// familyCapabilities is the capability block shared by every template that
+// can serve images and search: web_search uses the provider-agnostic
+// DuckDuckGo engine, and vision inherits the agent's own LLM provider and
+// credentials (the kernel expands "inherit" at boot). If the configured
+// endpoint or model cannot take image input, the vision call fails at
+// runtime — the TUI makes no per-vendor vision claim.
+func familyCapabilities() map[string]interface{} {
+	return map[string]interface{}{
+		"web_search": map[string]interface{}{"provider": "duckduckgo"},
+		"vision":     map[string]interface{}{"provider": "inherit"},
+		"skills":     skillsDefault(),
 	}
 }
 
 func codexPreset() Preset {
-	cx := map[string]interface{}{"provider": "codex", "api_key_env": ""}
 	return Preset{
 		Name:        "codex",
-		Description: PresetDescription{Summary: "ChatGPT account — vision + web search + tools"},
+		Description: PresetDescription{Summary: "ChatGPT account (Codex OAuth) — vision + web search + tools"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				// Keep gpt-5.6-sol as the default: gpt-6-astra is documented and
@@ -1416,7 +1080,7 @@ func codexPreset() Preset {
 				// GPT-5.6 routes remain selectable where enabled. The complete
 				// curated list lives in preset_editor.go; the bare gpt-5.6 alias is
 				// intentionally omitted.
-				"provider": "codex", "model": "gpt-5.6-sol",
+				"provider": ProviderCodex, "model": "gpt-5.6-sol",
 				"api_key": nil, "api_key_env": "",
 				"base_url": "https://chatgpt.com/backend-api/codex",
 				// LingTai is the primary brain, so Codex runs at maximum
@@ -1425,11 +1089,7 @@ func codexPreset() Preset {
 				// generated init.json actually receive xhigh.
 				"thinking": "xhigh",
 			},
-			"capabilities": map[string]interface{}{
-				"web_search": cx,
-				"vision":     cx,
-				"skills":     skillsDefault(),
-			},
+			"capabilities": familyCapabilities(),
 		},
 	}
 }
@@ -1449,13 +1109,13 @@ func claudePreset() Preset {
 				// AuthState.ClaudeCodeAuthConfigured). Default model is the CLI
 				// alias "opus"; the editor also offers "fable", whose full ID
 				// is `claude-fable-5-1` in current Claude Code.
-				"provider": "claude-code", "model": "opus",
+				"provider": ProviderClaudeCode, "model": "opus",
 				"api_key": nil, "api_key_env": "",
 			},
 			// Conservative capabilities: Claude Code is wired here as a completion
 			// provider only. We do NOT route web_search or vision through it —
-			// the CLI's own native tool surface is out of scope,
-			// and there's no inherit path validated for this provider yet.
+			// the CLI's own native tool surface is out of scope, and the
+			// kernel's claude-code vision route only returns CLI guidance.
 			// Keep the standard LingTai skills default so agents behave like
 			// any other preset.
 			"capabilities": map[string]interface{}{
@@ -1465,26 +1125,42 @@ func claudePreset() Preset {
 	}
 }
 
-func customPreset() Preset {
+// openaiPreset is the OpenAI-compatible family template: the official
+// OpenAI API when base_url is empty, or any compatible endpoint (a vendor's
+// OpenAI-compatible API, a local server, or an account pool such as
+// sub2api / subs-pool) when the user fills base_url in. wire_api selects
+// Chat Completions (the default) or Responses. There is no universal model,
+// so the model starts empty and must be typed before the preset can be saved.
+func openaiPreset() Preset {
 	return Preset{
-		Name:        "custom",
-		Description: PresetDescription{Summary: "OpenAI-compatible API — full capabilities"},
+		Name:        "openai",
+		Description: PresetDescription{Summary: "OpenAI-compatible — official OpenAI API or any compatible endpoint (Chat Completions or Responses)"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider": "custom", "model": "", "api_compat": "openai",
-				"api_key": nil, "api_key_env": "LLM_API_KEY", "base_url": nil,
+				"provider": ProviderOpenAI, "model": "",
+				"api_key": nil, "api_key_env": DefaultAPIKeyEnv(ProviderOpenAI),
+				"base_url": nil, "wire_api": WireAPIChatCompletions,
 			},
-			"capabilities": map[string]interface{}{
-				"web_search": e(),
-				// Inherit vision through the LLM's own endpoint. When the
-				// relay is OpenAI-compatible and the underlying model
-				// supports vision (gpt-4o/4.x, gpt-5.5, etc.), the kernel
-				// routes through OpenAIVisionService with the LLM's
-				// base_url. If the relay or model can't do vision the
-				// call fails at runtime — no special handling.
-				"vision": map[string]interface{}{"provider": "inherit"},
-				"skills": skillsDefault(),
+			"capabilities": familyCapabilities(),
+		},
+	}
+}
+
+// anthropicPreset is the Anthropic-compatible family template: the official
+// Anthropic API when base_url is empty, or any Messages-compatible endpoint
+// when the user fills base_url in. The model starts empty for the same
+// reason as openaiPreset.
+func anthropicPreset() Preset {
+	return Preset{
+		Name:        "anthropic",
+		Description: PresetDescription{Summary: "Anthropic-compatible — official Anthropic API or any Messages-compatible endpoint"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": ProviderAnthropic, "model": "",
+				"api_key": nil, "api_key_env": DefaultAPIKeyEnv(ProviderAnthropic),
+				"base_url": nil,
 			},
+			"capabilities": familyCapabilities(),
 		},
 	}
 }
@@ -1668,18 +1344,11 @@ func DefaultMCPSpec(name string) (module, envVar, configRel string, supported bo
 	return defaultMCPSpec(name)
 }
 
-// DefaultPreset returns the first built-in preset (minimax).
-func DefaultPreset() Preset {
-	return minimaxPreset()
-}
-
 // AutoEnvVarName builds a deterministic api_key_env slot name for a
 // preset, with a number suffix that gap-fills the lowest unused index.
 //
-// Shape: <PROVIDER>[_<REGION>]_<N>_API_KEY
+// Shape: <PROVIDER>_<N>_API_KEY (e.g. OPENAI_1_API_KEY, ANTHROPIC_2_API_KEY)
 //   - PROVIDER:   uppercased manifest.llm.provider
-//   - REGION:     "CN" or "INTL" for minimax/zhipu (read from base_url);
-//     omitted for other providers
 //   - N:          the lowest positive integer not already present in
 //     existingKeys (1-based). Reuses freed slots since the
 //     user said API keys rapidly rotate anyway.
@@ -1696,9 +1365,6 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 		return ""
 	}
 	prefix := strings.ToUpper(provider)
-	if region := regionSuffix(provider, llmString(llm, "base_url")); region != "" {
-		prefix += "_" + region
-	}
 	// Find the lowest unused N. We scan existingKeys for entries that
 	// match `<prefix>_<int>_API_KEY` and collect the integers.
 	used := map[int]bool{}
@@ -1709,7 +1375,7 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 		}
 		mid := strings.TrimSuffix(strings.TrimPrefix(name, wantPrefix), "_API_KEY")
 		// Only consider pure-integer suffixes — skip things like
-		// MINIMAX_PERSONAL_API_KEY (no number) or MINIMAX_PROD_v2_API_KEY.
+		// OPENAI_PERSONAL_API_KEY (no number) or OPENAI_PROD_v2_API_KEY.
 		n := 0
 		for _, c := range mid {
 			if c < '0' || c > '9' {
@@ -1727,46 +1393,6 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 			return fmt.Sprintf("%s_%d_API_KEY", prefix, n)
 		}
 	}
-}
-
-// regionSuffix returns "CN" / "INTL" for providers with regional
-// splits, "" for everything else. Mirrors the wizard's existing
-// region-detection logic so a preset that says "minimaxi.com" gets
-// the same CN suffix the wizard would have applied.
-//
-// A region row that declares its own Env (OpenCode Go) is not a CN/INTL
-// split — it is a separate account reached through a shared endpoint. It
-// gets no suffix: the substring match below classifies by hostname, and
-// opencode.ai contains neither "api.z.ai" nor "minimaxi.com", so zhipu
-// would fall through to "CN" and minimax to "INTL" and the stamped slot
-// (MINIMAX_INTL_1_API_KEY for https://opencode.ai/zen/go/v1) would lie
-// about the endpoint it unlocks.
-func regionSuffix(provider, baseURL string) string {
-	for _, r := range ProviderRegionURLs[provider] {
-		if r.URL != "" && r.URL == baseURL && r.Env != "" {
-			return ""
-		}
-	}
-	switch provider {
-	case "minimax":
-		if strings.Contains(baseURL, "minimaxi.com") {
-			return "CN"
-		}
-		return "INTL"
-	case "zhipu":
-		if strings.Contains(baseURL, "api.z.ai") {
-			return "INTL"
-		}
-		return "CN"
-	}
-	return ""
-}
-
-// llmString is a tiny accessor that returns a string field from an
-// llm map without panicking on missing keys or wrong types.
-func llmString(llm map[string]interface{}, key string) string {
-	v, _ := llm[key].(string)
-	return v
 }
 
 // AgentOpts holds per-agent configuration values set at creation time.
@@ -1841,9 +1467,10 @@ func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string
 
 // SyncCapabilityAPIKeyEnv propagates the LLM's api_key_env to any
 // capability whose provider matches the LLM provider. This ensures
-// capabilities like web_search and vision use the same resolved env
-// var slot (e.g. "ZHIPU_CN_1_API_KEY") rather than a stale preset
-// placeholder (e.g. "ZHIPU_API_KEY").
+// capabilities that name the agent's own provider use the same resolved
+// env var slot (e.g. "OPENAI_1_API_KEY") rather than a stale preset
+// placeholder (e.g. "OPENAI_API_KEY"). Capabilities declared as
+// "inherit" are expanded by the kernel and need no rewrite here.
 func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
@@ -1868,6 +1495,20 @@ func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {
 			continue
 		}
 		capMap["api_key_env"] = llmKeyEnv
+	}
+}
+
+// retiredLLMFields are manifest.llm keys the kernel no longer reads. The TUI
+// never writes them: the preset editor drops them on commit and init.json
+// generation drops them from the copied llm block. Existing files are not
+// rewritten just to remove them.
+var retiredLLMFields = []string{"api_compat"}
+
+// StripRetiredLLMFields deletes retired keys (see retiredLLMFields) from an
+// llm map in place. A nil map is a no-op.
+func StripRetiredLLMFields(llm map[string]interface{}) {
+	for _, key := range retiredLLMFields {
+		delete(llm, key)
 	}
 }
 
@@ -1926,12 +1567,16 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	if caps, ok := p.Manifest["capabilities"]; ok {
 		manifest["capabilities"] = caps
 	}
+	// The kernel no longer reads retired llm keys (api_compat); never
+	// carry them into a generated init.json.
+	if llmMap, ok := manifest["llm"].(map[string]interface{}); ok {
+		StripRetiredLLMFields(llmMap)
+	}
 	// Propagate the LLM's resolved api_key_env to capabilities that
-	// share the same provider. The builtin preset templates use a
-	// placeholder like "ZHIPU_API_KEY", but stampAutoEnvVar rewrites
-	// the LLM's slot to "ZHIPU_CN_1_API_KEY" etc. Without this,
-	// web_search/vision capabilities still reference the non-existent
-	// placeholder and fail at boot.
+	// share the same provider. A template may declare a placeholder like
+	// "OPENAI_API_KEY" while stampAutoEnvVar rewrites the LLM's slot to
+	// "OPENAI_1_API_KEY". Without this, a capability that names the same
+	// provider would still reference the placeholder and fail at boot.
 	SyncCapabilityAPIKeyEnv(manifest)
 	manifest["admin"] = map[string]interface{}{
 		"karma":   opts.Karma,

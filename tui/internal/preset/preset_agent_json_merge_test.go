@@ -52,7 +52,7 @@ func TestSetupPreservesAgentJSONIdentity(t *testing.T) {
 	opts.Karma = false
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestSetupFreshAgentInitializesAgentJSON(t *testing.T) {
 	// Note: we do NOT pre-create agentDir — GenerateInitJSONWithOpts must.
 
 	opts := DefaultAgentOpts()
-	if err := GenerateInitJSONWithOpts(minimaxPreset(), "newbie", "newbie", lingtaiDir, globalDir, opts); err != nil {
+	if err := GenerateInitJSONWithOpts(codexPreset(), "newbie", "newbie", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 

@@ -23,11 +23,11 @@ func TestWriteCreatesMinimalArtifactsWithSchemaVersions(t *testing.T) {
 			{Severity: SeverityHint, Text: "refresh credentials"},
 		},
 		LLM: LLMConfig{
-			Provider:      "custom",
-			Model:         "claude-sonnet-5",
+			Provider:      "openai",
+			Model:         "gpt-test",
 			BaseHost:      "api.example.com",
-			APICompat:     "anthropic",
-			APIKeyEnv:     "ANTHROPIC_API_KEY",
+			WireAPI:       "responses",
+			APIKeyEnv:     "OPENAI_API_KEY",
 			APIKeyPresent: true,
 		},
 	}
