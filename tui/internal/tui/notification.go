@@ -159,22 +159,6 @@ func notificationTitle(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, filepath.Base(agentDir))
 }
 
-func (m NotificationModel) blockWrapWidth() int {
-	wrapWidth := m.width - 8
-	if wrapWidth < 40 {
-		return 40
-	}
-	if wrapWidth > 120 {
-		return 120
-	}
-	return wrapWidth
-}
-
-// renderNotificationSnapshot formats a single NotificationBlockSnapshot for display.
-// It shows the event identity, modern metadata sections, the full raw meta block,
-// global _notification_guidance, and each channel's actual payload from the
-// canonical block the agent saw.
-
 func notificationMarkdownEntries(s sqlitelog.NotificationBlockSnapshot, cursor, total int) []MarkdownEntry {
 	group := notificationSnapshotGroup(s, cursor, total)
 	entries := []MarkdownEntry{
@@ -292,13 +276,6 @@ func notificationMarkdownMapBlock(s sqlitelog.NotificationBlockSnapshot, cursor,
 	return sb.String()
 }
 
-func notificationMarkdownAnyBlock(s sqlitelog.NotificationBlockSnapshot, cursor, total int, label string, value interface{}) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# %s\n\n", notificationSnapshotMarkdownTitle(s, cursor, total, label))
-	notificationWriteMarkdownAnySection(&sb, label, value)
-	return sb.String()
-}
-
 func notificationMarkdownNotificationsBlock(s sqlitelog.NotificationBlockSnapshot, cursor, total int, label string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s\n\n", notificationSnapshotMarkdownTitle(s, cursor, total, label))
@@ -388,167 +365,6 @@ func notificationJSON(value interface{}) string {
 		return fmt.Sprintf("%v", value)
 	}
 	return string(b)
-}
-
-func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, total, wrapWidth int) string {
-	var sb strings.Builder
-
-	if wrapWidth <= 0 {
-		wrapWidth = 76
-	}
-
-	// ── Block index counter ─────────────────────────────────────────────────
-	sb.WriteString(StyleFaint.Render(fmt.Sprintf("snapshot %d of %d", cursor+1, total)))
-	sb.WriteString("\n")
-
-	// ── Event identity row ──────────────────────────────────────────────────
-	tsStr := s.Time().Format(time.RFC3339)
-	idPart := StyleFaint.Render(fmt.Sprintf("id=%d", s.ID))
-	tsPart := StyleSubtle.Render(tsStr)
-	row := idPart + "  " + tsPart
-	if s.Mode != "" {
-		row += "  " + StyleFaint.Render("mode="+s.Mode)
-	}
-	if s.CallID != "" {
-		row += "  " + StyleFaint.Render("call_id="+s.CallID)
-	}
-	sb.WriteString(row + "\n")
-	sb.WriteString("\n")
-
-	labelStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
-	valueStyle := lipgloss.NewStyle().Foreground(ColorAgent)
-	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
-
-	// ── _meta envelope blocks (tool_meta / agent_meta / guidance) ───────────
-	writeNotificationMapBlock(&sb, "_meta.tool_meta", s.ToolMeta, []string{
-		"id", "timestamp", "char_count", "elapsed_ms", "status", "spilled_char_count", "synthetic",
-	}, wrapWidth, labelStyle, valueStyle)
-	writeNotificationMapBlock(&sb, "_meta.agent_meta", s.AgentMeta, []string{
-		"current_time", "context", "active_turn_tool_calls",
-		"current_tool_result_chars", "elapsed_ms",
-	}, wrapWidth, labelStyle, valueStyle)
-	writeNotificationMapBlock(&sb, "_meta.guidance", s.Guidance, []string{
-		"schema_version", "guidance_version", "priority", "render_mode", "sections", "meta_readme",
-	}, wrapWidth, labelStyle, valueStyle)
-
-	// ── Channel safety framing: _meta.notification_guidance ─────────────────
-	if s.NotificationGuidance != "" {
-		sb.WriteString(labelStyle.Render("  ✦ _meta.notification_guidance") + "\n")
-		for _, line := range wrappedNotificationLines(s.NotificationGuidance, wrapWidth) {
-			sb.WriteString(notifStyle.Faint(true).Render("    "+line) + "\n")
-		}
-		sb.WriteString("\n")
-	}
-
-	// ── Per-channel notification payloads ───────────────────────────────────
-	if len(s.Notifications) > 0 {
-		sb.WriteString(labelStyle.Render("  ✉ notifications") + "\n")
-		// Render channels in sorted order for determinism.
-		channels := make([]string, 0, len(s.Notifications))
-		for ch := range s.Notifications {
-			channels = append(channels, ch)
-		}
-		sort.Strings(channels)
-		for _, ch := range channels {
-			payload := s.Notifications[ch]
-			sb.WriteString(labelStyle.Render("    ["+ch+"]") + "\n")
-			for _, line := range strings.Split(payload, "\n") {
-				sb.WriteString(notifStyle.Render("      "+line) + "\n")
-			}
-		}
-	} else if len(s.Sources) > 0 {
-		// Fallback: sources list without payload body (malformed/old event)
-		sb.WriteString(labelStyle.Render("  ✉ sources") + "\n")
-		for _, src := range s.Sources {
-			sb.WriteString(notifStyle.Render("    • "+src) + "\n")
-		}
-	}
-
-	// ── Meta footer (context%, time, seq) ──────────────────────────
-	if s.Meta != nil {
-		if footer := formatBlockMetaFooter(s.Meta); footer != "" {
-			sb.WriteString(notifStyle.Faint(true).Render("    "+footer) + "\n")
-		}
-	}
-
-	return sb.String()
-}
-
-func writeNotificationMapBlock(sb *strings.Builder, title string, data map[string]interface{}, preferred []string, wrapWidth int, labelStyle, valueStyle lipgloss.Style) {
-	if len(data) == 0 {
-		return
-	}
-	sb.WriteString(labelStyle.Render("  ◈ "+title) + "\n")
-	for _, key := range orderedNotificationKeys(data, preferred) {
-		lines := wrappedNotificationLines(formatNotificationValue(data[key]), wrapWidth-10)
-		if len(lines) == 0 {
-			continue
-		}
-		sb.WriteString(labelStyle.Render("    "+key+": ") + valueStyle.Render(lines[0]) + "\n")
-		for _, line := range lines[1:] {
-			sb.WriteString(valueStyle.Render("      "+line) + "\n")
-		}
-	}
-	sb.WriteString("\n")
-}
-
-func orderedNotificationKeys(data map[string]interface{}, preferred []string) []string {
-	seen := make(map[string]bool, len(data))
-	keys := make([]string, 0, len(data))
-	for _, key := range preferred {
-		if _, ok := data[key]; ok {
-			keys = append(keys, key)
-			seen[key] = true
-		}
-	}
-	extra := make([]string, 0, len(data))
-	for key := range data {
-		if !seen[key] {
-			extra = append(extra, key)
-		}
-	}
-	sort.Strings(extra)
-	return append(keys, extra...)
-}
-
-func formatNotificationValue(v interface{}) string {
-	switch x := v.(type) {
-	case nil:
-		return "<nil>"
-	case string:
-		return x
-	case bool:
-		if x {
-			return "true"
-		}
-		return "false"
-	case float64:
-		if x == float64(int64(x)) {
-			return fmt.Sprintf("%.0f", x)
-		}
-		return fmt.Sprintf("%g", x)
-	case float32:
-		return fmt.Sprintf("%g", x)
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%v", x)
-	default:
-		b, err := json.MarshalIndent(v, "", "  ")
-		if err == nil {
-			return string(b)
-		}
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-func wrappedNotificationLines(text string, wrapWidth int) []string {
-	if wrapWidth <= 0 {
-		wrapWidth = 76
-	}
-	if text == "" {
-		return []string{""}
-	}
-	wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(text)
-	return strings.Split(wrapped, "\n")
 }
 
 // formatBlockMetaFooter renders the NotificationBlockMeta vital signs as

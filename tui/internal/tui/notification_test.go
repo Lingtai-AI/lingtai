@@ -10,7 +10,75 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
+
+func TestNotificationMarkdownEntriesPreserveLiveSnapshot(t *testing.T) {
+	snapshot := sqlitelog.NotificationBlockSnapshot{
+		ID:      42,
+		Sources: []string{"legacy-system"},
+		ToolMeta: map[string]interface{}{
+			"status": "ok",
+		},
+		AgentMeta:            map[string]interface{}{"active_turn_tool_calls": 2},
+		Guidance:             map[string]interface{}{"summary": "read the source"},
+		NotificationGuidance: "Use producer tools for channel payloads.",
+		Notifications: map[string]string{
+			"zeta":  `{"z":true}` + "\n",
+			"alpha": `{"a":true}` + "\n",
+		},
+	}
+	entries := notificationMarkdownEntries(snapshot, 0, 1)
+	wantLabels := []string{
+		"all blocks", "overview", "_meta.tool_meta", "_meta.agent_meta", "_meta.guidance",
+		"_meta.notification_guidance", "_meta.notifications", "_meta.notifications.alpha", "_meta.notifications.zeta",
+	}
+	if len(entries) != len(wantLabels) {
+		t.Fatalf("got %d entries, want %d: %#v", len(entries), len(wantLabels), entries)
+	}
+	contents := make(map[string]string, len(entries))
+	for i, entry := range entries {
+		if entry.Label != wantLabels[i] {
+			t.Fatalf("entry %d label = %q, want %q", i, entry.Label, wantLabels[i])
+		}
+		contents[entry.Label] = entry.Content
+	}
+	all := contents["all blocks"]
+	for _, want := range []string{
+		"## `_meta.tool_meta`", `"status": "ok"`, `"active_turn_tool_calls": 2`,
+		`"summary": "read the source"`, "Use producer tools for channel payloads.",
+		"### `alpha`", "### `zeta`", "legacy-system",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("all blocks content missing %q: %s", want, all)
+		}
+	}
+	if strings.Index(all, "### `alpha`") >= strings.Index(all, "### `zeta`") {
+		t.Fatalf("all blocks channels are not sorted: %s", all)
+	}
+	if got, want := contents["_meta.notifications.alpha"], "# Snapshot 1/1 — notifications.alpha\n\n## `notifications.alpha`\n\n```json\n{\"a\":true}\n\n```\n\n"; got != want {
+		t.Fatalf("channel content = %q, want %q", got, want)
+	}
+	if got := formatBlockMetaFooter(nil); got != "" {
+		t.Fatalf("nil meta footer = %q, want empty", got)
+	}
+	if strings.Contains(contents["overview"], "Meta summary:") {
+		t.Fatalf("overview with nil meta contains a footer: %s", contents["overview"])
+	}
+	snapshot.Meta = &sqlitelog.NotificationBlockMeta{
+		ContextUsage: 0.5, CurrentTime: "2026-10-03T10:15:00Z", InjectionSeq: 4,
+	}
+	const wantFooter = "ctx 50.0% · 10:15 UTC · seq 4"
+	if got := formatBlockMetaFooter(snapshot.Meta); got != wantFooter {
+		t.Fatalf("full meta footer = %q, want %q", got, wantFooter)
+	}
+	for _, entry := range notificationMarkdownEntries(snapshot, 0, 1) {
+		if entry.Label == "overview" && !strings.Contains(entry.Content, "**Meta summary:** "+wantFooter) {
+			t.Fatalf("overview missing meta footer %q: %s", wantFooter, entry.Content)
+		}
+	}
+}
 
 func TestDefaultCommandsIncludesNotification(t *testing.T) {
 	cmd, ok := findCommand("notification")
