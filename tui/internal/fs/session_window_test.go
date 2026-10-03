@@ -454,6 +454,78 @@ func TestWindowedRebuildSkipsNonRenderableTextMetadata(t *testing.T) {
 	}
 }
 
+func TestReadPreviousJSONLLineReturnsOnlyRange(t *testing.T) {
+	huge := strings.Repeat("x", 128*1024+1)
+	hugeLine := "head\n" + huge + "\n"
+	tests := []struct {
+		name    string
+		content string
+		end     int64
+		want    sessionJSONLWindowLine
+		wantOK  bool
+	}{
+		{name: "short last line", content: "short\nnext\n", end: 11, want: sessionJSONLWindowLine{start: 6, end: 11}, wantOK: true},
+		{name: "short first line", content: "short\nnext\n", end: 6, want: sessionJSONLWindowLine{start: 0, end: 6}, wantOK: true},
+		{name: "CRLF last line", content: "a\r\nb\r\n", end: 6, want: sessionJSONLWindowLine{start: 3, end: 6}, wantOK: true},
+		{name: "empty record", content: "a\n\nb\n", end: 3, want: sessionJSONLWindowLine{start: 2, end: 3}, wantOK: true},
+		{name: "empty record at EOF", content: "\n", end: 1, want: sessionJSONLWindowLine{start: 0, end: 1}, wantOK: true},
+		{name: "final line without newline", content: "tail", end: 4, want: sessionJSONLWindowLine{start: 0, end: 4}, wantOK: true},
+		{name: "over 128 KiB and multiple scan blocks", content: hugeLine, end: int64(len(hugeLine)), want: sessionJSONLWindowLine{start: 5, end: int64(len(hugeLine))}, wantOK: true},
+		{name: "zero end", content: "line\n", end: 0},
+		{name: "empty file", content: "", end: 0},
+		{name: "end beyond EOF", content: "line\n", end: 6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "events.jsonl")
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+
+			got, ok := readPreviousJSONLLine(f, tt.end)
+			if ok != tt.wantOK || ok && got != tt.want {
+				t.Fatalf("readPreviousJSONLLine(end=%d) = (%+v, %v), want (%+v, %v)", tt.end, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestReadPreviousJSONLLineRejectsClosedFileAndTruncatedBound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	content := []byte("first\nsecond\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readPreviousJSONLLine(f, int64(len(content))); ok {
+		t.Fatal("closed file unexpectedly produced a line range")
+	}
+
+	f, err = os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := os.Truncate(path, int64(len("first\n"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readPreviousJSONLLine(f, int64(len(content))); ok {
+		t.Fatal("stale end beyond the truncated file unexpectedly produced a line range")
+	}
+}
+
 func TestSessionMetadataCanonicalNumericFallback(t *testing.T) {
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
