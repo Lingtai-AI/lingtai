@@ -192,8 +192,9 @@ class MarkdownBuildTests(unittest.TestCase):
             "year": 2026,
             "journal": "Journal of Testable Skills",
         }
+        body = fetch_paper._extract_article_body(PUBLISHER_HTML)
         md = fetch_paper._build_publisher_markdown(
-            meta, PUBLISHER_HTML, "https://link.aps.org/doi/10.1103/x"
+            meta, PUBLISHER_HTML, "https://link.aps.org/doi/10.1103/x", body
         )
         self.assertIn("# Resolved Title", md)
         self.assertIn("link.aps.org", md)  # provenance URL
@@ -222,13 +223,41 @@ class TierPublisherExtractTests(unittest.TestCase):
         _stub_requests.get = _patch_get(PUBLISHER_HTML)
         out = SCRIPT_DIR / "_test_out_happy"
         out.mkdir(exist_ok=True)
+        original_extract = fetch_paper._extract_article_body
+        expected_body = original_extract(PUBLISHER_HTML)
+        extracted_html = []
+
+        def _spy_extract(html):
+            extracted_html.append(html)
+            return original_extract(html)
+
+        fetch_paper._extract_article_body = _spy_extract
         try:
-            path = fetch_paper.tier_publisher_extract(self._meta(), out)
+            meta = self._meta()
+            path = fetch_paper.tier_publisher_extract(meta, out)
             self.assertIsNotNone(path)
             self.assertTrue(path.exists())
+            self.assertEqual(path, out / "paper.md")
             text = path.read_text()
-            self.assertIn("first paragraph of the body", text)
+            self.assertEqual(extracted_html, [PUBLISHER_HTML])
+            self.assertIn(
+                "## Full text (extracted)\n\n" + expected_body + "\n\n---",
+                text,
+            )
+            self.assertIn("# A Self-Contained Publisher Extractor", text)
+            self.assertIn("Jane Doe", text)
+            self.assertIn(
+                "DOI: [10.1103/PhysRevTest.1.000001]"
+                "(https://doi.org/10.1103/PhysRevTest.1.000001)",
+                text,
+            )
+            self.assertIn(
+                "- Source: in-house publisher-page extractor (Tier 5), "
+                + meta["url"],
+                text,
+            )
         finally:
+            fetch_paper._extract_article_body = original_extract
             for p in out.glob("*"):
                 p.unlink()
             out.rmdir()
@@ -254,6 +283,20 @@ class TierPublisherExtractTests(unittest.TestCase):
             path = fetch_paper.tier_publisher_extract(meta, out)
             self.assertIsNone(path)
         finally:
+            out.rmdir()
+
+    def test_miss_when_body_is_below_minimum(self):
+        short_page = "<html><body><article>brief text.</article></body></html>"
+        _stub_requests.get = _patch_get(short_page)
+        out = SCRIPT_DIR / "_test_out_short_body"
+        out.mkdir(exist_ok=True)
+        try:
+            path = fetch_paper.tier_publisher_extract(self._meta(), out)
+            self.assertIsNone(path)
+            self.assertFalse((out / "paper.md").exists())
+        finally:
+            for p in out.glob("*"):
+                p.unlink()
             out.rmdir()
 
     def test_miss_on_paywall_html(self):
