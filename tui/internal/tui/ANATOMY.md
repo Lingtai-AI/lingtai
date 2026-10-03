@@ -64,6 +64,7 @@ related_files:
   - tui/internal/tui/detect.go
   - tui/internal/tui/toolcall_display.go
   - tui/internal/tui/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/tui/agent_rail_collapse_test.go
   - tui/internal/tui/agents_direct_conversation_boundary_test.go
   - tui/internal/tui/agora_removed_test.go
