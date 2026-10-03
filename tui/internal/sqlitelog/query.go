@@ -71,25 +71,7 @@ func parseNotificationBlockFields(fieldsJSON string, b *NotificationSummaryEntry
 	b.Summary = f.Summary
 	b.Sources = f.Sources
 	if f.Meta != nil {
-		m := &NotificationBlockMeta{}
-		if v, ok := f.Meta["current_time"].(string); ok {
-			m.CurrentTime = v
-		}
-		if v, ok := f.Meta["injection_seq"].(float64); ok {
-			m.InjectionSeq = int(v)
-		}
-		if ctx, ok := f.Meta["context"].(map[string]interface{}); ok {
-			if v, ok := ctx["system_tokens"].(float64); ok {
-				m.ContextSystemTokens = int(v)
-			}
-			if v, ok := ctx["history_tokens"].(float64); ok {
-				m.ContextHistoryTokens = int(v)
-			}
-			if v, ok := ctx["usage"].(float64); ok {
-				m.ContextUsage = v
-			}
-		}
-		b.Meta = m
+		b.Meta = parseBlockMeta(f.Meta)
 	}
 }
 
@@ -105,24 +87,9 @@ func QueryNotificationBlocks(agentDir string, limit int) ([]NotificationSummaryE
 		`SELECT id, ts, fields_json, COALESCE(source_file,'') FROM events WHERE type = 'notification_pair_injected' ORDER BY id DESC LIMIT %d`,
 		limit,
 	)
-	db := DBPath(agentDir)
-	if _, err := os.Stat(db); err != nil {
-		return nil, fmt.Errorf("sqlite sidecar not found: %s", db)
-	}
-	bin, err := findSQLite3()
+	out, err := executeSQL(agentDir, sql)
 	if err != nil {
 		return nil, err
-	}
-	out, err := exec.Command(bin, "-separator", "\x1f", db, sql).Output()
-	if err != nil {
-		msg := ""
-		if ee, ok := err.(*exec.ExitError); ok {
-			msg = strings.TrimSpace(string(ee.Stderr))
-		}
-		if msg != "" {
-			return nil, fmt.Errorf("sqlite3: %s", msg)
-		}
-		return nil, fmt.Errorf("sqlite3 query failed: %w", err)
 	}
 	raw := strings.TrimRight(string(out), "\n")
 	if raw == "" {
@@ -355,24 +322,9 @@ func QueryNotificationBlockSnapshots(agentDir string, limit int) ([]Notification
 		`SELECT id, ts, fields_json, COALESCE(source_file,'') FROM events WHERE type = 'notification_block_injected' ORDER BY id DESC LIMIT %d`,
 		limit,
 	)
-	db := DBPath(agentDir)
-	if _, err := os.Stat(db); err != nil {
-		return nil, fmt.Errorf("sqlite sidecar not found: %s", db)
-	}
-	bin, err := findSQLite3()
+	out, err := executeSQL(agentDir, sql)
 	if err != nil {
 		return nil, err
-	}
-	out, err := exec.Command(bin, "-separator", "\x1f", db, sql).Output()
-	if err != nil {
-		msg := ""
-		if ee, ok := err.(*exec.ExitError); ok {
-			msg = strings.TrimSpace(string(ee.Stderr))
-		}
-		if msg != "" {
-			return nil, fmt.Errorf("sqlite3: %s", msg)
-		}
-		return nil, fmt.Errorf("sqlite3 query failed: %w", err)
 	}
 	raw := strings.TrimRight(string(out), "\n")
 	if raw == "" {
@@ -508,10 +460,9 @@ func PrettyFields(ev NotificationEvent) string {
 	return string(b)
 }
 
-// runQuery executes sql against the agent's sqlite sidecar using the system
-// sqlite3 binary. Rows are returned as tab-separated values (4 columns:
-// id, ts, type, fields_json, source_file).
-func runQuery(agentDir, sql string) ([]NotificationEvent, error) {
+// executeSQL runs sql against the agent's sqlite sidecar using the system
+// sqlite3 binary and its unit-separator output format.
+func executeSQL(agentDir, sql string) ([]byte, error) {
 	db := DBPath(agentDir)
 	if _, err := os.Stat(db); err != nil {
 		return nil, fmt.Errorf("sqlite sidecar not found: %s", db)
@@ -530,6 +481,15 @@ func runQuery(agentDir, sql string) ([]NotificationEvent, error) {
 			return nil, fmt.Errorf("sqlite3: %s", msg)
 		}
 		return nil, fmt.Errorf("sqlite3 query failed: %w", err)
+	}
+	return out, nil
+}
+
+// runQuery parses notification rows returned by the shared sqlite executor.
+func runQuery(agentDir, sql string) ([]NotificationEvent, error) {
+	out, err := executeSQL(agentDir, sql)
+	if err != nil {
+		return nil, err
 	}
 	return parseRows(strings.TrimRight(string(out), "\n"))
 }

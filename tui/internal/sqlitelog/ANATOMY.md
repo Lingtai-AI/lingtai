@@ -9,6 +9,7 @@ related_files:
   - tui/internal/sqlitelog/molt_recent_test.go
   - tui/internal/sqlitelog/query.go
   - tui/internal/sqlitelog/query_test.go
+  - tui/internal/sqlitelog/query_cleanup_test.go
   - tui/internal/sqlitelog/refresh_recent_test.go
   - tui/internal/sqlitelog/tool_call_counts_test.go
   - tui/internal/fs/session.go
@@ -31,7 +32,7 @@ maintenance: |
 
 | Symbol | Citation | Purpose |
 |---|---|---|
-| `DBPath` / `Exists` | `tui/internal/sqlitelog/query.go:421,433` | resolves `<agentDir>/logs/log.sqlite` and reports whether the index is present at all |
+| `DBPath` / `Exists` | `tui/internal/sqlitelog/query.go:373,385` | resolves `<agentDir>/logs/log.sqlite` and reports whether the index is present at all |
 | `SessionEventRow` / `ErrorEvent` | `tui/internal/sqlitelog/event.go:20,27` | the row shapes handed back to `internal/fs` session reconstruction and diagnostics |
 | `sessionEventFilterSQL` / `sessionEventFieldsSQL` | `tui/internal/sqlitelog/event.go:102,109` | the allow-list of event types that may become session entries, and the projection that strips oversized `tool_result` payloads at the SQL layer. Keep this in sync with `parseEventMap`'s allow-list in `tui/internal/fs/session.go` |
 | `EventsIndexCoverage` + `HasRows` / `StartsAtBeginning` / `TailNearEOF` | `tui/internal/sqlitelog/event.go:123-144`, `tui/internal/sqlitelog/event.go:193` | the honesty gate: how much of the JSONL byte range the index actually covers, so a sparse database can never be mistaken for a complete replay |
@@ -41,8 +42,9 @@ maintenance: |
 | `QueryMoltSessionWindows` | `tui/internal/sqlitelog/molt.go:99` | resolves current/previous `psyche_molt` boundaries — the time windows `/kanban` Ctrl+D session stats are summed over |
 | `QueryMoltSessionToolCallCounts` | `tui/internal/sqlitelog/molt.go:244` | counts lifecycle `tool_call` events inside those same windows |
 | `QueryRecentMoltTimes` / `QueryRecentRefreshCompleteTimes` | `tui/internal/sqlitelog/molt.go:334`, `tui/internal/sqlitelog/molt.go:343` | newest-first boundary timestamps rendered as ledger separators by `tui/internal/fs/rebuild_marker.go` |
-| notification readers | `tui/internal/sqlitelog/query.go:100,350,440,449,464,482` | `QueryNotificationBlocks`, `QueryNotificationBlockSnapshots`, `QueryNotifications`, and the by-id / before / after pivot queries backing `/notification` paging |
-| `PrettyFields` | `tui/internal/sqlitelog/query.go:499` | renders a notification event's JSON payload for the detail view |
+| notification readers | `tui/internal/sqlitelog/query.go:82,317,392,401,416,434` | `QueryNotificationBlocks`, `QueryNotificationBlockSnapshots`, `QueryNotifications`, and the by-id / before / after pivot queries backing `/notification` paging |
+| `parseBlockMeta` / `executeSQL` | `tui/internal/sqlitelog/query.go:291,465` | shared notification metadata parsing and sqlite3 sidecar execution/error handling |
+| `PrettyFields` | `tui/internal/sqlitelog/query.go:451` | renders a notification event's JSON payload for the detail view |
 
 ## Connections
 
