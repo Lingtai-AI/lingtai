@@ -127,7 +127,7 @@ func CopyEmbeddedBundle(recipeName, projectRoot string) error {
 	if root == "" {
 		return fmt.Errorf("CopyEmbeddedBundle: recipe %q not found", recipeName)
 	}
-	if _, err := loadEmbeddedRecipeInfo(root, ""); err != nil {
+	if _, err := loadEmbeddedRecipeInfo(root); err != nil {
 		return fmt.Errorf("CopyEmbeddedBundle: source bundle invalid: %w", err)
 	}
 
