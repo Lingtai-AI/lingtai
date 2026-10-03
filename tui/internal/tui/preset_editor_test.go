@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -465,7 +468,7 @@ func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
 func TestPresetEditorNoCapabilityFieldsInEditorFieldOrder(t *testing.T) {
 	wantOrder := []editorField{
 		feName, feSummary, feTier, feGains, feLoses,
-		feProvider, feModel, feServiceTier, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
+		feProvider, feModel, feServiceTier, feCodexCredits, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 		feSave,
 	}
 	if !reflect.DeepEqual(editorFieldOrder, wantOrder) {
@@ -2128,5 +2131,95 @@ func TestPresetEditorEmptyBaseURLShowsOfficialDefault(t *testing.T) {
 				t.Fatalf("empty %s base_url row should name the official endpoint %q; got %q", provider, want, line)
 			}
 		})
+	}
+}
+
+func TestPresetEditorCodexCreditsOptInRoundTrip(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", t.TempDir())
+	p := testCodexPresetEditorPreset(nil)
+	p.Source = preset.SourceSaved
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	if !m.fieldVisible(feCodexCredits) || !m.isCyclable(feCodexCredits) || m.codexAllowCredits() {
+		t.Fatal("Codex credits must be reachable and default off")
+	}
+	for i, f := range editorFieldOrder {
+		if f == feCodexCredits {
+			m.cursor = i
+		}
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.codexAllowCredits() {
+		t.Fatal("Enter must enable credits")
+	}
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatal("opt-in preset must commit")
+	}
+	committed := cmd().(PresetEditorCommitMsg).Preset
+	if allow, ok := committed.Manifest["llm"].(map[string]interface{})["codex_allow_credits"].(bool); !ok || !allow {
+		t.Fatal("opt-in must be a JSON boolean")
+	}
+	if err := preset.Save(committed); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := preset.Load(committed.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := preset.GenerateInitJSON(loaded, "credit-agent", "credit-agent", project, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, "credit-agent", "init.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var init map[string]interface{}
+	if err := json.Unmarshal(data, &init); err != nil {
+		t.Fatal(err)
+	}
+	if init["manifest"].(map[string]interface{})["llm"].(map[string]interface{})["codex_allow_credits"] != true {
+		t.Fatal("credit choice must reach the generated Agent init")
+	}
+	m = NewPresetEditorModelWithBuiltinFlag(loaded, "en", nil, "", false)
+	if !m.codexAllowCredits() {
+		t.Fatal("saved opt-in must reload")
+	}
+	for i, f := range editorFieldOrder {
+		if f == feCodexCredits {
+			m.cursor = i
+		}
+	}
+	m.cycleFocused(-1)
+	_, cmd = m.commit()
+	if _, present := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})["codex_allow_credits"]; present {
+		t.Fatal("off must omit the field")
+	}
+	m.setCodexAllowCredits(true)
+	m.switchProvider(preset.ProviderCodex, preset.ProviderOpenAI)
+	if m.fieldVisible(feCodexCredits) || m.isCyclable(feCodexCredits) {
+		t.Fatal("other providers must hide credits")
+	}
+	if _, present := m.llmMap()["codex_allow_credits"]; present {
+		t.Fatal("provider switch must clear opt-in")
+	}
+	m.switchProvider(preset.ProviderOpenAI, preset.ProviderCodex)
+	if m.codexAllowCredits() {
+		t.Fatal("switching back must default off")
+	}
+}
+
+func TestPresetEditorCodexCreditsMalformedValuesDefaultOff(t *testing.T) {
+	for _, value := range []interface{}{nil, false, "true", "false", 1} {
+		p := testCodexPresetEditorPreset(nil)
+		p.Manifest["llm"].(map[string]interface{})["codex_allow_credits"] = value
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		if m.codexAllowCredits() {
+			t.Fatalf("%v must not enable credits", value)
+		}
+		normalizeLLMForCommit(m.working.Manifest)
+		if _, present := m.llmMap()["codex_allow_credits"]; present {
+			t.Fatalf("%v must be removed on commit", value)
+		}
 	}
 }
