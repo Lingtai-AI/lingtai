@@ -75,3 +75,21 @@ troubleshooting, use the five shared operation children under
 `reference/operations/`; for live OAuth quota/rate limits, use
 `reference/operations/endpoint-capabilities/SKILL.md` and never expose auth
 paths or tokens. This child owns Codex preset facts.
+
+## Purchased Codex credits
+
+In either the terminal or desktop preset editor, select **codex** and turn
+**Paid Codex credits** On to allow requests after included ChatGPT usage runs
+out. The shared field is `manifest.llm.codex_allow_credits: true` (JSON boolean).
+It defaults Off, including for existing presets; Off omits the field. Saved
+presets retain the choice. Switching away from Codex clears it. This is for
+purchased Codex credits on the signed-in account, not an OpenAI API balance,
+and requires a kernel that implements the option.
+
+The kernel checks included usage before requests with the option Off. If usage
+is exhausted or unverifiable, that turn stops; retry after reset or service
+recovery, or explicitly opt in. On uses the same Codex connection and lets
+OpenAI decide allowance, credits, debit, and spending limits. The local check
+cannot guarantee zero charges when usage changes during a request, and does
+not prioritize credits ahead of included allowance. External pools through
+`openai` manage their own billing policy.

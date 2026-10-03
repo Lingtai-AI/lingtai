@@ -536,6 +536,8 @@
   "preset_editor.field_loses": "loses",
   "preset_editor.field_provider": "provider",
   "preset_editor.field_model": "model",
+  "preset_editor.field_codex_credits": "Paid Codex credits",
+  "preset_editor.codex_credits_hint": "On permits requests after included usage runs out; OpenAI controls billing.",
   "preset_editor.field_service_tier": "service_tier",
   "preset_editor.field_thinking": "Reasoning effort",
   "preset_editor.field_wire_api": "wire_api",

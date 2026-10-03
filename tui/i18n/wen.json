@@ -532,6 +532,8 @@
   "preset_editor.field_loses": "短板",
   "preset_editor.field_provider": "提供商",
   "preset_editor.field_model": "模型",
+  "preset_editor.field_codex_credits": "Codex 付费积分",
+  "preset_editor.codex_credits_hint": "开则套餐额度尽后仍可请求；计费由 OpenAI 定。",
   "preset_editor.field_service_tier": "服务层",
   "preset_editor.field_thinking": "推理强度",
   "preset_editor.field_wire_api": "API 式",

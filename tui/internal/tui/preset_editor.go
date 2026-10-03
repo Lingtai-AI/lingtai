@@ -51,6 +51,7 @@ const (
 	feProvider
 	feModel
 	feServiceTier
+	feCodexCredits
 	feThinking
 	feWireAPI
 	feResponsesTransport
@@ -70,7 +71,7 @@ const (
 // capabilityRows), not as form rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feServiceTier, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
+	feProvider, feModel, feServiceTier, feCodexCredits, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 	feSave,
 }
 
@@ -573,6 +574,10 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		if m.hasThinking() {
 			m.cycleFocused(+1)
 		}
+	case feCodexCredits:
+		if m.isCodexProvider() {
+			m.cycleFocused(+1)
+		}
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
@@ -684,6 +689,28 @@ func llmHasServiceTier(llm map[string]interface{}) bool {
 	provider := asString(llm["provider"])
 	return provider == preset.ProviderOpenAI ||
 		preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyCodexSingle
+}
+
+func (m PresetEditorModel) codexAllowCredits() bool {
+	allow, _ := m.llmMap()["codex_allow_credits"].(bool)
+	return m.isCodexProvider() && allow
+}
+
+func (m *PresetEditorModel) setCodexAllowCredits(allow bool) {
+	llm := m.llmMap()
+	if m.isCodexProvider() && allow {
+		llm["codex_allow_credits"] = true
+	} else {
+		delete(llm, "codex_allow_credits")
+	}
+}
+
+func normalizeCodexCredits(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	allow, _ := llm["codex_allow_credits"].(bool)
+	if preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle || !allow {
+		delete(llm, "codex_allow_credits")
+	}
 }
 
 func (m PresetEditorModel) hasServiceTier() bool {
@@ -950,6 +977,7 @@ func normalizeLLMForCommit(manifest map[string]interface{}) {
 		preset.StripRetiredLLMFields(llm)
 	}
 	normalizeServiceTier(manifest)
+	normalizeCodexCredits(manifest)
 	normalizeThinking(manifest)
 	normalizeWireAPI(manifest)
 	normalizeResponsesTransport(manifest)
@@ -1012,6 +1040,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feServiceTier:
 		if m.hasServiceTier() {
 			m.setServiceTier(cycleString(serviceTierOptions, m.serviceTier(), dir))
+		}
+	case feCodexCredits:
+		if m.isCodexProvider() {
+			m.setCodexAllowCredits(!m.codexAllowCredits())
 		}
 	case feThinking:
 		if m.hasThinking() {
@@ -1098,6 +1130,7 @@ func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
 		delete(llm, "codex_auth_path")
 	}
 	normalizeServiceTier(m.working.Manifest)
+	normalizeCodexCredits(m.working.Manifest)
 	normalizeThinking(m.working.Manifest)
 	normalizeWireAPI(m.working.Manifest)
 	normalizeResponsesTransport(m.working.Manifest)
@@ -1284,6 +1317,11 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		return s
 	case feServiceTier:
 		return m.serviceTier()
+	case feCodexCredits:
+		if m.codexAllowCredits() {
+			return "on"
+		}
+		return "off"
 	case feThinking:
 		return m.thinkingValue()
 	case feWireAPI:
@@ -1464,6 +1502,12 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	if m.fieldVisible(feServiceTier) {
 		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.serviceTier(), width-4)))
 	}
+	if m.fieldVisible(feCodexCredits) {
+		rows = append(rows, row(feCodexCredits, m.row(feCodexCredits, lbl("codex_credits"), m.fieldString(feCodexCredits), width-4)))
+		for _, line := range strings.Split(ansi.Wrap(i18n.T("preset_editor.codex_credits_hint"), max(1, width-4), ""), "\n") {
+			rows = append(rows, plain("  "+line))
+		}
+	}
 	if m.fieldVisible(feThinking) {
 		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.thinkingValue(), width-4)))
 	}
@@ -1529,6 +1573,9 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 		if strip := m.serviceTierRadioStrip(focused, valStyle); strip != "" {
 			return marker + keyStyle.Render(key) + strip
 		}
+	}
+	if f == feCodexCredits {
+		return marker + keyStyle.Render(key) + radioStrip([]string{"off", "on"}, m.fieldString(f), focused, valStyle)
 	}
 	if f == feThinking {
 		if strip := m.thinkingRadioStrip(focused, valStyle); strip != "" {
@@ -1692,6 +1739,8 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 		return true
 	case feServiceTier:
 		return m.hasServiceTier()
+	case feCodexCredits:
+		return m.isCodexProvider()
 	case feThinking:
 		return m.hasThinking()
 	case feWireAPI:
@@ -1814,6 +1863,8 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
+	case feCodexCredits:
+		return m.isCodexProvider()
 	case feServiceTier:
 		return m.hasServiceTier()
 	case feThinking:
