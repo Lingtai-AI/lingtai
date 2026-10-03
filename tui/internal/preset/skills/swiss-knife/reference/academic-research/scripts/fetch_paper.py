@@ -376,7 +376,7 @@ def tier_publisher_extract(meta: dict, out_dir: Path) -> Optional[Path]:
         # Not enough readable full text — don't write a near-empty artifact.
         return None
 
-    md = _build_publisher_markdown(meta, html, url)
+    md = _build_publisher_markdown(meta, html, url, body)
     dst = out_dir / "paper.md"
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(md, encoding="utf-8")
@@ -758,13 +758,14 @@ def _extract_article_body(html: str) -> str:
     return best
 
 
-def _build_publisher_markdown(meta: dict, html: str, url: str) -> str:
+def _build_publisher_markdown(meta: dict, html: str, url: str, body: str) -> str:
     """Assemble a Markdown artifact with provenance + extracted content.
 
     Prefers CrossRef-resolved `meta` for the header (authoritative), but falls
     back to the page's own citation_* tags when a field is missing. Always
     records provenance and an explicit limitations note so downstream agents
     know this is a heuristic landing-page extraction, not a typeset full text.
+    `body` is the text already extracted and checked by the tier gate.
     """
     tags = _extract_meta_tags(html)
     title = meta.get("title") or tags.get("title") or "(untitled)"
@@ -773,8 +774,6 @@ def _build_publisher_markdown(meta: dict, html: str, url: str) -> str:
     year = meta.get("year") or ""
     doi = meta.get("doi") or tags.get("doi") or ""
     abstract = tags.get("abstract") or meta.get("abstract") or ""
-    body = _extract_article_body(html)
-
     lines = [f"# {title}", ""]
     if authors:
         lines += [", ".join(authors), ""]
