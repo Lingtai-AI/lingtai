@@ -99,7 +99,7 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
 
   const placed = new Set(Object.keys(pos));
 
-  function placeChildren(parentAddr: string, depth: number) {
+  function placeChildren(parentAddr: string) {
     const kids = childrenOf.get(parentAddr);
     if (!kids || kids.length === 0) return;
     const parent = pos[parentAddr];
@@ -115,12 +115,12 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
         y: kids.length === 1 ? parent.y : startY + (i / (kids.length - 1)) * spread,
       };
       placed.add(kids[i]);
-      placeChildren(kids[i], depth + 1);
+      placeChildren(kids[i]);
     }
   }
 
   for (const admin of admins) {
-    placeChildren(admin.address, 1);
+    placeChildren(admin.address);
   }
 
   const orphans = nodes.filter(n => !placed.has(n.address));
@@ -213,7 +213,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
       // Update existing dots and create new ones for nodes not yet seen.
       // Layout and stored positions are computed lazily — only when a
       // genuinely new node appears — to avoid the cost on most frames.
-      const stored = loadPositions();
+      let stored: Record<string, { x: number; y: number }> | null = null;
       let layout: Record<string, { x: number; y: number }> | null = null;
 
       for (const n of network.nodes) {
@@ -225,6 +225,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
           prev.isHuman = n.is_human;
         } else {
           // Node appeared in a tape frame but wasn't in dotsRef yet — create it
+          if (!stored) stored = loadPositions();
           if (!layout) layout = computeLayout(network, W, H);
           const sp = stored[n.address];
           const lp = layout[n.address];
@@ -376,9 +377,10 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
     const net = networkRef.current;
     const mode = edgeModeRef.current;
     const filt = filterRef.current;
-    const hidden = filt?.hiddenNodes ?? new Set<string>();
+    const hidden = filt?.hiddenNodes;
 
     const pulse = 0.5 + 0.5 * Math.sin(now * Math.PI * 2 / 1000);
+    const mailRgb = hexRgb(th.edgeColors.mail);
 
     // ── Edges ──────────────────────────────────────────────
     const edges: Array<{ src: string; tgt: string; weight: number }> = [];
@@ -410,10 +412,10 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
       const b = dots.get(e.tgt);
       if (!a || !b) continue;
       if (a.state === '__hidden__' || b.state === '__hidden__') continue;
-      if (hidden.has(e.src) || hidden.has(e.tgt)) continue;
+      if (hidden?.has(e.src) || hidden?.has(e.tgt)) continue;
 
       const isAvatar = mode === 'avatar';
-      const rgb = isAvatar ? th.amberRgb : hexRgb(th.edgeColors.mail);
+      const rgb = isAvatar ? th.amberRgb : mailRgb;
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -426,7 +428,6 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
     }
 
     // ── Bullets (flying mail) ──────────────────────────────
-    const mailRgb = hexRgb(th.edgeColors.mail);
     const liveBullets: Bullet[] = [];
     for (const b of bulletsRef.current) {
       const age = now - b.born;
@@ -497,7 +498,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
     const humanRgb: [number, number, number] = hexRgb(th.text);
     for (const d of dots.values()) {
       if (d.state === '__hidden__') continue; // not in current replay frame
-      if (hidden.has(d.id)) continue; // filtered out by user
+      if (hidden?.has(d.id)) continue; // filtered out by user
       const isAgent = !d.isHuman;
       const stateHex = isAgent ? (th.stateColors[d.state] || th.stateColors['']) : '';
       const [dr, dg, db] = d.isHuman ? humanRgb : hexRgb(stateHex);
