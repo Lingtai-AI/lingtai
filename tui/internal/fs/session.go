@@ -570,11 +570,6 @@ type sessionJSONLWindowLine struct {
 	end   int64
 }
 
-// readPreviousJSONLLine retains only a fixed prefix for compatibility with the
-// range finder callers; metadata classification itself structurally scans the
-// entire range via readSessionEventMetadataRange.
-const sessionCountPrefixLimit = 128 * 1024
-
 func lastCompleteJSONLOffset(f *os.File) int64 {
 	info, err := f.Stat()
 	if err != nil || info.Size() == 0 {
@@ -605,14 +600,14 @@ func lastCompleteJSONLOffset(f *os.File) int64 {
 	return 0
 }
 
-func readPreviousJSONLLine(f *os.File, end int64) (sessionJSONLWindowLine, []byte, bool, bool) {
+func readPreviousJSONLLine(f *os.File, end int64) (sessionJSONLWindowLine, bool) {
 	if end <= 0 {
-		return sessionJSONLWindowLine{}, nil, false, false
+		return sessionJSONLWindowLine{}, false
 	}
 	contentEnd := end
 	var one [1]byte
 	if _, err := f.ReadAt(one[:], end-1); err != nil {
-		return sessionJSONLWindowLine{}, nil, false, false
+		return sessionJSONLWindowLine{}, false
 	}
 	if one[0] == '\n' {
 		contentEnd--
@@ -625,7 +620,7 @@ func readPreviousJSONLLine(f *os.File, end int64) (sessionJSONLWindowLine, []byt
 		}
 		buf := make([]byte, pos-blockStart+1)
 		if _, err := f.ReadAt(buf, blockStart); err != nil && err != io.EOF {
-			return sessionJSONLWindowLine{}, nil, false, false
+			return sessionJSONLWindowLine{}, false
 		}
 		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
 			start = blockStart + int64(i) + 1
@@ -636,18 +631,7 @@ func readPreviousJSONLLine(f *os.File, end int64) (sessionJSONLWindowLine, []byt
 		}
 		pos = blockStart - 1
 	}
-	lineLen := contentEnd - start
-	readLen := lineLen
-	if readLen > sessionCountPrefixLimit {
-		readLen = sessionCountPrefixLimit
-	}
-	line := make([]byte, readLen)
-	if len(line) > 0 {
-		if _, err := f.ReadAt(line, start); err != nil && err != io.EOF {
-			return sessionJSONLWindowLine{}, nil, false, false
-		}
-	}
-	return sessionJSONLWindowLine{start: start, end: end}, bytes.TrimSpace(line), lineLen > readLen, true
+	return sessionJSONLWindowLine{start: start, end: end}, true
 }
 
 // ingestEventsFromJSONLWindowed reads backward from the parser-proven EOF and
@@ -680,7 +664,7 @@ func (sc *SessionCache) ingestEventsFromJSONLWindowed(orchDir string, window int
 	selectedNewest := make([]sessionJSONLWindowLine, 0, window)
 	scanEnd := completeOff
 	for scanEnd > 0 && len(selectedNewest) < window {
-		rng, _, _, ok := readPreviousJSONLLine(f, scanEnd)
+		rng, ok := readPreviousJSONLLine(f, scanEnd)
 		if !ok {
 			return false
 		}
@@ -714,7 +698,7 @@ func (sc *SessionCache) ingestEventsFromJSONLWindowed(orchDir string, window int
 	}
 	if len(newEntries) > 0 && needsGroupBackExtension(newEntries[0]) && len(selected) > 0 {
 		for boundaryEnd := selected[0].start; boundaryEnd > 0; {
-			rng, _, _, ok := readPreviousJSONLLine(f, boundaryEnd)
+			rng, ok := readPreviousJSONLLine(f, boundaryEnd)
 			if !ok {
 				return false
 			}
