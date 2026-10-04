@@ -47,9 +47,8 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 - **`portal/internal/api/handlers.go:90-117`** — `readTopologyTail(path, n)`. Streams `topology.jsonl` and returns the last `n` non-empty lines as raw JSON, memory-bounded by `n` and the per-line token limit.
 - **`portal/internal/api/handlers.go:121-152`** — `AppendTopology(path, network)` / `AppendTopologyAt`. Writes one JSONL line `{"t":<unix_ms>,"net":<network>}`. `AppendTopologyAt` uses `normalizeNetworkSlices` so nil slices encode as `[]`. Opens the file with `O_APPEND`; creates parent dirs on first write.
 - **`portal/internal/api/handlers.go:156-174`** — `NewProgressHandler(baseDir)`. `GET /api/topology/progress` — reads `reconstruct.progress` (`"N/M"` format), returns `{"current":N,"total":M}` or `{}`.
-- **`portal/internal/api/handlers_test.go:89-165`** — Empty live-network arrays, mail-mode behavior, and `normalizeNetworkSlices` idempotence/populated-slice retention.
-- **`portal/internal/api/handlers_test.go:168-238`** — CORS regression coverage for live network, topology, and progress handlers, including success and error/fallback responses.
-- **`portal/internal/api/handlers_test.go:279-297`** — Appended tape frames retain `[]` for all four empty network slices in raw JSON.
+- **`portal/internal/api/handlers_test.go:89-127, 240-258`** — Live-network empty-array serialization and mail-mode behavior, plus empty-array serialization in appended topology frames.
+- **`portal/internal/api/handlers_test.go:129-199`** — CORS regression coverage for live network, topology, and progress handlers, including success and error/fallback responses.
 
 ### Replay (`replay.go`, 864 lines)
 

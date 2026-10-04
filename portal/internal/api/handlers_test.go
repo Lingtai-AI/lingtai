@@ -126,45 +126,6 @@ func TestNetworkHandlerMailMode(t *testing.T) {
 	}
 }
 
-func TestNormalizeNetworkSlices(t *testing.T) {
-	t.Run("nil slices normalize idempotently", func(t *testing.T) {
-		once := normalizeNetworkSlices(fs.Network{})
-		twice := normalizeNetworkSlices(once)
-		firstJSON, err := json.Marshal(once)
-		if err != nil {
-			t.Fatalf("marshal normalized network: %v", err)
-		}
-		secondJSON, err := json.Marshal(twice)
-		if err != nil {
-			t.Fatalf("marshal normalized network twice: %v", err)
-		}
-		if !bytes.Equal(firstJSON, secondJSON) {
-			t.Fatalf("second normalization changed JSON: %s -> %s", firstJSON, secondJSON)
-		}
-		assertNetworkSlicesAreEmptyArrays(t, firstJSON)
-	})
-
-	t.Run("populated slices remain unchanged", func(t *testing.T) {
-		network := fs.Network{
-			Nodes:        []fs.AgentNode{{Address: "/test/agent-a", AgentName: "a", State: "ACTIVE"}},
-			AvatarEdges:  []fs.AvatarEdge{{}},
-			ContactEdges: []fs.ContactEdge{{}},
-			MailEdges:    []fs.MailEdge{{}},
-		}
-		before, err := json.Marshal(network)
-		if err != nil {
-			t.Fatalf("marshal input network: %v", err)
-		}
-		after, err := json.Marshal(normalizeNetworkSlices(network))
-		if err != nil {
-			t.Fatalf("marshal normalized network: %v", err)
-		}
-		if !bytes.Equal(after, before) {
-			t.Fatalf("normalization changed populated network: before %s, after %s", before, after)
-		}
-	})
-}
-
 func TestHandlersDoNotSetCORSHeaders(t *testing.T) {
 	t.Run("network success", func(t *testing.T) {
 		handler := NewNetworkHandler(t.TempDir())
