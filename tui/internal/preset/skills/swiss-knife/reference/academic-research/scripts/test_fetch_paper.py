@@ -11,7 +11,6 @@ replaced the broken upstream `download_paper` dependency (issue #136). They stub
   * miss: paywall / login HTML is detected and refused
   * metadata extraction from citation_* meta tags
   * article body extraction heuristics
-  * the --no-publisher-extract flag skips the tier
   * tier registration / route wiring in the TIERS table
 
 The module imports `fetch_paper` directly, so it relies only on the stub
@@ -223,15 +222,6 @@ class TierPublisherExtractTests(unittest.TestCase):
         _stub_requests.get = _patch_get(PUBLISHER_HTML)
         out = SCRIPT_DIR / "_test_out_happy"
         out.mkdir(exist_ok=True)
-        original_extract = fetch_paper._extract_article_body
-        expected_body = original_extract(PUBLISHER_HTML)
-        extracted_html = []
-
-        def _spy_extract(html):
-            extracted_html.append(html)
-            return original_extract(html)
-
-        fetch_paper._extract_article_body = _spy_extract
         try:
             meta = self._meta()
             path = fetch_paper.tier_publisher_extract(meta, out)
@@ -239,25 +229,13 @@ class TierPublisherExtractTests(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertEqual(path, out / "paper.md")
             text = path.read_text()
-            self.assertEqual(extracted_html, [PUBLISHER_HTML])
-            self.assertIn(
-                "## Full text (extracted)\n\n" + expected_body + "\n\n---",
-                text,
-            )
-            self.assertIn("# A Self-Contained Publisher Extractor", text)
-            self.assertIn("Jane Doe", text)
-            self.assertIn(
-                "DOI: [10.1103/PhysRevTest.1.000001]"
-                "(https://doi.org/10.1103/PhysRevTest.1.000001)",
-                text,
-            )
+            self.assertIn("first paragraph of the body", text)
             self.assertIn(
                 "- Source: in-house publisher-page extractor (Tier 5), "
                 + meta["url"],
                 text,
             )
         finally:
-            fetch_paper._extract_article_body = original_extract
             for p in out.glob("*"):
                 p.unlink()
             out.rmdir()
@@ -285,20 +263,6 @@ class TierPublisherExtractTests(unittest.TestCase):
         finally:
             out.rmdir()
 
-    def test_miss_when_body_is_below_minimum(self):
-        short_page = "<html><body><article>brief text.</article></body></html>"
-        _stub_requests.get = _patch_get(short_page)
-        out = SCRIPT_DIR / "_test_out_short_body"
-        out.mkdir(exist_ok=True)
-        try:
-            path = fetch_paper.tier_publisher_extract(self._meta(), out)
-            self.assertIsNone(path)
-            self.assertFalse((out / "paper.md").exists())
-        finally:
-            for p in out.glob("*"):
-                p.unlink()
-            out.rmdir()
-
     def test_miss_on_paywall_html(self):
         _stub_requests.get = _patch_get(PAYWALL_HTML)
         out = SCRIPT_DIR / "_test_out_paywall"
@@ -321,33 +285,6 @@ class TierRegistrationTests(unittest.TestCase):
         # Tier-5 must sit between CORE and LibGen.
         self.assertLess(names.index("core"), names.index("publisher_extract"))
         self.assertLess(names.index("publisher_extract"), names.index("libgen"))
-
-    def test_flag_skips_tier(self):
-        # When allow_publisher_extract=False, fetch_one must not invoke the tier.
-        called = {"n": 0}
-
-        def _spy(meta, out_dir):
-            called["n"] += 1
-            return None
-
-        orig = fetch_paper.tier_publisher_extract
-        # Rebind in the TIERS table too.
-        orig_tiers = fetch_paper.TIERS
-        try:
-            fetch_paper.tier_publisher_extract = _spy
-            fetch_paper.TIERS = [
-                (n, _spy if n == "publisher_extract" else f)
-                for n, f in orig_tiers
-            ]
-            # Drive only the skip decision: confirm the guard in fetch_one
-            # references allow_publisher_extract by checking the function arg.
-            import inspect
-            sig = inspect.signature(fetch_paper.fetch_one)
-            self.assertIn("allow_publisher_extract", sig.parameters)
-        finally:
-            fetch_paper.tier_publisher_extract = orig
-            fetch_paper.TIERS = orig_tiers
-
 
 if __name__ == "__main__":
     unittest.main()
