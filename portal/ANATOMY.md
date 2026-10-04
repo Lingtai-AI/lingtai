@@ -16,7 +16,6 @@ related_files:
   - portal/web/package.json
   - portal/web/src/App.tsx
   - portal/web/src/Graph.tsx
-  - portal/web/src/Graph.test.mjs
   - portal/web/src/BottomBar.tsx
   - portal/web/src/FilterPanel.tsx
   - portal/web/src/api.ts
@@ -71,7 +70,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 - **`internal/api/`** — HTTP server, handlers, and the 784-line replay endpoint. See `portal/internal/api/ANATOMY.md`.
 - **`internal/fs/`** — Filesystem readers: agent manifests, heartbeat, mailbox, network reconstruction (`reconstruct.go`), topology types (`types.go`). Same shape as `tui/internal/fs/` but Portal-specific.
 - **`internal/migrate/`** — retained m001–m039 source/tests and registry history; production Portal does not import or execute it. See `portal/internal/migrate/ANATOMY.md`.
-- **`web/`** — React 19 + TypeScript + Vite frontend. Source under `web/src/`; builds to `web/dist/`. `web/src/Graph.tsx` owns graph layout, replay dot synchronization, and canvas drawing; `web/src/Graph.test.mjs` exercises those behaviors against the transpiled component. `web/src/App.tsx:88-121` starts the live coordinator, while `web/src/live-network.mjs:1-111` explicitly requests incomplete `mail=0` for the fast lane and full mail only for live email mode; `/api/network` remains full by default, and incomplete snapshots reach consumers only behind the mail-availability gate. Results merge mail fields into the latest live snapshot with generation/controller acceptance.
+- **`web/`** — React 19 + TypeScript + Vite frontend. Source under `web/src/`; builds to `web/dist/`. `web/src/Graph.tsx` owns graph layout, replay dot synchronization, and canvas drawing. `web/src/App.tsx:88-121` starts the live coordinator, while `web/src/live-network.mjs:1-111` explicitly requests incomplete `mail=0` for the fast lane and full mail only for live email mode; `/api/network` remains full by default, and incomplete snapshots reach consumers only behind the mail-availability gate. Results merge mail fields into the latest live snapshot with generation/controller acceptance.
 - **`i18n/`** — en/zh/wen JSON tables (independent of `tui/i18n/`).
 
 ## Connections
