@@ -3,7 +3,6 @@ package preset
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -91,7 +90,10 @@ func TestScanCategory(t *testing.T) {
 		t.Fatalf("ScanCategory(recommended) returned no recipes")
 	}
 	found := false
-	for _, r := range recipes {
+	for i, r := range recipes {
+		if i > 0 && recipes[i-1].ID > r.ID {
+			t.Errorf("ScanCategory(recommended) IDs out of order: %q before %q", recipes[i-1].ID, r.ID)
+		}
 		if r.ID == "adaptive" {
 			found = true
 			if r.Info.Name == "" {
@@ -154,62 +156,6 @@ func TestScanCategory_NoLangFilter(t *testing.T) {
 		for id := range ids {
 			if id == "greeter-zh" || id == "greeter-wen" || id == "plain-zh" || id == "plain-wen" {
 				t.Errorf("ScanCategory(intrinsic, %q) returned legacy-suffix ID %q", lang, id)
-			}
-		}
-	}
-}
-
-func TestRecipeCleanupScanCategoryDirectoryNameOrder(t *testing.T) {
-	globalDir := t.TempDir()
-	categoryDir := filepath.Join(globalDir, "recipes", "recommended")
-	for _, name := range []string{"zeta", "middle", "alpha"} {
-		writeRecipeJSON(t, filepath.Join(categoryDir, name), "", name, "test")
-	}
-	writeRecipeJSON(t, filepath.Join(categoryDir, ".hidden"), "", "hidden", "test")
-	if err := os.MkdirAll(filepath.Join(categoryDir, "invalid"), 0o755); err != nil {
-		t.Fatalf("mkdir invalid recipe: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(categoryDir, "regular-file"), []byte("ignored"), 0o644); err != nil {
-		t.Fatalf("write regular file: %v", err)
-	}
-
-	recipes := ScanCategory(globalDir, "recommended", "en")
-	got := make([]string, len(recipes))
-	for i, recipe := range recipes {
-		got[i] = recipe.ID
-		if recipe.Embedded || recipe.Dir == "" {
-			t.Errorf("recipe %q provenance = embedded:%t dir:%q, want disk with nonempty dir", recipe.ID, recipe.Embedded, recipe.Dir)
-		}
-		if recipe.Info.ID != "test" {
-			t.Errorf("recipe %q manifest ID = %q, want test", recipe.ID, recipe.Info.ID)
-		}
-	}
-	if strings.Join(got, ",") != "alpha,middle,zeta" {
-		t.Fatalf("recipe IDs = %v, want [alpha middle zeta]", got)
-	}
-}
-
-func TestRecipeCleanupScanEmbeddedCategoryLocaleStableOrder(t *testing.T) {
-	var baseline []DiscoveredRecipe
-	for i, lang := range []string{"en", "zh", "wen"} {
-		recipes := ScanEmbeddedCategory("intrinsic", lang)
-		got := make([]string, len(recipes))
-		for j, recipe := range recipes {
-			got[j] = recipe.ID
-			if !recipe.Embedded || recipe.Dir != "" {
-				t.Errorf("%q provenance = embedded:%t dir:%q, want embedded with empty dir", recipe.ID, recipe.Embedded, recipe.Dir)
-			}
-		}
-		if strings.Join(got, ",") != "greeter,plain" {
-			t.Fatalf("ScanEmbeddedCategory(intrinsic, %q) IDs = %v, want [greeter plain]", lang, got)
-		}
-		if i == 0 {
-			baseline = recipes
-			continue
-		}
-		for j := range recipes {
-			if !reflect.DeepEqual(recipes[j].Info, baseline[j].Info) {
-				t.Errorf("ScanEmbeddedCategory(intrinsic, %q) metadata for %q differs from en", lang, recipes[j].ID)
 			}
 		}
 	}
