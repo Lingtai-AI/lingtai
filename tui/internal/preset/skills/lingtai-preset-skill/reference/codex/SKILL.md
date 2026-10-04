@@ -1,8 +1,8 @@
 ---
 name: preset-skill-codex
 description: "Use when revising the built-in codex TUI preset."
-version: 4.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+version: 4.1.0
+last_changed_at: "2026-09-30T00:00:00Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -10,6 +10,7 @@ related_files:
   - tui/CONTRACT.md
   - tui/internal/preset/revision.go
   - tui/internal/headless/preset_revision.go
+  - tui/internal/config/codex_public_models.go
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -27,34 +28,51 @@ endpoint use an external pool such as sub2api / subs-pool through that same
 
 ## Template-specific settings
 
-Read the official [Codex authentication](https://developers.openai.com/codex/auth)
-and [Codex models](https://developers.openai.com/codex/models) pages. For actual
-served acceptance, compare that Codex-specific catalog with a fresh
-ChatGPT-OAuth request/live selection against the Codex route; never use the
-standard OpenAI model list to populate this picker. Keep account rollout and
-subscription gates as evidence, and verify image input for each exact model.
-Never inspect or print OAuth token contents.
+Since 2026-09-30 the picker's model lineup is fetched, not hand-curated: see
+"Public model-directory picker" below before assuming the old
+docs-page-comparison workflow still applies to the live list. Never inspect
+or print OAuth token contents.
 
 ## TUI surfaces to revise
 
-Start at codexPreset in tui/internal/preset/preset.go. Revise
-providerModels["codex"], codexThinkingOptions, and the model row in
-tui/internal/tui/preset_editor.go when the Codex catalog or reasoning choices
-change; the service tier row offers normal/fast (fast is sent as priority).
-Preserve the /codex base_url suffix, empty api_key_env, OAuth identity
-(codex_auth_path account binding), and explicit xhigh default. Follow the
-Codex-specific checklist in tui/internal/tui/SKILL.md and the
-latest-two-generation rule in tui/CONTRACT.md.
+Start at codexPreset in tui/internal/preset/preset.go, which pins the
+constructor/default to `config.DefaultCodexModelOptions()[0]`
+(tui/internal/config/codex_public_models.go) — currently gpt-5.6-sol: public
+Astra documentation is positive, but exact authenticated OAuth-route
+availability is not, so the offline default does not silently promote Astra.
+Revise codexThinkingOptions in tui/internal/tui/preset_editor.go when Codex's
+reasoning choices change; the service tier row offers normal/fast (fast is
+sent as priority). Preserve the /codex base_url suffix, empty api_key_env,
+OAuth identity (codex_auth_path account binding), and explicit xhigh default.
+Follow the Codex-specific checklist in tui/internal/tui/SKILL.md. The
+latest-two-generation rule in tui/CONTRACT.md no longer governs Codex — see
+that contract's "Codex exception" and the next section — but still governs
+Claude Code's CLI aliases.
 
-The picker is gpt-5.6-sol, gpt-6-astra, gpt-5.6-terra, and gpt-5.6-luna;
-gpt-5.5 and older gpt-5.4, gpt-5.4-mini, gpt-5.3-codex, and gpt-5.2 are not
-offered. The constructor/default remains gpt-5.6-sol: public Astra
-documentation is positive, but exact authenticated OAuth-route availability
-is not, so the editor does not silently promote Astra. Saved presets are not
-rewritten. To inspect live OAuth quota, complete the
-app-server initialize handshake, send account/rateLimits/read with
-structurally `null` params, and optionally observe account/rateLimits/updated;
-read usedPercent, windowDurationMins, and resetsAt without exposing secrets.
+## Public model-directory picker
+
+Codex's model row is per-editor state
+(`PresetEditorModel.codexModels`), not a `providerModels` map entry — there is
+no static list to edit when a new model ships. On preset-editor entry,
+`config.RefreshCodexPublicModels` (tui/internal/config/codex_public_models.go)
+fetches the fixed public directory
+`https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json`
+(bounded ~5s/~2MiB, last-good cache under `<globalDir>/cache/`, offline
+static fallback on any failure) and retains entries whose `display_name`
+starts with the exact case-sensitive prefix `GPT` — no numeric-generation,
+visibility, or account-entitlement filter. The retained `display_name` is the
+displayed label; the entry's `slug` is what gets persisted into
+`manifest.llm.model`. This is public metadata, not proof the current account
+can use a listed model — treat every entry as a suggestion and let the actual
+run be the entitlement check. A saved/custom id absent from the live/cached
+list keeps rendering (hollow) and keeps working; pressing `c` on the model
+row opens a free-text custom entry for any account-specific or brand-new id.
+A completed refresh never changes a saved preset's model, an agent's active
+preset, or its thinking level, and never gates Save. To inspect live OAuth
+quota instead, complete the app-server initialize handshake, send
+account/rateLimits/read with structurally `null` params, and optionally
+observe account/rateLimits/updated; read usedPercent, windowDurationMins, and
+resetsAt without exposing secrets.
 
 ## Reviewed deterministic revision
 

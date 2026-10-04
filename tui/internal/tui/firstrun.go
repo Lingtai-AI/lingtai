@@ -98,10 +98,12 @@ const (
 	stepLaunching
 )
 
-// (codexModels was removed in 2026-05 — the codex preset now declares
-// its own model in llm.model like every other provider, picked via the
-// preset editor's model row. See preset_editor.go's providerModels map
-// and the SKILL.md next to it for the maintained model list.)
+// (A firstRunStep-scoped codexModels model picker was removed in 2026-05 —
+// the codex preset now declares its own model in llm.model like every other
+// provider, picked via the preset editor's model row. See
+// preset_editor.go's (*PresetEditorModel).codexModels field — a distinct,
+// later-added per-editor public-directory catalog, not this removed
+// picker — and the SKILL.md next to it.)
 
 // stepProgress returns the 1-based index and total for progress display:
 // library • presets-config • details. Templates always exist after
@@ -834,6 +836,20 @@ func (m FirstRunModel) runBootstrap(ch chan<- string) tea.Cmd {
 
 func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case codexPublicModelsMsg:
+		// Explicit forwarding (not left to the generic default: branch
+		// below) for the embedded preset editor's asynchronous Codex
+		// public-model refresh: only while the wizard is actually on
+		// stepEditPreset, and only into the editor's own state — the
+		// wizard's other step state, the working preset, and any
+		// in-progress text edit are untouched either way.
+		if m.step == stepEditPreset {
+			updated, cmd := m.presetEditor.Update(msg)
+			m.presetEditor = updated
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height

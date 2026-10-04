@@ -16,6 +16,9 @@ related_files:
   - tui/internal/tui/props.go
   - tui/internal/tui/preset_library.go
   - tui/internal/tui/preset_editor.go
+  - tui/internal/tui/preset_editor_test.go
+  - tui/internal/config/codex_public_models.go
+  - tui/internal/config/codex_public_models_test.go
   - tui/internal/tui/SKILL.md
   - tui/internal/preset/preset.go
   - tui/internal/preset/revision.go
@@ -217,23 +220,30 @@ provider switch into such a family).
 The model ids the TUI offers are a contract with the user: everything the
 picker shows must be something the chosen endpoint actually serves today. A
 retired id in the list is a 4xx the user did not ask for, and a list that
-only ever grows rots into one.
+only ever grows rots into one. Codex is the one authorized exception to this
+framing below — it trades a served-today promise for account-verifiable
+public suggestions — so read the Codex exception before assuming a claim
+below still covers it.
 
-**Two-generation rule.** For every model family, the TUI ships only the
-**latest two generations**. This binds:
+**Two-generation rule.** For every STILL-STATIC model family, the TUI ships
+only the **latest two generations**. This binds:
 
-- `providerModels` (`tui/internal/tui/preset_editor.go`) — the curated
-  catalog for the ←/→ picker on the editor's model row, looked up by
-  `modelOptions(provider)`. Only the two subscription routes carry one: the
-  Codex OAuth catalog and the Claude Code CLI aliases. The `openai` and
-  `anthropic` families point at arbitrary endpoints, so their model row is
-  free text and their templates ship an empty model that Save requires the
-  user to fill in. When the user switches provider, a curated id the new
-  family cannot serve falls back to that family's first catalog entry, or is
-  cleared for a free-text family; arbitrary user text is never rewritten;
+- `providerModels` (`tui/internal/tui/preset_editor.go`) — the curated,
+  package-level catalog for the ←/→ picker on the editor's model row, looked
+  up by `modelOptions(provider)`. Only one subscription route is a static
+  catalog here now: the Claude Code CLI aliases. (Codex was the other static
+  entry through 2026-09; it is now sourced per the Codex exception below and
+  is deliberately absent from this map.) The `openai` and `anthropic`
+  families point at arbitrary endpoints, so their model row is free text and
+  their templates ship an empty model that Save requires the user to fill
+  in. When the user switches provider, a curated id the new family cannot
+  serve falls back to that family's first catalog entry, or is cleared for a
+  free-text family; arbitrary user text is never rewritten;
 - the default `model` of every built-in preset constructor
   (`tui/internal/preset/preset.go`), which for a picker-bearing provider must
-  itself be the first of that provider's shipped ids.
+  itself be the first of that provider's shipped ids — for Codex, the first
+  entry of the offline static fallback (`config.DefaultCodexModelOptions()`,
+  see below), not a live-fetched id.
 
 The TUI makes no per-model vision claim: templates declare `vision: inherit`
 and whether the configured model accepts images is a runtime fact.
@@ -242,21 +252,82 @@ Reading of the rule:
 
 | Term | Meaning |
 |---|---|
-| family | one model line in a curated catalog — the Codex `gpt-*` line |
-| generation | the version step within the family — `gpt-6` vs `gpt-5.6` |
-| **not** a generation | a variant inside one generation — `-mini`, the `gpt-5.6-sol/-terra/-luna` routes. All variants of a kept generation stay. |
-| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`). Free-text rows (`openai`, `anthropic`) have no catalog to curate. |
+| family | one model line in a curated catalog — the Claude Code alias line |
+| generation | the version step within the family — e.g. `gpt-6` vs `gpt-5.6` in a hypothetical hand-curated family |
+| **not** a generation | a variant inside one generation — `-mini`-style suffixes. All variants of a kept generation stay. |
+| exempt | catalogs with no generation ladder: CLI aliases naming concurrent tiers (`opus`/`fable`/`sonnet`/`haiku`). Free-text rows (`openai`, `anthropic`) have no catalog to curate. Codex is also exempt, but for a different reason — see below, not "no ladder." |
 
-**Standing obligation.** Adding a new generation is the same change that
-removes the third-newest one — from `providerModels` and from any provider
-manual under
+**Standing obligation.** Adding a new generation to a family still governed by
+this rule (today, only Claude Code's CLI aliases can gain/lose a tier) is the
+same change that removes the third-newest one — from `providerModels` and
+from any provider manual under
 `tui/internal/preset/skills/lingtai-preset-skill/reference/` that enumerates
 the lineup. Never rewrite `presets/saved/`: a user pinned to a retired id
 keeps working, the picker just stops offering it.
 
+### Codex exception: public-directory-sourced suggestions
+
+Human-authorized override (2026-09-30), superseding the two-generation rule
+and the "served today" promise above for Codex ONLY. Every other provider's
+promise in this section, and the rest of this contract (Claude Code CLI
+aliases, `openai`/`anthropic` free-text policy, the explicit preset-revision
+contract below), is unchanged.
+
+Codex's model row is **per-editor-instance state**
+(`PresetEditorModel.codexModels` in `tui/internal/tui/preset_editor.go`), not
+a package-level static map: every open editor independently seeds, fetches,
+and displays its own copy — there is no shared mutable catalog to pollute
+across concurrently open editors.
+
+- **Source and binding filter.** On preset-editor entry (`Init()`), the
+  editor starts one asynchronous, bounded fetch of the fixed public directory
+  `https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json`
+  (`config.RefreshCodexPublicModels`, `tui/internal/config/codex_public_models.go`).
+  No OAuth/API-key request, no Codex CLI dependency, and no new kernel
+  service are involved. An entry is retained if and only if its
+  `display_name` string STARTS WITH the exact case-sensitive prefix `GPT`;
+  every other field in the source document — including any numeric
+  generation, visibility, or account-entitlement flag — is read by nothing
+  in this TUI and filters nothing. This directory is public metadata, not
+  proof that the current account can use a listed model; the kernel/endpoint
+  response when the agent actually runs is the only real entitlement check.
+- **Slug vs. label.** The retained `display_name` is shown to the user
+  UNCHANGED (the picker's visible label); the entry's `slug` is what gets
+  persisted into `manifest.llm.model` and is the only value ←/→ cycling
+  compares. Entries are deduplicated by slug. A saved or hand-typed model not
+  present in the current lineup is still rendered (hollow, by its raw slug)
+  and remains fully usable — a model missing from the catalog is never
+  cleared, hidden, or blocked from Save merely because it fell out of (or
+  never appeared in) the public list.
+- **Bounded, fail-open network behavior.** The fetch is bounded (~5s timeout,
+  ~2MiB response cap). On success it overwrites a last-good cache under the
+  caller's `<globalDir>/cache/`, never under the saved-preset tree. On ANY
+  failure — timeout, transport error, non-200, malformed/empty body, or an
+  oversized body — the editor falls back to that last-good cache, and only
+  then to a small compiled-in offline static list
+  (`config.DefaultCodexModelOptions()`), so the picker is never empty and a
+  single bad response can never erase a previously good cache.
+- **Selection- and edit-preservation.** A completed refresh replaces ONLY the
+  editor's own candidate list. It never touches the working preset's selected
+  or custom model id, an in-progress inline/clone-name text edit, the
+  editor's mode, or its dirty-vs-clean state — whatever the editor is doing
+  when the refresh result arrives. There is no network gate on Save: `commit()`
+  still runs only structural `Validate()` (see "Preset editor service tier"
+  and the availability-save-gate skill referenced elsewhere in this repo).
+  Refreshing never auto-changes a saved preset, an agent's active preset, its
+  model, or its thinking level.
+- **Explicit custom entry.** Pressing `c` while focused on the Codex model
+  row opens the same inline free-text editor every free-text provider already
+  uses, prefilled with the current slug, so Codex is never trapped cycling
+  only the public-directory suggestions — an arbitrary account-specific or
+  brand-new id remains one keystroke away regardless of what the directory,
+  cache, or offline fallback currently contain.
+
 Per-provider source lists, the rest of the inclusion checklist (served on our
-endpoint, GA not preview, documented vision, subscription gates), and the
-removal procedure live in `tui/internal/tui/SKILL.md`.
+endpoint, GA not preview, documented vision, subscription gates) for
+`claude-code`, and the removal procedure for a still-static family live in
+`tui/internal/tui/SKILL.md`, which also carries the Codex exception's
+pointer back here.
 
 ## Explicit preset revision contract
 
