@@ -9,7 +9,6 @@ related_files:
   - tui/internal/sqlitelog/molt_recent_test.go
   - tui/internal/sqlitelog/query.go
   - tui/internal/sqlitelog/query_test.go
-  - tui/internal/sqlitelog/query_cleanup_test.go
   - tui/internal/sqlitelog/refresh_recent_test.go
   - tui/internal/sqlitelog/tool_call_counts_test.go
   - tui/internal/fs/session.go
