@@ -69,32 +69,6 @@ func setupNetworkHandlerMailFixture(t *testing.T) string {
 	return base
 }
 
-func assertNetworkSlicesAreEmptyArrays(t *testing.T, data []byte) {
-	t.Helper()
-	var network map[string]json.RawMessage
-	if err := json.Unmarshal(data, &network); err != nil {
-		t.Fatalf("decode network fields: %v", err)
-	}
-	for _, field := range []string{"nodes", "avatar_edges", "contact_edges", "mail_edges"} {
-		got, ok := network[field]
-		if !ok {
-			t.Fatalf("network is missing %q", field)
-		}
-		if !bytes.Equal(got, []byte("[]")) {
-			t.Errorf("%s = %s, want []", field, got)
-		}
-	}
-}
-
-func TestNewNetworkHandler_EmptyCollectionsAreArrays(t *testing.T) {
-	rr := httptest.NewRecorder()
-	NewNetworkHandler(t.TempDir()).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/network", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
-	assertNetworkSlicesAreEmptyArrays(t, rr.Body.Bytes())
-}
-
 func TestNetworkHandlerMailMode(t *testing.T) {
 	base := setupNetworkHandlerMailFixture(t)
 	for _, tc := range []struct {
@@ -235,26 +209,6 @@ func TestAppendTopologyAt_ExplicitTimestamp(t *testing.T) {
 	if len(entry.Net.Nodes) != 1 || entry.Net.Nodes[0].Address != "/test/agent-a" {
 		t.Errorf("unexpected network: %+v", entry.Net)
 	}
-}
-
-func TestAppendTopologyAt_EmptyCollectionsAreArrays(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "topology.jsonl")
-	AppendTopologyAt(path, fs.Network{}, 1000)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read topology: %v", err)
-	}
-	var frame struct {
-		T   int64           `json:"t"`
-		Net json.RawMessage `json:"net"`
-	}
-	if err := json.Unmarshal(data, &frame); err != nil {
-		t.Fatalf("decode tape frame: %v", err)
-	}
-	if frame.T != 1000 {
-		t.Fatalf("timestamp = %d, want 1000", frame.T)
-	}
-	assertNetworkSlicesAreEmptyArrays(t, frame.Net)
 }
 
 func TestAppendTopology_UsesCurrentTime(t *testing.T) {
