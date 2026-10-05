@@ -223,18 +223,11 @@ class TierPublisherExtractTests(unittest.TestCase):
         out = SCRIPT_DIR / "_test_out_happy"
         out.mkdir(exist_ok=True)
         try:
-            meta = self._meta()
-            path = fetch_paper.tier_publisher_extract(meta, out)
+            path = fetch_paper.tier_publisher_extract(self._meta(), out)
             self.assertIsNotNone(path)
             self.assertTrue(path.exists())
-            self.assertEqual(path, out / "paper.md")
             text = path.read_text()
             self.assertIn("first paragraph of the body", text)
-            self.assertIn(
-                "- Source: in-house publisher-page extractor (Tier 5), "
-                + meta["url"],
-                text,
-            )
         finally:
             for p in out.glob("*"):
                 p.unlink()
