@@ -165,6 +165,11 @@ appears as the degraded state below.
    (fable F8, D1-D5 below): check agents present (R1), `config.json`
    presence (R3.1), `.env` API keys (R2), `.secrets` for declared addons
    (R1), runtime/version (R1).
+4. The startup TUI binary update verifies the installed binary from captured
+   command stdout/stderr and preserves each command's exit status, even while
+   that output streams live. Streamed command output is not repeated in the
+   update summary; non-command diagnostics (orchestration, verification, and
+   failure lines) are never suppressed.
 
 ## Provider families
 
