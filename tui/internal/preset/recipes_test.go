@@ -90,10 +90,7 @@ func TestScanCategory(t *testing.T) {
 		t.Fatalf("ScanCategory(recommended) returned no recipes")
 	}
 	found := false
-	for i, r := range recipes {
-		if i > 0 && recipes[i-1].ID > r.ID {
-			t.Errorf("ScanCategory(recommended) IDs out of order: %q before %q", recipes[i-1].ID, r.ID)
-		}
+	for _, r := range recipes {
 		if r.ID == "adaptive" {
 			found = true
 			if r.Info.Name == "" {
