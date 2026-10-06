@@ -257,6 +257,86 @@ func TestWriteMail_RealAgentSenderUnchanged(t *testing.T) {
 	}
 }
 
+// TestWriteMail_StampsAbsoluteReturnRoute checks the raw keys the kernel reads:
+// a Go round-trip through the same struct tag would pass even with a misspelled
+// tag, so the message is decoded as a generic map.
+func TestWriteMail_StampsAbsoluteReturnRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		manifest    map[string]interface{}
+		wantAgentID string
+	}{
+		{
+			name:        "manifest carries agent_id",
+			manifest:    map[string]interface{}{"agent_name": "human", "address": "human", "agent_id": "human-7f3a", "admin": nil},
+			wantAgentID: "human-7f3a",
+		},
+		{
+			name:        "manifest without agent_id",
+			manifest:    map[string]interface{}{"agent_name": "human", "address": "human", "admin": nil},
+			wantAgentID: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			senderDir := t.TempDir()
+			recipientDir := t.TempDir()
+			manifestBytes, _ := json.Marshal(tc.manifest)
+			if err := os.WriteFile(filepath.Join(senderDir, ".agent.json"), manifestBytes, 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+
+			if err := WriteMail(recipientDir, senderDir, "human", "orchestrator", "", "hello"); err != nil {
+				t.Fatalf("WriteMail: %v", err)
+			}
+
+			outboxDir := filepath.Join(senderDir, "mailbox", "outbox")
+			entries, err := os.ReadDir(outboxDir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("outbox entries = %d (err %v), want 1", len(entries), err)
+			}
+			id := entries[0].Name()
+
+			data, err := os.ReadFile(filepath.Join(outboxDir, id, "message.json"))
+			if err != nil {
+				t.Fatalf("read message.json: %v", err)
+			}
+			var raw map[string]interface{}
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatalf("decode message.json: %v", err)
+			}
+			if raw["from"] != "human" {
+				t.Errorf("from = %v, want human (display sender must not change)", raw["from"])
+			}
+			if !reflect.DeepEqual(raw["identity"], tc.manifest) {
+				t.Errorf("identity = %#v, want manifest %#v", raw["identity"], tc.manifest)
+			}
+			route, ok := raw["_return_route"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("_return_route = %#v, want object", raw["_return_route"])
+			}
+			if len(route) != 2 {
+				t.Errorf("_return_route = %#v, want exactly address and sender_agent_id", route)
+			}
+			if route["address"] != senderDir {
+				t.Errorf("_return_route.address = %v, want absolute sender workdir %q", route["address"], senderDir)
+			}
+			if got, present := route["sender_agent_id"]; !present || got != tc.wantAgentID {
+				t.Errorf("_return_route.sender_agent_id = %#v (present %v), want %q", got, present, tc.wantAgentID)
+			}
+
+			msg, ok := readMailboxMessage(outboxDir, id)
+			want := MailReturnRoute{Address: senderDir, SenderAgentID: tc.wantAgentID}
+			if !ok || msg.ReturnRoute == nil || *msg.ReturnRoute != want {
+				t.Fatalf("readMailboxMessage ReturnRoute = %#v (ok %v), want %#v", msg.ReturnRoute, ok, want)
+			}
+			cache := NewMailCache(senderDir).Refresh()
+			if len(cache.Messages) != 1 || cache.Messages[0].ReturnRoute == nil || *cache.Messages[0].ReturnRoute != want {
+				t.Fatalf("MailCache ReturnRoute = %#v, want %#v", cache.Messages, want)
+			}
+		})
+	}
+}
+
 func TestMailCache_ScansOutboxWithUndelivered(t *testing.T) {
 	humanDir := t.TempDir()
 	outboxDir := filepath.Join(humanDir, "mailbox", "outbox", "msg-out-1")
@@ -401,7 +481,8 @@ func TestMailCacheCloneDetachesMutableGraphAndPreservesShapes(t *testing.T) {
 						"aliases": []string{"original-alias"},
 					},
 				},
-				Delivered: true,
+				ReturnRoute: &MailReturnRoute{Address: "/original/sender", SenderAgentID: "original-id"},
+				Delivered:   true,
 			},
 			{
 				ID:        "two",
@@ -429,9 +510,11 @@ func TestMailCacheCloneDetachesMutableGraphAndPreservesShapes(t *testing.T) {
 	originalNested["aliases"].([]string)[0] = "mutated-original-alias"
 	originalRoute := original.Messages[1].To.([]interface{})[1].(map[string]interface{})
 	originalRoute["route"].([]interface{})[0] = "mutated-original-route"
+	original.Messages[0].ReturnRoute.Address = "mutated-original-route-address"
 
 	if clone.seen["one"] != 0 || clone.Messages[0].CC[0] != "cc-one" ||
-		clone.Messages[0].Attachments[0] != "one.txt" || clone.Messages[0].To.([]string)[0] != "to-one" {
+		clone.Messages[0].Attachments[0] != "one.txt" || clone.Messages[0].To.([]string)[0] != "to-one" ||
+		clone.Messages[0].ReturnRoute.Address != "/original/sender" {
 		t.Fatalf("original mutation reached clone: %#v", clone.Messages[0])
 	}
 	cloneNested := clone.Messages[0].Identity["nested"].(map[string]interface{})
@@ -450,9 +533,11 @@ func TestMailCacheCloneDetachesMutableGraphAndPreservesShapes(t *testing.T) {
 	clone.Messages[0].To.([]string)[0] = "mutated-clone-to"
 	cloneNested["labels"].([]interface{})[0] = "mutated-clone-label"
 	cloneRoute["route"].([]interface{})[0] = "mutated-clone-route"
+	clone.Messages[0].ReturnRoute.SenderAgentID = "mutated-clone-id"
 	if original.seen["two"] != 1 || original.Messages[0].CC[0] != "mutated-original-cc" ||
 		original.Messages[0].Attachments[0] != "mutated-original.txt" || original.Messages[0].To.([]string)[0] != "mutated-original-to" ||
-		originalNested["labels"].([]interface{})[0] != "mutated-original-label" || originalRoute["route"].([]interface{})[0] != "mutated-original-route" {
+		originalNested["labels"].([]interface{})[0] != "mutated-original-label" || originalRoute["route"].([]interface{})[0] != "mutated-original-route" ||
+		original.Messages[0].ReturnRoute.SenderAgentID != "original-id" {
 		t.Fatalf("clone mutation reached original: %#v", original.Messages)
 	}
 
