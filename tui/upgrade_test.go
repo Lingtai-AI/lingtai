@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -433,6 +436,78 @@ func TestStartupUnknownInstallDoesNotMutate(t *testing.T) {
 	}
 	if errOut.Len() != 0 {
 		t.Fatalf("unknown install should not write stderr, got %q", errOut.String())
+	}
+}
+
+func TestStreamingCommandRunnerCapturesAndStreamsOutput(t *testing.T) {
+	var liveOut, liveErr bytes.Buffer
+	runner := streamingCommandRunner{stdout: &liveOut, stderr: &liveErr}
+
+	res := runner.Run("sh", "-c", "echo out; echo err >&2; exit 3")
+
+	if res.Stdout != "out\n" || res.Stderr != "err\n" {
+		t.Fatalf("captured stdout=%q stderr=%q", res.Stdout, res.Stderr)
+	}
+	if liveOut.String() != "out\n" || liveErr.String() != "err\n" {
+		t.Fatalf("streamed stdout=%q stderr=%q", liveOut.String(), liveErr.String())
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(res.Err, &exitErr) || exitErr.ExitCode() != 3 {
+		t.Fatalf("expected exit status 3, got %v", res.Err)
+	}
+}
+
+func TestStartupSourceUpdateStreamsInstallerOutputOnce(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	metadataPath := writeStartupSourceInstallMetadata(t, globalDir, prefix, binDir, "v0.8.0")
+	const marker = "fake-installer-marker-7f3a"
+	script := fmt.Sprintf(`set -eu
+echo "%[3]s"
+mkdir -p '%[1]s'
+printf '#!/bin/sh\necho "lingtai-tui v0.8.1"\n' > '%[1]s/lingtai-tui'
+chmod 755 '%[1]s/lingtai-tui'
+sed 's/v0.8.0/v0.8.1/' '%[2]s' > '%[2]s.new' && mv '%[2]s.new' '%[2]s'
+`, binDir, metadataPath, marker)
+	installer := filepath.Join(t.TempDir(), "install.sh")
+	if err := os.WriteFile(installer, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var liveOut, liveErr bytes.Buffer
+	streamed := map[string]bool{}
+	var out, errOut bytes.Buffer
+	updated := handleTUIUpgradeWithOptions(config.TUIInstallInfo{
+		Method:       config.TUIInstallMethodSource,
+		Detail:       "metadata at " + metadataPath,
+		MetadataPath: metadataPath,
+	}, "v0.8.0", "v0.8.1", startupTUIUpgradeOptions{
+		Input:                 strings.NewReader("yes\n"),
+		Output:                &out,
+		ErrOutput:             &errOut,
+		Runner:                streamingCommandRunner{stdout: &liveOut, stderr: &liveErr, streamed: streamed},
+		streamed:              streamed,
+		GlobalDir:             globalDir,
+		Stat:                  statMissingForStartupTest,
+		SourceInstallScript:   installer,
+		VerifyTUIArchitecture: func(string) error { return nil },
+	})
+
+	if !updated {
+		t.Fatalf("streaming source update should verify the captured version; stderr=%q output=\n%s", errOut.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "Updated TUI binary: lingtai-tui v0.8.1") {
+		t.Fatalf("missing captured version in summary:\n%s", out.String())
+	}
+	if n := strings.Count(liveOut.String(), marker); n != 1 {
+		t.Fatalf("installer output should stream exactly once, got %d:\n%s", n, liveOut.String())
+	}
+	if strings.Contains(out.String(), marker) {
+		t.Fatalf("summary repeated streamed installer output:\n%s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("successful streaming update should not write stderr, got %q", errOut.String())
 	}
 }
 

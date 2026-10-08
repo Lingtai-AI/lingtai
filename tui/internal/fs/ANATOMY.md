@@ -183,7 +183,8 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `RebuildFromSources` / `RebuildFromSourcesInMemory` | `tui/internal/fs/session.go:195-213` | authoritative full ingest; write-through requests still pass through the cache's persistence role |
 | `RebuildFromSourcesWindowedInMemory` / `Complete` / `ExactHistoryStats` | `tui/internal/fs/session.go:219-230`, `tui/internal/fs/session.go:425-436` | bounded newest-content ingest; completeness prevents partial-file truncation but does not grant write authority. `ExactHistoryStats` (the separately invoked full-history metadata count) is retained and tested but has no production caller — see the note below |
 | `Persist` / `PersistErr` / `rewriteFile` / `append` | `tui/internal/fs/session.go:313-389` | complete `MainAggregateWriter` snapshots use unique-temp atomic replacement; `PersistErr` reports replacement failures while compatibility `Persist` and internal rebuild deliberately remain best-effort, and append behavior is unchanged |
-| `Refresh` | `tui/internal/fs/session.go:2251-2260` | incremental poll from each source's last complete consumed record; `NoPersist` caches update memory without appending the shared aggregate |
+| `readPreviousJSONLLine` / `ingestEventsFromJSONLWindowed` | `tui/internal/fs/session.go:603-744` | backward range-only newline scan feeds full-record metadata classification; no discarded prefix copy or alternate metadata parser |
+| `Refresh` | `tui/internal/fs/session.go:2315-2324` | incremental poll from each source's last complete consumed record; `NoPersist` caches update memory without appending the shared aggregate |
 | **project_hash.go** | | |
 | `ProjectHash(projectPath)` | `tui/internal/fs/project_hash.go:9` | SHA-256 first 12 hex chars — used as the registry key for each project |
 | **contacts.go** | | |

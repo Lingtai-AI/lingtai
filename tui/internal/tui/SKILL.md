@@ -5,15 +5,31 @@ Bookkeeping notes for keeping `providerModels` and friends in
 this **before** editing those maps so you don't bork an agent network with a
 typo or a retired model.
 
+**Codex is no longer maintained through this manual process.** Since
+2026-09-30 Codex's model row is per-editor-instance state fetched from a
+public directory, cached, and offline-fallback-protected — see
+`tui/CONTRACT.md`'s "Model list curation" → "Codex exception" for the full
+binding contract (display_name filter, slug/label split, cache, refresh
+preservation, and the `c` custom-entry key). Everything below this point that
+talks about hand-curating a Codex list (the authoritative-source row, Rule 0's
+scope, and "When you add/remove a model") is retained as historical rationale
+for WHY the old static entries were chosen, not as a live maintenance
+procedure — do not add a new hardcoded Codex generation here. The Claude Code
+CLI-alias guidance below is unaffected and still current.
+
 ## What this file is for
 
 LingTai ships four provider families (`editorProviders`: openai, anthropic,
-codex, claude-code). Only two carry a curated model catalog in
-`providerModels`: the Codex OAuth route and the Claude Code CLI aliases. The
-`openai` and `anthropic` families point at arbitrary endpoints (the official
-APIs, other vendors' compatible endpoints, or account pools), so their model
-row is free text and there is no list to keep current. Every model picker,
-display, and free-text decision calls `modelOptions(provider)`.
+codex, claude-code). Only one still carries a STATIC package-level model
+catalog in `providerModels`: the Claude Code CLI aliases. Codex's lineup is
+public-directory-sourced per-editor state (`PresetEditorModel.codexModels`,
+see the note above) rather than a `providerModels` entry. The `openai` and
+`anthropic` families point at arbitrary endpoints (the official APIs, other
+vendors' compatible endpoints, or account pools), so their model row is free
+text and there is no list to keep current. Every static-catalog/free-text
+decision calls `modelOptions(provider)`; Codex additionally consults
+`(*PresetEditorModel).modelSlugOptions`/`modelDisplayOptions` for its own
+per-instance lineup.
 
 Drift in a curated catalog causes one of two failures:
 
@@ -41,14 +57,23 @@ explicit `xhigh` default; `claude-code` has no reasoning row.
 
 | Provider | Canonical list | Cadence | Notes |
 |---|---|---|---|
-| `codex` | https://developers.openai.com/codex/models | Monthly | ChatGPT-OAuth only — not the standard OpenAI API list |
-| `claude-code` | the installed `claude` CLI's model-selection help | On CLI releases | CLI aliases (`opus`/`fable`/`sonnet`/`haiku`), not dated API ids |
+| `codex` | `config.CodexPublicModelsURL` (the openai/codex public directory) | Live, per editor entry | No longer hand-curated here — fetched/cached/fallback per `tui/CONTRACT.md`'s Codex exception. The historical `https://developers.openai.com/codex/models` source below documents WHY the old static entries existed, not a list to keep updating by hand. |
+| `claude-code` | the installed `claude` CLI's model-selection help | On CLI releases | CLI aliases (`opus`/`fable`/`sonnet`/`haiku`), not dated API ids — still hand-maintained |
 
-For codex specifically, **do not** consult `https://platform.openai.com/docs/models`. That's the standard API model list, which includes models the codex backend (`chatgpt.com/backend-api/codex/responses`) doesn't accept (e.g. `gpt-5.5-pro` exists in the standard API but 4xx's on the codex endpoint).
+Historical note (pre-2026-09-30 static catalog): the old hand-maintained Codex
+list was sourced from https://developers.openai.com/codex/models and
+deliberately never from `https://platform.openai.com/docs/models` — the
+standard API list, which includes models the codex backend
+(`chatgpt.com/backend-api/codex/responses`) doesn't accept (e.g.
+`gpt-5.5-pro` 4xx's on the codex endpoint). The new public-directory fetch
+applies its own binding filter instead (display_name starts with `GPT`,
+case-sensitive) and does not re-derive this docs-page distinction — a
+returned entry is a suggestion, not a served-today guarantee, for exactly
+the reasons this paragraph used to guard against by hand.
 
 ## Curation rules
 
-**Rule 0 — latest two generations only.** `tui/CONTRACT.md` ("Model list curation") caps every family at its latest two generations. Adding a new generation is the same change that removes the third-newest. Variants inside a generation (`-mini`, the `gpt-5.6-sol/-terra/-luna` routes) are not generations and all stay. Read that section before touching the maps; the checklist below decides inclusion *within* the two generations the rule allows.
+**Rule 0 — latest two generations only, for STATIC catalogs.** `tui/CONTRACT.md` ("Model list curation") caps every family still governed by a package-level catalog at its latest two generations. Today that means Claude Code's CLI aliases only — Codex is the documented exception (public-directory-sourced, no generation/visibility filter). Adding a new generation to a still-governed family is the same change that removes the third-newest. Variants inside a generation (e.g. `-mini`-style suffixes) are not generations and all stay. Read that section before touching `providerModels`; the checklist below decided inclusion for the retired static Codex catalog and still applies to any future static catalog.
 
 Never add a catalog for `openai` or `anthropic`: their endpoint is whatever
 the user configured, so no list can be correct for everyone. When the user
@@ -67,25 +92,37 @@ For each candidate model, decide inclusion against this checklist:
    `gpt-5.6-sol` as the default-first/native default, and mention the gate
    beside the entry. Do not silently promote it.
 
-## Why some models you might expect are missing
+## Why some models you might expect are missing (historical — pre-2026-09-30 static catalog)
 
-- **`gpt-5.5-pro`** — exists in OpenAI's standard API at `/api/docs/models/gpt-5.5-pro` ($30/$180 per 1M tokens), is available in ChatGPT for Pro/Business/Enterprise, but **is not listed under Codex models**. Adding it would cause 4xx on the codex endpoint. Excluded.
-- **`gpt-5.3-codex-spark`** — Research Preview as of 2026-05. Excluded until promoted to GA.
-- **`o3-pro` / `o4-mini` / older o-series** — none are in the Codex CLI catalog. Codex serves the documented GPT-6/GPT-5.6 line here.
+This section explains the reasoning behind the OLD hand-picked Codex list; it
+is no longer an active exclusion process (the public-directory fetch applies
+only the display_name/`GPT`-prefix filter, not this reasoning) but is kept so
+the historical defaults in `config.DefaultCodexModelOptions()` remain
+explainable.
 
-## When you add a new model
+- **`gpt-5.5-pro`** — existed in OpenAI's standard API at `/api/docs/models/gpt-5.5-pro` ($30/$180 per 1M tokens), was available in ChatGPT for Pro/Business/Enterprise, but was **not listed under Codex models**. Adding it would have caused 4xx on the codex endpoint. Excluded from the old static list.
+- **`gpt-5.3-codex-spark`** — Research Preview as of 2026-05. Excluded from the old static list until promoted to GA.
+- **`o3-pro` / `o4-mini` / older o-series** — none were in the Codex CLI catalog the old static list was drawn from.
+
+## When you add a new model (STATIC catalogs only — not Codex)
 
 ```go
 // In providerModels:
-preset.ProviderCodex: {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"}, // default first; Astra availability-gated
+preset.ProviderClaudeCode: {"opus", "fable", "sonnet", "haiku"},
 ```
 
-Order matters in `providerModels` only for the picker UX — left-to-right is the cycle order with ←/→. Putting the desired default first keeps fresh templates and the picker aligned. The `templates/codex.json` (built from `preset.go:codexPreset()`) should also have its `llm.model` bumped when you change that default. Existing saved presets keep whatever model they already declared — that's a feature, not a bug.
+Order matters in `providerModels` only for the picker UX — left-to-right is the cycle order with ←/→. Putting the desired default first keeps fresh templates and the picker aligned. Existing saved presets keep whatever model they already declared — that's a feature, not a bug. Codex has no equivalent step: its default is `config.DefaultCodexModelOptions()[0]` (`tui/internal/config/codex_public_models.go`), and `templates/codex.json` (built from `preset.go:codexPreset()`) pins that same offline-fallback default; the live picker lineup itself is never hand-edited.
 
-## When you remove a retired model
+## When you remove a retired model (STATIC catalogs only — not Codex)
 
 1. Remove from `providerModels` (and from any provider manual that enumerates the lineup).
 2. **Don't** scan saved presets and rewrite their `llm.model`. Users may have very specific reasons for pinning. Migrating their saved/ files silently is worse than letting them hit the 4xx and choose for themselves. (If we ever do migrate, it's an explicit user-confirmed step — not a startup hook.)
+
+Codex has no "remove" step here: a model falling out of the live public
+directory simply stops appearing in a future refresh's candidate list (see
+the Codex exception in `tui/CONTRACT.md`) — there is no static entry to edit,
+and a saved/custom id already in use keeps working and keeps rendering
+exactly like the "don't rewrite saved presets" rule above.
 
 ## Codex preset specifics
 
@@ -98,20 +135,36 @@ Codex is the odd one out — it uses ChatGPT OAuth instead of an API key. A few 
 - **Two login methods, one completion path.** Codex login first shows a method chooser: browser OAuth/localhost for same-machine use, or device code for remote/headless use. `CodexOAuthDoneMsg` writes the token bundle after either method completes; stale completions are epoch-gated so cancelled attempts cannot overwrite `codex-auth.json`.
 - **Empty email is valid.** OpenAI's id_token JWT sometimes ships without the profile claim. We treat `RefreshToken != ""` as the canonical "session is usable" signal and fall back to `(logged in)` for display. Don't gate any logic on `Email != ""`.
 
-## Verification when bumping the codex list
+## Verification when touching the Codex public-directory fetch
 
-After editing `providerModels["codex"]`:
+There is no "codex list" to bump by hand any more. When you touch
+`tui/internal/config/codex_public_models.go` or the per-editor wiring in
+`preset_editor.go` instead:
 
-1. **Build:** `cd tui && go vet ./... && go test ./... && make build`
-2. **Manual:** open the preset editor on the codex template, cycle through models with ←/→. Each one should render in the model row.
-3. **Live test:** restart an agent on each model in the new list. If you can't run all of them, at least run the new latest and the previous default to confirm the codex endpoint accepts both.
-4. **Don't** assume the docs page is canonical for the Codex backend's actual acceptance. The docs sometimes list models still rolling out. If a model 4xx's, it's not in your account yet — leave it in the list (it'll work for users who have it) but note the rollout status in the comment.
+1. **Build/unit test:** `cd tui && go vet ./... && go test ./...` — the parser
+   filter, dedupe, cache, and timeout/error fallback tests are hermetic
+   (injected transport/bytes, `t.TempDir()`), never a live endpoint.
+2. **Manual:** open the preset editor on the codex template; the model row
+   should show the compiled-in offline fallback immediately, then update in
+   place (same slugs persisted, labels possibly refreshed) once the
+   background fetch completes. ←/→ still cycles; `c` still opens a free-text
+   custom entry.
+3. **Live spot-check (optional, not a unit test):** confirm the fixed URL
+   still serves the expected shape and that a live-fetched slug you select
+   actually runs — the directory is a suggestion, not a guarantee, so a 4xx
+   on a specific account is expected behavior, not a bug to chase by editing
+   a filter.
+4. **Don't** add a numeric-generation, visibility, or entitlement filter back
+   in — the human-authorized contract (`tui/CONTRACT.md`, "Codex exception")
+   is display_name-prefix-only on purpose.
 
 ## Cross-references
 
-- `preset_editor.go` — `editorProviders`, `providerModels`, `modelOptions`, `switchProvider`
+- `preset_editor.go` — `editorProviders`, `providerModels`, `modelOptions`, `switchProvider` (static/free-text catalogs)
+- `preset_editor.go` — `codexModels` field, `modelDisplayOptions`/`modelSlugOptions`/`isCuratedModelSlug`, `codexPublicModelsCmd`/`codexPublicModelsMsg`, `Init()` (per-editor Codex public-directory state and its refresh)
 - `preset_editor.go` — `mandatoryCapRow` (fixed, informational capabilities rendering)
-- `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
+- `tui/internal/config/codex_public_models.go` — fetch/parse/cache/fallback (`RefreshCodexPublicModels`, `ParseCodexPublicModels`, `DefaultCodexModelOptions`)
+- `internal/preset/preset.go:codexPreset()` — built-in template, sets default model (pinned to the offline fallback's first entry)
 - `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
 - `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion
 - `oauth.go` — browser OAuth, device-code login, token exchange, JWT email parser

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,9 @@ type startupTUIUpgradeOptions struct {
 	Stat     func(string) (os.FileInfo, error)
 	LookPath func(string) (string, error)
 
+	// Lines the default streaming runner already printed live; summaries skip re-listing them.
+	streamed map[string]bool
+
 	// UninstallHomebrew overrides the injected Homebrew formula uninstall used
 	// when the human confirms the cleanup prompt below. Nil in production
 	// (config.homebrewTUIUpdater.Upgrade defaults to the real `brew uninstall`
@@ -61,7 +65,8 @@ func (o *startupTUIUpgradeOptions) setDefaults() {
 		o.ErrOutput = os.Stderr
 	}
 	if o.Runner == nil {
-		o.Runner = streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr}
+		o.streamed = map[string]bool{}
+		o.Runner = streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr, streamed: o.streamed}
 	}
 	if o.CheckTUIUpgrade == nil {
 		o.CheckTUIUpgrade = config.CheckTUIUpgrade
@@ -122,7 +127,7 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 			UninstallHomebrew:      opts.UninstallHomebrew,
 			VerifyTUIArchitecture:  opts.VerifyTUIArchitecture,
 		})
-		printTUIUpdateLines(opts.Output, update.Lines)
+		printTUIUpdateLines(opts.Output, update.Lines, opts.streamed)
 		return false
 	}
 
@@ -185,7 +190,7 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 		UninstallHomebrew:      opts.UninstallHomebrew,
 		VerifyTUIArchitecture:  opts.VerifyTUIArchitecture,
 	})
-	printTUIUpdateLines(opts.Output, update.Lines)
+	printTUIUpdateLines(opts.Output, update.Lines, opts.streamed)
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
@@ -242,7 +247,7 @@ func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersio
 		SourceInstallScript:   opts.SourceInstallScript,
 		VerifyTUIArchitecture: opts.VerifyTUIArchitecture,
 	})
-	printTUIUpdateLines(opts.Output, update.Lines)
+	printTUIUpdateLines(opts.Output, update.Lines, opts.streamed)
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
@@ -254,8 +259,12 @@ func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersio
 	return true
 }
 
-func printTUIUpdateLines(w io.Writer, lines []config.DoctorLine) {
+func printTUIUpdateLines(w io.Writer, lines []config.DoctorLine, streamed map[string]bool) {
 	for _, line := range lines {
+		// Config re-lists captured command output as indented DoctorInfo; the live copy is already printed.
+		if line.Severity == config.DoctorInfo && strings.HasPrefix(line.Text, "  ") && streamed[strings.TrimSpace(line.Text)] {
+			continue
+		}
 		fmt.Fprintf(w, "  %s\n", line.Text)
 	}
 }
@@ -283,16 +292,27 @@ func answerYes(answer string) bool {
 }
 
 type streamingCommandRunner struct {
-	stdout *os.File
-	stderr *os.File
+	stdout   io.Writer
+	stderr   io.Writer
+	streamed map[string]bool
 }
 
 func (r streamingCommandRunner) Run(name string, args ...string) config.CommandResult {
+	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(name, args...)
-	cmd.Stdout = r.stdout
-	cmd.Stderr = r.stderr
+	cmd.Stdout = io.MultiWriter(r.stdout, &stdout)
+	cmd.Stderr = io.MultiWriter(r.stderr, &stderr)
 	err := cmd.Run()
-	return config.CommandResult{Err: err}
+	if r.streamed != nil {
+		for _, text := range []string{stdout.String(), stderr.String()} {
+			for _, line := range strings.Split(text, "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					r.streamed[line] = true
+				}
+			}
+		}
+	}
+	return config.CommandResult{Stdout: stdout.String(), Stderr: stderr.String(), Err: err}
 }
 
 type preparedAgentSleep struct {

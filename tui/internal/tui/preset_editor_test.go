@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -112,20 +113,15 @@ func builtinPresetForEditorTest(t *testing.T, name string) preset.Preset {
 	return preset.Preset{}
 }
 
-// TestPresetEditorProviderModelLineupsPinRequestedDefaults pins the only two
-// curated catalogs: the Codex OAuth route and the Claude Code CLI aliases.
-// The openai and anthropic families point at arbitrary endpoints, so their
-// model row is free text.
+// TestPresetEditorProviderModelLineupsPinRequestedDefaults pins the one
+// remaining STATIC package-level catalog (Claude Code CLI aliases) and
+// confirms codex is deliberately absent from it: Codex's lineup is now
+// per-editor state seeded from config.DefaultCodexModelOptions() and
+// refreshed from the public directory (see the TestPresetEditorCodexPublic*
+// and TestPresetEditorCustomModelKey* tests below), not a single
+// process-wide map. The openai and anthropic families still point at
+// arbitrary endpoints, so their model row stays free text.
 func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
-	// GPT-6 Astra is documented but account/client rollout is not proven, so
-	// Sol remains the default-first entry. The named GPT-5.6 routes are one
-	// generation's variants.
-	wantCodexModels := []string{
-		"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna",
-	}
-	if models := providerModels["codex"]; !reflect.DeepEqual(models, wantCodexModels) {
-		t.Fatalf("codex provider models = %#v, want %#v", models, wantCodexModels)
-	}
 	wantClaudeModels := []string{"opus", "fable", "sonnet", "haiku"}
 	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
 		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
@@ -135,22 +131,278 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 		gotProviders = append(gotProviders, provider)
 	}
 	sort.Strings(gotProviders)
-	if want := []string{"claude-code", "codex"}; !reflect.DeepEqual(gotProviders, want) {
-		t.Fatalf("curated catalogs = %#v, want only %#v", gotProviders, want)
+	if want := []string{"claude-code"}; !reflect.DeepEqual(gotProviders, want) {
+		t.Fatalf("static package-level catalogs = %#v, want only %#v", gotProviders, want)
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "codex"} {
 		if got := modelOptions(provider); got != nil {
-			t.Fatalf("%s must keep a free-text model row, got catalog %#v", provider, got)
+			t.Fatalf("%s must have no static catalog, got %#v", provider, got)
 		}
 	}
-	// Each template's default model is the first entry of its catalog.
-	for _, name := range []string{"codex", "claude"} {
-		p := builtinPresetForEditorTest(t, name)
-		llm := p.Manifest["llm"].(map[string]interface{})
-		provider := asString(llm["provider"])
-		if got, want := asString(llm["model"]), providerModels[provider][0]; got != want {
-			t.Fatalf("%s template model = %q, want catalog default %q", name, got, want)
+	// The claude template's default model is the first entry of its catalog.
+	claudeTemplate := builtinPresetForEditorTest(t, "claude")
+	claudeLLM := claudeTemplate.Manifest["llm"].(map[string]interface{})
+	if got, want := asString(claudeLLM["model"]), providerModels["claude-code"][0]; got != want {
+		t.Fatalf("claude template model = %q, want catalog default %q", got, want)
+	}
+	// The codex template's default model is the first entry of the
+	// compiled-in offline fallback — the same list a fresh editor seeds
+	// before any refresh completes (GPT-6 Astra's account/client rollout is
+	// not proven, so Sol remains default-first).
+	codexTemplate := builtinPresetForEditorTest(t, "codex")
+	codexLLM := codexTemplate.Manifest["llm"].(map[string]interface{})
+	if got, want := asString(codexLLM["model"]), config.DefaultCodexModelOptions()[0].Slug; got != want {
+		t.Fatalf("codex template model = %q, want offline default %q", got, want)
+	}
+}
+
+// TestPresetEditorInitStartsCodexPublicModelsRefresh is a structural check
+// that Init() now starts the bounded refresh (it used to be a no-op). It
+// deliberately does NOT invoke the returned command — doing so would fetch a
+// live endpoint from a unit test — it only proves Init() no longer returns
+// nil.
+func TestPresetEditorInitStartsCodexPublicModelsRefresh(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("Init() = nil, want a command that starts the Codex public-model refresh")
+	}
+}
+
+// TestPresetEditorCodexPublicModelsRefreshShowsLabelDistinctFromSlug proves
+// the binding contract end to end at the editor level: a refresh result
+// whose display label differs from its persisted slug renders the label in
+// the model row, while manifest.llm.model and ←/→ cycling keep operating on
+// the slug.
+func TestPresetEditorCodexPublicModelsRefreshShowsLabelDistinctFromSlug(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	m, _ = m.Update(codexPublicModelsMsg{options: []config.CodexModelOption{
+		{Slug: "gpt-5.6-sol", Label: "GPT-5.6 Sol"},
+		{Slug: "gpt-6-astra", Label: "GPT-6 Astra"},
+	}})
+
+	view := m.View()
+	if !strings.Contains(view, "GPT-5.6 Sol") {
+		t.Fatalf("view should render the refreshed display label; view:\n%s", view)
+	}
+	if got := asString(m.llmMap()["model"]); got != "gpt-5.6-sol" {
+		t.Fatalf("persisted model = %q, want the slug gpt-5.6-sol (never the label)", got)
+	}
+
+	m.cursor = editorFieldOrderIndex(t, feModel)
+	m.cycleFocused(+1)
+	if got := asString(m.llmMap()["model"]); got != "gpt-6-astra" {
+		t.Fatalf("cycled model = %q, want slug gpt-6-astra", got)
+	}
+}
+
+// TestPresetEditorCodexPublicModelsRefreshPreservesCustomModelAndDirtyState
+// covers the refresh-preservation contract: a completed background refresh
+// must never change the currently selected/custom model, must not disturb
+// an in-progress inline text edit, and must not flip a clean editor's dirty
+// state.
+func TestPresetEditorCodexPublicModelsRefreshPreservesCustomModelAndDirtyState(t *testing.T) {
+	p := testCodexPresetEditorPreset(nil)
+	p.Manifest["llm"].(map[string]interface{})["model"] = "gpt-6-hand-typed-preview"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	if m.isDirty() {
+		t.Fatal("freshly constructed editor must not be dirty")
+	}
+
+	// Start an in-progress inline edit on the summary field before the
+	// refresh lands.
+	m.cursor = editorFieldOrderIndex(t, feSummary)
+	m, _ = m.openInline()
+	if m.mode != emInline {
+		t.Fatalf("mode = %v, want emInline before the refresh arrives", m.mode)
+	}
+	m.input.SetValue("mid-edit summary")
+
+	refreshed, cmd := m.Update(codexPublicModelsMsg{options: []config.CodexModelOption{
+		{Slug: "gpt-5.6-sol", Label: "GPT-5.6 Sol"},
+	}})
+	if cmd != nil {
+		t.Fatal("the refresh result must not itself emit a follow-up command")
+	}
+
+	if got := asString(refreshed.llmMap()["model"]); got != "gpt-6-hand-typed-preview" {
+		t.Fatalf("custom model after refresh = %q, want the untouched hand-typed id", got)
+	}
+	if refreshed.isDirty() {
+		t.Fatal("a catalog-only refresh must not mark the editor dirty")
+	}
+	if refreshed.mode != emInline {
+		t.Fatalf("mode after refresh = %v, want emInline (unchanged)", refreshed.mode)
+	}
+	if got := refreshed.input.Value(); got != "mid-edit summary" {
+		t.Fatalf("in-progress inline edit = %q, want it preserved across the refresh", got)
+	}
+	if len(refreshed.codexModels) != 1 || refreshed.codexModels[0].Label != "GPT-5.6 Sol" {
+		t.Fatalf("codexModels after refresh = %#v, want the new options applied", refreshed.codexModels)
+	}
+}
+
+// TestPresetEditorCustomModelKeyOpensInlineEditForCodex is the "keep arrows
+// cycling, add a discoverable custom-entry key" contract: 'c' on the model
+// row opens the same free-text inline editor every free-text provider
+// already uses, prefilled with the current slug, so Codex is never trapped
+// cycling only the public-directory suggestions.
+func TestPresetEditorCustomModelKeyOpensInlineEditForCodex(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feModel)
+
+	updated, _ := m.updateBrowse(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if updated.mode != emInline {
+		t.Fatalf("mode after 'c' = %v, want emInline", updated.mode)
+	}
+	if got := updated.input.Value(); got != "gpt-5.6-sol" {
+		t.Fatalf("inline buffer = %q, want prefilled with the current slug", got)
+	}
+
+	updated.applyInline("my-custom-codex-model")
+	if got := asString(updated.llmMap()["model"]); got != "my-custom-codex-model" {
+		t.Fatalf("model after custom entry = %q, want the typed id", got)
+	}
+}
+
+// TestPresetEditorCustomModelKeyIgnoredOutsideCodexModelRow confirms 'c' is
+// scoped to the Codex model row and is not a stray global binding.
+func TestPresetEditorCustomModelKeyIgnoredOutsideCodexModelRow(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feSummary)
+
+	updated, _ := m.updateBrowse(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if updated.mode != emBrowse {
+		t.Fatalf("mode after 'c' off the model row = %v, want emBrowse (no-op)", updated.mode)
+	}
+}
+
+// codexEightEntryCatalog inlines the real public directory's GPT-prefixed
+// entries as of 2026-09-30 so the width-aware modelRadioStrip regression
+// tests below don't depend on any path outside the repo.
+func codexEightEntryCatalog() []config.CodexModelOption {
+	return []config.CodexModelOption{
+		{Slug: "gpt-6-astra", Label: "GPT-6-Astra"},
+		{Slug: "gpt-6.1-sol", Label: "GPT-6.1-Sol"},
+		{Slug: "gpt-6-sol", Label: "GPT-6-Sol"},
+		{Slug: "gpt-6-luna", Label: "GPT-6-Luna"},
+		{Slug: "gpt-5.6-sol", Label: "GPT-5.6-Sol"},
+		{Slug: "gpt-5.6-terra", Label: "GPT-5.6-Terra"},
+		{Slug: "gpt-5.6-luna", Label: "GPT-5.6-Luna"},
+		{Slug: "gpt-5.5", Label: "GPT-5.5"},
+	}
+}
+
+// TestPresetEditorModelRadioStripSelectedLabelNeverHiddenAtCommonWidths is
+// the permanent regression test for the windowedRadioStrip fix: every one
+// of the real 8-entry catalog's options, selected in turn, must render its
+// "● label" at the three common terminal widths — the full catalog strip
+// overflowed all three before the fix (modelRadioStrip in preset_editor.go).
+func TestPresetEditorModelRadioStripSelectedLabelNeverHiddenAtCommonWidths(t *testing.T) {
+	opts := codexEightEntryCatalog()
+	for _, width := range []int{80, 100, 120} {
+		for _, opt := range opts {
+			p := testCodexPresetEditorPreset(nil)
+			p.Manifest["llm"].(map[string]interface{})["model"] = opt.Slug
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 35})
+			m, _ = m.Update(codexPublicModelsMsg{options: opts})
+			m.cursor = editorFieldOrderIndex(t, feModel)
+			if !strings.Contains(m.View(), "● "+opt.Label) {
+				t.Errorf("width=%d selected=%s label=%s hidden", width, opt.Slug, opt.Label)
+			}
 		}
+	}
+}
+
+// TestPresetEditorModelRadioStripCustomEntryNeverHiddenAtCommonWidths covers
+// the off-catalog/hand-typed hollow-fallback entry the same way: it must
+// stay visible at every common width even when the full 8-entry catalog
+// plus the custom id can't all fit on one row.
+func TestPresetEditorModelRadioStripCustomEntryNeverHiddenAtCommonWidths(t *testing.T) {
+	opts := codexEightEntryCatalog()
+	const custom = "my-hand-typed-preview"
+	for _, width := range []int{80, 100, 120} {
+		p := testCodexPresetEditorPreset(nil)
+		p.Manifest["llm"].(map[string]interface{})["model"] = custom
+		m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 35})
+		m, _ = m.Update(codexPublicModelsMsg{options: opts})
+		m.cursor = editorFieldOrderIndex(t, feModel)
+		if !strings.Contains(m.View(), custom) {
+			t.Errorf("width=%d custom model %q hidden", width, custom)
+		}
+	}
+}
+
+// TestPresetEditorModelCycleVisitsEveryOptionRegardlessOfWindowing proves
+// windowing is display-only: ←/→ must still reach every catalog slug even
+// at a width where only some options are ever rendered at once.
+func TestPresetEditorModelCycleVisitsEveryOptionRegardlessOfWindowing(t *testing.T) {
+	opts := codexEightEntryCatalog()
+	p := testCodexPresetEditorPreset(nil)
+	p.Manifest["llm"].(map[string]interface{})["model"] = opts[0].Slug
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
+	m, _ = m.Update(codexPublicModelsMsg{options: opts})
+	m.cursor = editorFieldOrderIndex(t, feModel)
+
+	seen := make(map[string]bool, len(opts))
+	for range opts {
+		seen[asString(m.llmMap()["model"])] = true
+		m.cycleFocused(+1)
+	}
+	for _, opt := range opts {
+		if !seen[opt.Slug] {
+			t.Errorf("cycling at width=80 never visited %s (%s)", opt.Slug, opt.Label)
+		}
+	}
+}
+
+// TestPresetEditorCodexPublicModelsRefreshCommitPersistsSlugNotLabel is the
+// commit-path counterpart to
+// TestPresetEditorCodexPublicModelsRefreshShowsLabelDistinctFromSlug: the
+// *saved* preset must carry the slug, never the display label.
+func TestPresetEditorCodexPublicModelsRefreshCommitPersistsSlugNotLabel(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	m, _ = m.Update(codexPublicModelsMsg{options: []config.CodexModelOption{
+		{Slug: "gpt-5.6-sol", Label: "GPT-5.6 Sol"},
+		{Slug: "gpt-6-astra", Label: "GPT-6 Astra"},
+	}})
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatal("commit() returned a nil cmd for a valid preset")
+	}
+	committed := cmd().(PresetEditorCommitMsg)
+	llm := committed.Preset.Manifest["llm"].(map[string]interface{})
+	if got := asString(llm["model"]); got != "gpt-5.6-sol" {
+		t.Fatalf("committed model = %q, want the slug gpt-5.6-sol (never the label)", got)
+	}
+}
+
+// TestPresetEditorCodexPublicModelsRefreshCommitPreservesCustomModel is the
+// commit-path counterpart to
+// TestPresetEditorCodexPublicModelsRefreshPreservesCustomModelAndDirtyState:
+// a hand-typed model surviving a background refresh must also survive Save.
+func TestPresetEditorCodexPublicModelsRefreshCommitPreservesCustomModel(t *testing.T) {
+	p := testCodexPresetEditorPreset(nil)
+	p.Manifest["llm"].(map[string]interface{})["model"] = "gpt-6-hand-typed-preview"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	m, _ = m.Update(codexPublicModelsMsg{options: []config.CodexModelOption{
+		{Slug: "gpt-5.6-sol", Label: "GPT-5.6 Sol"},
+	}})
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatal("commit() returned a nil cmd for a valid preset")
+	}
+	committed := cmd().(PresetEditorCommitMsg)
+	llm := committed.Preset.Manifest["llm"].(map[string]interface{})
+	if got := asString(llm["model"]); got != "gpt-6-hand-typed-preview" {
+		t.Fatalf("committed model = %q, want the untouched hand-typed id", got)
 	}
 }
 

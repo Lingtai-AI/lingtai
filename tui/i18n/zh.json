@@ -515,6 +515,7 @@
   "preset_editor.validation": "校验",
   "preset_editor.valid": "通过内核校验",
   "preset_editor.hint_browse": "↑↓ 字段  enter 编辑/切换  ←→ 切换  ctrl+d JSON  esc 退出",
+  "preset_editor.model_custom_hint": "按 c 输入自定义模型 ID",
   "preset_editor.validation.description_summary_required": "描述不能为空。",
   "preset_editor.validation.llm_object_required": "必须填写 LLM 设置。",
   "preset_editor.validation.llm_provider_required": "提供商不能为空。",

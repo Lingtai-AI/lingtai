@@ -519,6 +519,7 @@
   "preset_editor.validation": "Validation",
   "preset_editor.valid": "passes kernel validation",
   "preset_editor.hint_browse": "↑↓ field  enter edit/cycle  ←→ cycle  ctrl+d json  esc exit",
+  "preset_editor.model_custom_hint": "press c for a custom model id",
   "preset_editor.validation.description_summary_required": "Description must be non-empty.",
   "preset_editor.validation.llm_object_required": "LLM settings must be present.",
   "preset_editor.validation.llm_provider_required": "Provider must be non-empty.",
