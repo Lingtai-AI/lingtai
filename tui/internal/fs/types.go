@@ -88,9 +88,20 @@ type MailMessage struct {
 	ReceivedAt  string                 `json:"received_at"`
 	Attachments []string               `json:"attachments,omitempty"`
 	Identity    map[string]interface{} `json:"identity,omitempty"`
+	// ReturnRoute is the absolute address the kernel's email reply resolver
+	// answers to. Mail written before routes were stamped has none.
+	ReturnRoute *MailReturnRoute `json:"_return_route,omitempty"`
 
 	// Delivered is a transient flag set by MailCache based on which folder
 	// the message was last seen in. Not serialized to disk.
 	// outbox/ ⇒ false; inbox/ or sent/ ⇒ true.
 	Delivered bool `json:"-"`
+}
+
+// MailReturnRoute is the `_return_route` object. The kernel writes the same
+// two keys on every send; Address must be an absolute agent-workdir path, and
+// SenderAgentID is "" when the sender's manifest has no agent_id.
+type MailReturnRoute struct {
+	Address       string `json:"address"`
+	SenderAgentID string `json:"sender_agent_id"`
 }

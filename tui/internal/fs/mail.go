@@ -214,6 +214,10 @@ func cloneMailMessage(msg MailMessage) MailMessage {
 	out.CC = cloneStrings(msg.CC)
 	out.Attachments = cloneStrings(msg.Attachments)
 	out.Identity = cloneJSONMap(msg.Identity)
+	if msg.ReturnRoute != nil {
+		route := *msg.ReturnRoute
+		out.ReturnRoute = &route
+	}
 	return out
 }
 
@@ -717,8 +721,16 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return ErrRemoteMailUnsupported
 	}
 
+	// The stamped reply route and the sender-side mailbox paths share this
+	// absolute sender workdir, so they cannot diverge. It is resolved before
+	// any mailbox state exists.
+	senderAbs, err := filepath.Abs(senderDir)
+	if err != nil {
+		return fmt.Errorf("resolve sender workdir: %w", err)
+	}
+
 	// Read sender's manifest as identity card (same as Python agents do)
-	identity := readManifestAsIdentity(senderDir)
+	identity := readManifestAsIdentity(senderAbs)
 
 	// Allocate every mailbox directory before writing JSON so the chosen id is
 	// unique across all folders this send will touch. Pseudo-agent sends write
@@ -727,13 +739,13 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 	pseudo := isPseudoAgent(identity)
 	switch {
 	case pseudo:
-		primaryParent = filepath.Join(senderDir, "mailbox", "outbox")
+		primaryParent = filepath.Join(senderAbs, "mailbox", "outbox")
 	default:
 		primaryParent = filepath.Join(recipientDir, "mailbox", "inbox")
 	}
 	sentParent := ""
 	if !pseudo {
-		sentParent = filepath.Join(senderDir, "mailbox", "sent")
+		sentParent = filepath.Join(senderAbs, "mailbox", "sent")
 	}
 
 	id, primaryDir, sentDir, err := prepareMailDirs(primaryParent, sentParent)
@@ -754,6 +766,8 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		ReceivedAt: now,
 		Identity:   identity,
 	}
+	senderAgentID, _ := identity["agent_id"].(string)
+	msg.ReturnRoute = &MailReturnRoute{Address: senderAbs, SenderAgentID: senderAgentID}
 
 	data, err := json.MarshalIndent(msg, "", "  ")
 	if err != nil {
