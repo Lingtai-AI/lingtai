@@ -41,13 +41,14 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 ### Handlers (`handlers.go`)
 
 - **`portal/internal/api/handlers.go:18`** — `TopologyMu sync.Mutex`. Global mutex guarding all `topology.jsonl` and replay-cache I/O — appends, rebuilds (reconstruction included), and every read path (`/api/topology`, manifest, chunk, and `needsReconstruction`).
-- **`portal/internal/api/handlers.go:20-45`** — `NewNetworkHandler(baseDir)`. `GET /api/network` — historical full network by default; only explicit `?mail=0` selects the incomplete fast shape, while `?mail=1` is explicit full behavior. Consumers of `mail=0` must gate mail totals with live availability rather than treating zero as factual. Always returns `[]` not `null` for empty slices. Sets `Lang` on the response.
-- **`portal/internal/api/handlers.go:58-83`** — `NewTopologyHandler(baseDir)`. `GET /api/topology` — serves the **most recent `maxTopologyResponseFrames` (1000) frames** of `topology.jsonl` as a JSON array. **Bounded retrieval contract:** the response is capped at 1000 frames (the replay timeline uses the manifest/chunk API for full history), the tape is streamed line-by-line by `readTopologyTail` (never fully materialized), and the read runs under `TopologyMu` so readers see a consistent snapshot relative to append/rebuild writers. Missing tapes still fall back to `[]`.
-- **`portal/internal/api/handlers.go:85-121`** — `readTopologyTail(path, n)`. Streams `topology.jsonl` and returns the last `n` non-empty lines as raw JSON, memory-bounded by `n` and the per-line token limit.
-- **`portal/internal/api/handlers.go:116-160`** — `AppendTopology(path, network)` / `AppendTopologyAt`. Writes one JSONL line `{"t":<unix_ms>,"net":<network>}`. Normalises nil slices to `[]`. Opens the file with `O_APPEND`; creates parent dirs on first write.
-- **`portal/internal/api/handlers.go:163-183`** — `NewProgressHandler(baseDir)`. `GET /api/topology/progress` — reads `reconstruct.progress` (`"N/M"` format), returns `{"current":N,"total":M}` or `{}`.
-- **`portal/internal/api/handlers_test.go:70-99`** — `TestNetworkHandlerMailMode` covers default full and explicit fast/full mail query behavior.
-- **`portal/internal/api/handlers_test.go:101-171`** — CORS regression coverage for live network, topology, and progress handlers, including success and error/fallback responses.
+- **`portal/internal/api/handlers.go:20-34`** — `normalizeNetworkSlices(network)`. Replaces nil node and edge slices with empty slices, preserving JSON `[]` output at both network boundaries.
+- **`portal/internal/api/handlers.go:36-50`** — `NewNetworkHandler(baseDir)`. `GET /api/network` — historical full network by default; only explicit `?mail=0` selects the incomplete fast shape, while `?mail=1` is explicit full behavior. Consumers of `mail=0` must gate mail totals with live availability rather than treating zero as factual. Calls `normalizeNetworkSlices` before setting `Lang` and encoding the response.
+- **`portal/internal/api/handlers.go:63-85`** — `NewTopologyHandler(baseDir)`. `GET /api/topology` — serves the **most recent `maxTopologyResponseFrames` (1000) frames** of `topology.jsonl` as a JSON array. **Bounded retrieval contract:** the response is capped at 1000 frames (the replay timeline uses the manifest/chunk API for full history), the tape is streamed line-by-line by `readTopologyTail` (never fully materialized), and the read runs under `TopologyMu` so readers see a consistent snapshot relative to append/rebuild writers. Missing tapes still fall back to `[]`.
+- **`portal/internal/api/handlers.go:90-117`** — `readTopologyTail(path, n)`. Streams `topology.jsonl` and returns the last `n` non-empty lines as raw JSON, memory-bounded by `n` and the per-line token limit.
+- **`portal/internal/api/handlers.go:121-152`** — `AppendTopology(path, network)` / `AppendTopologyAt`. Writes one JSONL line `{"t":<unix_ms>,"net":<network>}`. `AppendTopologyAt` uses `normalizeNetworkSlices` so nil slices encode as `[]`. Opens the file with `O_APPEND`; creates parent dirs on first write.
+- **`portal/internal/api/handlers.go:156-174`** — `NewProgressHandler(baseDir)`. `GET /api/topology/progress` — reads `reconstruct.progress` (`"N/M"` format), returns `{"current":N,"total":M}` or `{}`.
+- **`portal/internal/api/handlers_test.go:72-101`** — Live-network mail-mode behavior.
+- **`portal/internal/api/handlers_test.go:103-173`** — CORS regression coverage for live network, topology, and progress handlers, including success and error/fallback responses.
 
 ### Replay (`replay.go`, 864 lines)
 
@@ -75,7 +76,7 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 ## Composition
 
 - **Parent:** `portal/internal/`. Sibling packages: `fs/`, `migrate/`.
-- **Files:** `server.go` (~336 lines), `handlers.go` (~197 lines), `replay.go` (~864 lines), plus `*_test.go` files.
+- **Files:** `server.go` (~336 lines), `handlers.go` (~190 lines), `replay.go` (~864 lines), plus `*_test.go` files.
 - **No sub-packages.** All API logic is in this flat package.
 
 ## State

@@ -17,6 +17,22 @@ import (
 
 var TopologyMu sync.Mutex
 
+func normalizeNetworkSlices(network fs.Network) fs.Network {
+	if network.Nodes == nil {
+		network.Nodes = []fs.AgentNode{}
+	}
+	if network.AvatarEdges == nil {
+		network.AvatarEdges = []fs.AvatarEdge{}
+	}
+	if network.ContactEdges == nil {
+		network.ContactEdges = []fs.ContactEdge{}
+	}
+	if network.MailEdges == nil {
+		network.MailEdges = []fs.MailEdge{}
+	}
+	return network
+}
+
 func NewNetworkHandler(baseDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Preserve the historical full network by default. Only the live fast lane opts into the explicitly incomplete ?mail=0 shape.
@@ -26,18 +42,7 @@ func NewNetworkHandler(baseDir string) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if network.Nodes == nil {
-			network.Nodes = []fs.AgentNode{}
-		}
-		if network.AvatarEdges == nil {
-			network.AvatarEdges = []fs.AvatarEdge{}
-		}
-		if network.ContactEdges == nil {
-			network.ContactEdges = []fs.ContactEdge{}
-		}
-		if network.MailEdges == nil {
-			network.MailEdges = []fs.MailEdge{}
-		}
+		network = normalizeNetworkSlices(network)
 		network.Lang = i18n.Lang()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(network)
@@ -122,19 +127,7 @@ func AppendTopologyAt(path string, network fs.Network, unixMs int64) {
 	TopologyMu.Lock()
 	defer TopologyMu.Unlock()
 
-	// Normalize nil slices so JSON encodes [] instead of null
-	if network.Nodes == nil {
-		network.Nodes = []fs.AgentNode{}
-	}
-	if network.AvatarEdges == nil {
-		network.AvatarEdges = []fs.AvatarEdge{}
-	}
-	if network.ContactEdges == nil {
-		network.ContactEdges = []fs.ContactEdge{}
-	}
-	if network.MailEdges == nil {
-		network.MailEdges = []fs.MailEdge{}
-	}
+	network = normalizeNetworkSlices(network)
 
 	entry := fs.TapeFrame{
 		T:   unixMs,
