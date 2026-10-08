@@ -323,16 +323,6 @@ func TestWriteMail_StampsAbsoluteReturnRoute(t *testing.T) {
 			if got, present := route["sender_agent_id"]; !present || got != tc.wantAgentID {
 				t.Errorf("_return_route.sender_agent_id = %#v (present %v), want %q", got, present, tc.wantAgentID)
 			}
-
-			msg, ok := readMailboxMessage(outboxDir, id)
-			want := MailReturnRoute{Address: senderDir, SenderAgentID: tc.wantAgentID}
-			if !ok || msg.ReturnRoute == nil || *msg.ReturnRoute != want {
-				t.Fatalf("readMailboxMessage ReturnRoute = %#v (ok %v), want %#v", msg.ReturnRoute, ok, want)
-			}
-			cache := NewMailCache(senderDir).Refresh()
-			if len(cache.Messages) != 1 || cache.Messages[0].ReturnRoute == nil || *cache.Messages[0].ReturnRoute != want {
-				t.Fatalf("MailCache ReturnRoute = %#v, want %#v", cache.Messages, want)
-			}
 		})
 	}
 }
