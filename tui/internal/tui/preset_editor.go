@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -100,51 +101,80 @@ var editorProviders = []string{
 }
 
 // providerModels maps a provider to the curated model lineup the editor cycles
-// through with ←/→ on the model row. Only the two subscription routes carry a
-// catalog; the openai and anthropic families point at arbitrary endpoints, so
-// their model is free text.
-//
-// CURATION RULE (tui/CONTRACT.md, "Model list curation"): every family
-// listed here ships only its LATEST TWO GENERATIONS. A third-newest
-// generation is removed in the same change that adds a new one. Variants
-// within one generation (-sol/-terra/-luna) are not separate generations and
-// all stay. See tui/internal/tui/SKILL.md for the source list and the rest of
-// the inclusion checklist.
+// through with ←/→ on the model row. Codex is deliberately NOT in this
+// package-level map any more: its lineup is public-directory-sourced,
+// per-editor-instance state (PresetEditorModel.codexModels), not a single
+// process-wide static catalog — see the "Model list curation" Codex
+// exception in tui/CONTRACT.md. Claude Code is the one remaining static
+// catalog; the openai and anthropic families point at arbitrary endpoints,
+// so their model is free text.
 var providerModels = map[string][]string{
-	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
-	// Keep gpt-5.6-sol first to match the TUI default; the other named GPT-5.6
-	// routes remain selectable when the endpoint/account enables them. See
-	// SKILL.md next to this file for the canonical source list and why each
-	// model is included or excluded (e.g. pro-only variants can 4xx).
-	//
-	// GPT-6 Astra is documented but not proven available on every authenticated
-	// OAuth route, so keep the proven gpt-5.6-sol default first. gpt-5.5 is
-	// retired from this latest-two curation. Saved presets are never rewritten.
-	preset.ProviderCodex: {"gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"},
 	// Claude Code uses CLI aliases, not dated API IDs — `opus`/`fable`/
-	// `sonnet`/`haiku` name concurrent tiers of one generation, so the
-	// two-generation rule has nothing to trim here. Current Claude Code
-	// resolves fable to claude-fable-5-1.
+	// `sonnet`/`haiku` name concurrent tiers of one generation. Current
+	// Claude Code resolves fable to claude-fable-5-1.
 	preset.ProviderClaudeCode: {"opus", "fable", "sonnet", "haiku"},
 }
 
-// modelOptions is the single catalog lookup used by every model picker
-// surface. A provider without a curated catalog returns nil (free text).
+// modelOptions is the static catalog lookup for every provider EXCEPT
+// codex. A provider without a curated catalog returns nil (free text). Every
+// in-editor consumer that must also see the per-editor Codex lineup calls
+// the (*PresetEditorModel).modelSlugOptions method instead.
 func modelOptions(provider string) []string {
 	return providerModels[provider]
 }
 
-// isCuratedModel reports whether model is one of any provider's curated
-// catalog ids. A curated id belongs to its own route (a Codex OAuth model or
-// a Claude CLI alias), so it is cleared when the user switches to a
-// free-text provider family instead of being sent to an endpoint that does
-// not serve it.
-func isCuratedModel(model string) bool {
-	for _, models := range providerModels {
-		for _, candidate := range models {
-			if candidate == model {
-				return true
-			}
+// modelDisplayOptions returns the slug+label pairs the model row cycles
+// through for provider, from THIS editor instance's own state: Codex reads
+// m.codexModels (seeded offline-safe at construction, refreshed by Init());
+// Claude Code wraps the fixed CLI alias list (slug and label are identical
+// there); every other family has no catalog (nil — free text).
+func (m PresetEditorModel) modelDisplayOptions(provider string) []config.CodexModelOption {
+	if provider == preset.ProviderCodex {
+		return m.codexModels
+	}
+	aliases := providerModels[provider]
+	if len(aliases) == 0 {
+		return nil
+	}
+	out := make([]config.CodexModelOption, len(aliases))
+	for i, a := range aliases {
+		out[i] = config.CodexModelOption{Slug: a, Label: a}
+	}
+	return out
+}
+
+// modelSlugOptions is modelDisplayOptions with only the persisted slug — the
+// value every cycling/validation/dedup decision below actually compares and
+// stores. Label is a display-only concern confined to modelRadioStrip.
+func (m PresetEditorModel) modelSlugOptions(provider string) []string {
+	options := m.modelDisplayOptions(provider)
+	if len(options) == 0 {
+		return nil
+	}
+	slugs := make([]string, len(options))
+	for i, o := range options {
+		slugs[i] = o.Slug
+	}
+	return slugs
+}
+
+// isCuratedModelSlug reports whether slug is one of this editor's own
+// catalog ids — its per-instance Codex lineup, or the static Claude Code
+// alias list. A curated id belongs to its own route, so it is cleared when
+// the user switches to a free-text provider family instead of being sent to
+// an endpoint that does not serve it.
+func (m PresetEditorModel) isCuratedModelSlug(slug string) bool {
+	if slug == "" {
+		return false
+	}
+	for _, o := range m.codexModels {
+		if o.Slug == slug {
+			return true
+		}
+	}
+	for _, alias := range providerModels[preset.ProviderClaudeCode] {
+		if alias == slug {
+			return true
 		}
 	}
 	return false
@@ -221,6 +251,17 @@ type PresetEditorModel struct {
 	// empty when no global dir is available (tests); in that case the
 	// codex-OAuth branch falls back to inline edit.
 	globalDir string
+
+	// codexModels is this editor instance's own view of the Codex public
+	// model directory: seeded with the compiled-in offline fallback at
+	// construction, and replaced wholesale when the bounded refresh started
+	// by Init() completes (codexPublicModelsMsg). Deliberately per-editor
+	// state, not a global mutable catalog — every open editor fetches (and
+	// can display a different result) independently. A refresh only ever
+	// replaces this field; it never touches `working`/`original`, so the
+	// user's current or custom model selection, in-progress text edit, and
+	// dirty state all survive a completed refresh untouched.
+	codexModels []config.CodexModelOption
 
 	// API key state. existingKeys is the host's Config.Keys snapshot
 	// (env-var-name → value), used to prefill the api_key field when a
@@ -312,13 +353,51 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		globalDir:      globalDir,
 		apiKey:         apiKey,
 		saveErr:        normalizationErr,
+		codexModels:    config.DefaultCodexModelOptions(),
 	}
 }
 
-func (m PresetEditorModel) Init() tea.Cmd { return nil }
+// codexPublicModelsMsg carries the result of one bounded Codex public-model
+// directory refresh, dispatched by codexPublicModelsCmd from Init(). Options
+// is never empty (network, last-good cache, or the static fallback).
+type codexPublicModelsMsg struct {
+	options []config.CodexModelOption
+}
+
+// codexPublicModelsCmd starts one bounded, best-effort refresh of the Codex
+// public model directory (fixed URL, ~5s timeout, ~2MiB response cap — see
+// internal/config.RefreshCodexPublicModels). globalDir may be empty (tests,
+// or a host that didn't plumb one); the refresh then skips the on-disk cache
+// and falls straight through to the compiled-in static fallback on any
+// network failure. This performs no OAuth/API-key request and depends on no
+// Codex CLI or kernel service.
+func codexPublicModelsCmd(globalDir string) tea.Cmd {
+	return func() tea.Msg {
+		result := config.RefreshCodexPublicModels(globalDir, nil)
+		return codexPublicModelsMsg{options: result.Options}
+	}
+}
+
+// Init starts the editor's one asynchronous, bounded Codex public-model
+// directory refresh (see codexPublicModelsCmd). It runs regardless of the
+// editor's current provider so switching TO codex later already has a fresh
+// lineup; it never blocks entry, never gates Save, and never re-fetches on
+// its own after this first call.
+func (m PresetEditorModel) Init() tea.Cmd {
+	return codexPublicModelsCmd(m.globalDir)
+}
 
 func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case codexPublicModelsMsg:
+		// Replace ONLY the per-editor catalog. working/original, cursor,
+		// mode, and any in-progress inline/clone-name edit are untouched, so
+		// a completed refresh can never change the current selection, a
+		// custom typed model, or dirty state out from under the user —
+		// whatever mode the editor is in when this arrives.
+		m.codexModels = msg.options
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -441,6 +520,22 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 		// the form uncluttered.
 		m.showJSON = !m.showJSON
 		return m, nil
+	case "c":
+		// Discoverable escape hatch from catalog-only cycling: the Codex
+		// model row otherwise only cycles the public-directory suggestions
+		// (network/cache/offline-fallback), which are unverified metadata,
+		// not proof of account entitlement, and can lag a brand-new or
+		// account-specific id. 'c' opens the same inline free-text editor
+		// every free-text provider already uses, prefilled with the current
+		// slug, so Codex is never trapped in catalog-only cycling.
+		f := editorFieldOrder[m.cursor]
+		if f == feModel && m.isCodexProvider() {
+			m.input.SetValue(m.fieldString(f))
+			m.input.CursorEnd()
+			m.input.Focus()
+			m.mode = emInline
+		}
+		return m, nil
 	case "i":
 		// One-click import of the Codex CLI's own credential (`codex
 		// login` writes ~/.codex/auth.json) into the TUI store, bound to
@@ -557,7 +652,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.mode = emInline
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
-		if models := modelOptions(provider); len(models) > 0 {
+		if models := m.modelSlugOptions(provider); len(models) > 0 {
 			m.cycleFocused(+1)
 		} else {
 			m.input.SetValue(m.fieldString(f))
@@ -992,7 +1087,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		}
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
-		if models := modelOptions(provider); len(models) > 0 {
+		if models := m.modelSlugOptions(provider); len(models) > 0 {
 			next := cycleString(models, m.fieldString(f), dir)
 			m.llmMap()["model"] = next
 		}
@@ -1078,7 +1173,7 @@ func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
 	}
 
 	currentModel := asString(llm["model"])
-	if models := modelOptions(newProvider); len(models) > 0 {
+	if models := m.modelSlugOptions(newProvider); len(models) > 0 {
 		keep := false
 		for _, mdl := range models {
 			if mdl == currentModel {
@@ -1089,7 +1184,7 @@ func (m *PresetEditorModel) switchProvider(oldProvider, newProvider string) {
 		if !keep {
 			llm["model"] = models[0]
 		}
-	} else if isCuratedModel(currentModel) {
+	} else if m.isCuratedModelSlug(currentModel) {
 		llm["model"] = ""
 	}
 
@@ -1521,7 +1616,8 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 		return marker + keyStyle.Render(key) + m.providerRadioStrip(focused, valStyle)
 	}
 	if f == feModel {
-		if strip := m.modelRadioStrip(focused, valStyle); strip != "" {
+		budget := width - lipgloss.Width(marker) - presetEditorFieldLabelWidth
+		if strip := m.modelRadioStrip(focused, valStyle, budget); strip != "" {
 			return marker + keyStyle.Render(key) + strip
 		}
 	}
@@ -1587,14 +1683,124 @@ func (m PresetEditorModel) capabilitiesGuidanceRow(width int) string {
 
 // modelRadioStrip renders the model field as a horizontal radio strip
 // (● selected ○ unselected) when the current provider+route has a known
-// model lineup. Returns "" when there's no picker — caller falls back to the
-// standard single-value render.
-func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	models := modelOptions(asString(m.llmMap()["provider"]))
-	if len(models) == 0 {
+// model lineup. Each option renders its display label (Codex's
+// public-directory display_name when available, otherwise the slug itself);
+// selection, ←/→ cycling, and the persisted manifest.llm.model always
+// operate on the slug, never the label. Returns "" when there's no picker —
+// caller falls back to the standard single-value render.
+//
+// budget is the rendered-width ceiling for the returned string (the row's
+// available width, minus the marker and label column — see the feModel
+// call site in row()). Codex's public catalog can run to 8+ options and
+// easily overflow a single 80-column row; when the full strip doesn't fit,
+// this projects a window of options around whichever one is currently
+// selected (so it never goes invisible) and marks a trimmed side with "…".
+// ←/→ cycling (cycleFocused) always walks the full option list regardless
+// of what is rendered here — only display is windowed, never the cycle
+// order or the persisted slug.
+func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style, budget int) string {
+	options := m.modelDisplayOptions(asString(m.llmMap()["provider"]))
+	if len(options) == 0 {
 		return ""
 	}
-	return radioStrip(models, asString(m.llmMap()["model"]), focused, valStyle)
+	currentSlug := asString(m.llmMap()["model"])
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	parts := make([]string, 0, len(options)+1)
+	selected := -1
+	for _, option := range options {
+		label := option.Label
+		if label == "" {
+			label = option.Slug
+		}
+		switch {
+		case option.Slug == currentSlug && focused:
+			selected = len(parts)
+			parts = append(parts, valStyle.Render("● "+label))
+		case option.Slug == currentSlug:
+			selected = len(parts)
+			parts = append(parts, "● "+label)
+		default:
+			parts = append(parts, subtle.Render("○ "+label))
+		}
+	}
+	if currentSlug != "" && selected == -1 {
+		// The saved/custom model isn't in the current catalog (offline,
+		// stale cache, or a hand-typed id) — show it, hollow, exactly like
+		// the generic radioStrip fallback, so the row never claims a value
+		// the preset does not hold and an existing/custom selection is
+		// never silently hidden by a refresh.
+		selected = len(parts)
+		parts = append(parts, subtle.Render(currentSlug))
+	}
+
+	full := strings.Join(parts, "  ")
+	if budget <= 0 || lipgloss.Width(full) <= budget {
+		return full
+	}
+	return windowedRadioStrip(parts, selected, budget)
+}
+
+// windowedRadioStrip projects a window of pre-rendered radio-strip parts
+// (as built by modelRadioStrip) that fits within budget columns. It grows
+// a [lo,hi] window outward from index selected — which is always included
+// first and is never dropped — adding the next untaken neighbor on
+// whichever side still fits, until neither side can grow further. A side
+// with options left outside the window is marked with a subtle "…".
+//
+// Up to two ellipsis markers are reserved up front (rather than appended
+// after growing to the full budget) so growth can never paint itself into
+// a corner where the window fits but the ellipsis it turns out to need
+// doesn't: reserving first guarantees the final joined width never exceeds
+// budget except in the degenerate case where the selected entry alone is
+// already wider than budget, where showing it in full still wins.
+func windowedRadioStrip(parts []string, selected, budget int) string {
+	if selected < 0 || selected >= len(parts) {
+		selected = 0
+	}
+	const sep = "  "
+	ellipsis := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("…")
+	ellipsisCost := lipgloss.Width(sep) + lipgloss.Width(ellipsis)
+
+	selectedWidth := lipgloss.Width(parts[selected])
+	grow := budget - 2*ellipsisCost
+	if grow < selectedWidth {
+		grow = selectedWidth
+	}
+
+	lo, hi := selected, selected
+	width := selectedWidth
+	for {
+		grew := false
+		if hi+1 < len(parts) {
+			cost := lipgloss.Width(sep) + lipgloss.Width(parts[hi+1])
+			if width+cost <= grow {
+				width += cost
+				hi++
+				grew = true
+			}
+		}
+		if lo-1 >= 0 {
+			cost := lipgloss.Width(sep) + lipgloss.Width(parts[lo-1])
+			if width+cost <= grow {
+				width += cost
+				lo--
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+
+	shown := make([]string, 0, hi-lo+3)
+	if lo > 0 {
+		shown = append(shown, ellipsis)
+	}
+	shown = append(shown, parts[lo:hi+1]...)
+	if hi < len(parts)-1 {
+		shown = append(shown, ellipsis)
+	}
+	return strings.Join(shown, sep)
 }
 
 func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss.Style) string {
@@ -1703,7 +1909,7 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 		// preset to a different Codex OAuth account when more than one exists.
 		return m.isCodexProvider() && len(m.codexAccountRefs()) > 1
 	case feModel:
-		return len(modelOptions(asString(m.llmMap()["provider"]))) > 0
+		return len(m.modelSlugOptions(asString(m.llmMap()["provider"]))) > 0
 	}
 	return false
 }
@@ -1911,6 +2117,11 @@ func (m PresetEditorModel) renderFooter() string {
 		// account is invalid: advertise the one-click import on the
 		// codex API-key row.
 		hint += "  " + i18n.T("codex.import_cli_hint")
+	} else if editorFieldOrder[m.cursor] == feModel && m.isCodexProvider() {
+		// Advertise the free-text escape hatch only while looking at the
+		// model row: the public-directory catalog is a suggestion, and 'c'
+		// is otherwise not obviously reachable from ←/→ cycling alone.
+		hint += "  " + i18n.T("preset_editor.model_custom_hint")
 	}
 	return hintStyle.Render("  " + hint)
 }
