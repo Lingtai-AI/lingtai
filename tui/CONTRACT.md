@@ -396,3 +396,15 @@ so that race can have platform-dependent behavior.
 The set is reachable both from the interactive `/doctor` view and the
 `lingtai-tui doctor` CLI (fable F5) so the checks that force the first-run /
 recovery wizards can be surfaced when the TUI itself cannot start.
+
+## Preset editor Codex paid credits
+
+The native `codex` preset exposes a cursor-reachable Off/On row for paid
+credits; other providers hide it. Missing, false, and malformed values display
+Off. On commits JSON boolean `true` as `manifest.llm.codex_allow_credits`; Off
+omits it. Saved presets preserve the explicit choice through save/load and
+Agent init generation. Switching away clears it, and switching back requires a
+new opt-in. The editor does not query or change billing. A supporting kernel
+checks included usage with the option off and permits credit-backed requests
+with it on; OpenAI decides charges. See the
+[Codex preset manual](internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md).
