@@ -70,6 +70,7 @@ related_files:
   - tui/internal/tui/agora_removed_test.go
   - tui/internal/tui/app_cursor_test.go
   - tui/internal/tui/app_recipe_test.go
+  - tui/internal/tui/app_recovery_esc_test.go
   - tui/internal/tui/apriori_summary_render_test.go
   - tui/internal/tui/auto_refresh_test.go
   - tui/internal/tui/claude_auth_test.go

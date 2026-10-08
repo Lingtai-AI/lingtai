@@ -1935,6 +1935,15 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
+		// Recovery setup starts before Mail has ever been constructed. Esc can
+		// return here without saving credentials, so start Mail's normal first
+		// activation before forwarding a window size to its input widget.
+		if a.mailGeneration == 0 {
+			a.tuiConfig = config.LoadTUIConfig(a.globalDir)
+			a.installMailModel(a.newMailForCurrentContext())
+			a, arCmd := a.startAutoRefresh()
+			return a, tea.Batch(a.mail.Init(), a.sendSize(), arCmd)
+		}
 		// Fresh-on-entry: copy mode resets on every re-entry to the preserved
 		// mail model (the confirmed "reset when leaving chat/mail" behavior).
 		// This path is more robust than reset-on-leave because the slash-command
