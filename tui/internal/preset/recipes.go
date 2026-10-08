@@ -39,9 +39,10 @@ const RecipeDotDir = ".recipe"
 //
 //   - ID: machine identifier (stable across locales), usually matches the
 //     recipe bundle's directory name. Used for dedup and reference.
-//   - Name: display name (localized per active language via the file-level
-//     fallback — zh/recipe.json → recipe.json).
-//   - Description: display description (same localization rules as Name).
+//   - Name: display name from the canonical .recipe/recipe.json manifest;
+//     it is not localized.
+//   - Description: display description from the same canonical manifest;
+//     it is not localized.
 //   - Version: recipe version string (semver-ish). Optional; defaults to
 //     "1.0.0" when absent from the manifest.
 //   - LibraryName: literal folder name of the sibling library that ships
@@ -111,7 +112,7 @@ func ScanEmbeddedCategory(category, lang string) []DiscoveredRecipe {
 			continue
 		}
 		recipeRoot := path.Join(root, entry.Name())
-		info, err := loadEmbeddedRecipeInfo(recipeRoot, lang)
+		info, err := loadEmbeddedRecipeInfo(recipeRoot)
 		if err != nil {
 			continue
 		}
@@ -121,9 +122,6 @@ func ScanEmbeddedCategory(category, lang string) []DiscoveredRecipe {
 			Embedded: true,
 		})
 	}
-	sort.Slice(recipes, func(i, j int) bool {
-		return recipes[i].ID < recipes[j].ID
-	})
 	return recipes
 }
 
@@ -142,8 +140,7 @@ func ReadEmbeddedRecipeFile(name, relPath string) ([]byte, error) {
 	return iofs.ReadFile(recipeAssetsFS, path.Join(root, clean))
 }
 
-func loadEmbeddedRecipeInfo(root, lang string) (RecipeInfo, error) {
-	_ = lang // recipe.json is canonical and not localized
+func loadEmbeddedRecipeInfo(root string) (RecipeInfo, error) {
 	data, err := iofs.ReadFile(recipeAssetsFS, path.Join(root, RecipeDotDir, "recipe.json"))
 	if err != nil {
 		return RecipeInfo{}, fmt.Errorf("read embedded recipe.json: %w", err)
@@ -211,9 +208,6 @@ func ScanCategory(globalDir, category, lang string) []DiscoveredRecipe {
 		}
 		recipes = append(recipes, DiscoveredRecipe{ID: e.Name(), Info: info, Dir: dir})
 	}
-	sort.Slice(recipes, func(i, j int) bool {
-		return recipes[i].ID < recipes[j].ID
-	})
 	return recipes
 }
 
@@ -376,27 +370,6 @@ func langFallbackChain(lang string) []string {
 		return []string{""}
 	}
 	return []string{lang, ""}
-}
-
-// resolveRecipeDotFile resolves a file directly under .recipe/ with the
-// standard lang fallback. Used for recipe.json.
-func resolveRecipeDotFile(bundleDir, lang, filename string) string {
-	if bundleDir == "" {
-		return ""
-	}
-	recipeDot := filepath.Join(bundleDir, RecipeDotDir)
-	for _, l := range langFallbackChain(lang) {
-		var path string
-		if l == "" {
-			path = filepath.Join(recipeDot, filename)
-		} else {
-			path = filepath.Join(recipeDot, l, filename)
-		}
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path
-		}
-	}
-	return ""
 }
 
 // resolveRecipeBehavioralFile resolves one of the behavioral-layer files
