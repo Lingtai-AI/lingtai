@@ -218,8 +218,8 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `DecodeJSONUseNumber` | `tui/internal/preset/json_number.go:10-27` | exact-number, single-document decoder for explicit TUI read-modify-write paths; not a startup reader or migration |
 | `Load(name)` | `tui/internal/preset/preset.go:278` | saved/ first, then templates/; sets `Source` |
 | `List()` | `tui/internal/preset/preset.go:216` | saved (alphabetical) + templates in `BuiltinPresets()` order; each carries `Source` |
-| `ScanCategory()` / `ScanEmbeddedCategory()` | `tui/internal/preset/recipes.go:102-128` | disk-backed recipe discovery and read-only compiled metadata fallback |
-| `ReadEmbeddedRecipeFile()` | `tui/internal/preset/recipes.go:130-142` | reads compiled recipe content without materializing a path |
+| `ScanCategory()` / `ScanEmbeddedCategory()` | `tui/internal/preset/recipes.go:103-126,193-212` | disk-backed recipe discovery and read-only compiled metadata fallback |
+| `ReadEmbeddedRecipeFile()` | `tui/internal/preset/recipes.go:128-141` | reads compiled recipe content without materializing a path |
 | `Save(p)` | `tui/internal/preset/preset.go:447` | ALWAYS to `saved/`; never templates |
 | `RefreshTemplates()` | `tui/internal/preset/preset.go:515` | rewrites `templates/` from `BuiltinPresets()`, prunes retired (e.g. the former per-vendor templates) |
 | `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1232` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
