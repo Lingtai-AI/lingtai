@@ -738,7 +738,8 @@ json_string_field() {
 run_manifest_python() {
   local body="$1"
   shift
-  if command -v python3 >/dev/null 2>&1; then
+  # macOS can provide a developer-tools launcher without a usable Python.
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import json' >/dev/null 2>&1; then
     BODY="$body" python3 "$@"
     return
   fi
