@@ -110,6 +110,37 @@ func TestCheckStartupDecision_MirrorOnlyKeyDeclaredByAnotherOrchestrator(t *test
 	assertLineFlag(t, lines, "config.json mirror", true, false)
 }
 
+func TestCheckStartupDecision_LoginProviderNoKeys(t *testing.T) {
+	// A claude-code / codex orchestrator authenticates via CLI/OAuth login:
+	// with no .env and a `{}` config.json, D2/D3 must agree with the launcher
+	// (normal launch) instead of reporting a degraded mirror and missing keys.
+	for _, provider := range []string{"claude-code", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			orchDir, globalDir := startupFixture(t,
+				`{"manifest":{"llm":{"provider":"`+provider+`","api_key_env":""}}}`,
+				`{}`,
+				"",
+			)
+			lines := checkStartupDecision(orchDir, globalDir)
+			assertLineFlag(t, lines, "No keys mirror needed", true, false)
+			assertLineFlag(t, lines, "No API key needed", true, false)
+			assertNotContains(t, lines, "recovery wizard")
+			assertNotContains(t, lines, "degraded launch")
+		})
+	}
+}
+
+func TestCheckStartupDecision_APIKeyProviderNoKeysStillFails(t *testing.T) {
+	orchDir, globalDir := startupFixture(t,
+		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"DEEPSEEK_API_KEY"}}}`,
+		`{}`,
+		"",
+	)
+	lines := checkStartupDecision(orchDir, globalDir)
+	assertLineFlag(t, lines, "keys mirror is empty", false, false)
+	assertLineFlag(t, lines, "No API keys in .env", false, false)
+}
+
 func TestCheckStartupDecision_Degraded(t *testing.T) {
 	orchDir, globalDir := startupFixture(t,
 		`{"addons": {"imap": {}}}`,

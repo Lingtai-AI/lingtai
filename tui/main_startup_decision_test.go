@@ -19,6 +19,7 @@ func TestStartupDecision(t *testing.T) {
 		resolvedKeys    map[string]string
 		configOK        bool
 		mirrorKeys      map[string]string
+		login           bool
 		declaredKeyEnvs []string
 		wantFirstRun    bool
 		wantRecovery    bool
@@ -68,10 +69,36 @@ func TestStartupDecision(t *testing.T) {
 			// mirror is healthy — legacy setups without .env still launch.
 			orchestrators: 1, resolvedKeys: map[string]string{"DEEPSEEK_API_KEY": "x"}, configOK: true, mirrorKeys: map[string]string{"DEEPSEEK_API_KEY": "x"},
 		},
+		{
+			name: "claude-code orchestrator + no keys + keyless config.json → normal",
+			// Keyless provider authenticates via the Claude Code CLI login:
+			// R2 holds without any API key and there is nothing to mirror.
+			orchestrators: 1, resolvedKeys: map[string]string{}, configOK: true, mirrorKeys: nil, login: true,
+		},
+		{
+			name:          "codex OAuth orchestrator + no keys + no config.json → normal",
+			orchestrators: 1, resolvedKeys: map[string]string{}, configOK: false, mirrorKeys: nil, login: true,
+		},
+		{
+			name: "login orchestrator + env keys + keyless config.json → degraded",
+			// A real key in .env still needs its R3.1 mirror.
+			orchestrators: 1, resolvedKeys: map[string]string{"DEEPSEEK_API_KEY": "x"}, configOK: true, mirrorKeys: nil, login: true,
+			wantDegraded: true,
+		},
+		{
+			name:          "api-key provider + no keys + keyless config.json → recovery",
+			orchestrators: 1, resolvedKeys: map[string]string{}, configOK: true, mirrorKeys: nil,
+			declaredKeyEnvs: []string{"DEEPSEEK_API_KEY"}, wantRecovery: true,
+		},
+		{
+			name:          "api-key provider + env keys + keyless config.json → degraded",
+			orchestrators: 1, resolvedKeys: map[string]string{"DEEPSEEK_API_KEY": "x"}, configOK: true, mirrorKeys: nil,
+			declaredKeyEnvs: []string{"DEEPSEEK_API_KEY"}, wantDegraded: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			firstRun, recovery, degraded := startupDecision(tc.orchestrators, tc.resolvedKeys, tc.configOK, tc.mirrorKeys, tc.declaredKeyEnvs...)
+			firstRun, recovery, degraded := startupDecision(tc.orchestrators, tc.resolvedKeys, tc.configOK, tc.mirrorKeys, tc.login, tc.declaredKeyEnvs...)
 			if firstRun != tc.wantFirstRun || recovery != tc.wantRecovery || degraded != tc.wantDegraded {
 				t.Fatalf("startupDecision(%d, %v, %v, %v) = (firstRun=%v, recovery=%v, degraded=%v), want (%v, %v, %v)",
 					tc.orchestrators, tc.resolvedKeys, tc.configOK, tc.mirrorKeys,
@@ -120,8 +147,61 @@ func TestStartupDecisionFromWizardManifestCustomKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstRun, recovery, degraded := startupDecision(len(orchestrators), resolved, configOK, mirror.Keys, declared)
+	firstRun, recovery, degraded := startupDecision(len(orchestrators), resolved, configOK, mirror.Keys, false, declared)
 	if firstRun || recovery || degraded {
 		t.Fatalf("wizard handoff/reopen classified as firstRun=%v recovery=%v degraded=%v", firstRun, recovery, degraded)
+	}
+}
+
+// Disk-to-decision boundary for the keyless-provider bug: a lone orchestrator
+// whose manifest.llm.provider is a CLI/OAuth login family, with no .env and a
+// `{}` config.json, must launch normally instead of opening the setup wizard.
+// The same layout with an API-key provider still goes to recovery.
+func TestStartupDecisionFromManifestLoginProvider(t *testing.T) {
+	cases := []struct {
+		provider     string
+		wantRecovery bool
+	}{
+		{provider: "claude-code"},
+		{provider: "claude_agent_sdk"},
+		{provider: "codex"},
+		{provider: "codex_oauth"},
+		{provider: "deepseek", wantRecovery: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			root := t.TempDir()
+			lingtaiDir := filepath.Join(root, ".lingtai")
+			orchDir := filepath.Join(lingtaiDir, "orch")
+			globalDir := filepath.Join(root, "global")
+			if err := os.MkdirAll(orchDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(globalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			initJSON := `{"manifest":{"llm":{"provider":"` + tc.provider + `","api_key_env":""}}}`
+			if err := os.WriteFile(filepath.Join(orchDir, "init.json"), []byte(initJSON), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(orchDir, ".agent.json"), []byte(`{"admin":{"karma":true}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(`{}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			orchestrators := tui.DetectOrchestrators(lingtaiDir)
+			declared, login := tui.OrchestratorCredentials(lingtaiDir, orchestrators)
+			resolved, configOK := config.ResolveKeys(globalDir)
+			mirror, err := config.LoadConfigReadOnly(globalDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstRun, recovery, degraded := startupDecision(len(orchestrators), resolved, configOK, mirror.Keys, login, declared...)
+			if firstRun || recovery != tc.wantRecovery || degraded {
+				t.Fatalf("provider %q: firstRun=%v recovery=%v degraded=%v, want recovery=%v only",
+					tc.provider, firstRun, recovery, degraded, tc.wantRecovery)
+			}
+		})
 	}
 }

@@ -515,24 +515,39 @@ func HasAPIKeys(keys map[string]string, declaredKeyEnvs ...string) bool {
 // init.json. A missing or malformed manifest returns "" and preserves the
 // conventional-key fallback in startup and doctor.
 func ReadAgentAPIKeyEnv(agentDir string) string {
+	return readAgentLLM(agentDir).APIKeyEnv
+}
+
+// ReadAgentProvider reads only manifest.llm.provider from an agent's
+// init.json. A missing or malformed manifest returns "". Startup and doctor
+// classify it (preset.UsesLoginCredential) to recognize keyless orchestrators
+// such as claude-code or codex that authenticate through a CLI/OAuth login.
+func ReadAgentProvider(agentDir string) string {
+	return readAgentLLM(agentDir).Provider
+}
+
+type agentLLMFields struct {
+	Provider  string `json:"provider"`
+	APIKeyEnv string `json:"api_key_env"`
+}
+
+func readAgentLLM(agentDir string) agentLLMFields {
 	if agentDir == "" {
-		return ""
+		return agentLLMFields{}
 	}
 	data, err := os.ReadFile(filepath.Join(agentDir, "init.json"))
 	if err != nil {
-		return ""
+		return agentLLMFields{}
 	}
 	var init struct {
 		Manifest struct {
-			LLM struct {
-				APIKeyEnv string `json:"api_key_env"`
-			} `json:"llm"`
+			LLM agentLLMFields `json:"llm"`
 		} `json:"manifest"`
 	}
 	if json.Unmarshal(data, &init) != nil {
-		return ""
+		return agentLLMFields{}
 	}
-	return init.Manifest.LLM.APIKeyEnv
+	return init.Manifest.LLM
 }
 
 // writeEnvLines writes lines back to the .env file with a single
