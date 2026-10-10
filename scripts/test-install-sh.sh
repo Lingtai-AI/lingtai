@@ -20,6 +20,15 @@ assert_eq() {
   fi
 }
 
+# macOS may expose a python3 launcher even though the developer tools are not
+# installed. An unusable launcher must take the existing managed-Python route.
+(
+  python3() { return 1; }
+  ensure_uv() { :; }
+  find_uv() { printf '%s' /usr/bin/true; }
+  run_manifest_python '{}' -c 'import json' || fail "unusable python3 must use managed Python"
+)
+
 command -v git >/dev/null || fail "git is required"
 command -v python3 >/dev/null || fail "python3 is required"
 
