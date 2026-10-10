@@ -718,6 +718,23 @@ func checkStartupDecision(orchDir, globalDir string) []doctorLine {
 	return checkStartupDecisionAt(filepath.Dir(orchDir), orchDir, globalDir)
 }
 
+// OrchestratorCredentials reads, for the given orchestrators under lingtaiDir,
+// each manifest.llm.api_key_env (declaredKeyEnvs, in order) and whether any
+// orchestrator's provider authenticates through a CLI/OAuth login
+// (preset.UsesLoginCredential, e.g. claude-code or codex) instead of an API
+// key. The startup gate (main.go startupDecision) and the doctor D2/D3 checks
+// share this so they never disagree about R2.
+func OrchestratorCredentials(lingtaiDir string, orchestrators []string) (declaredKeyEnvs []string, loginOrchestrator bool) {
+	for _, name := range orchestrators {
+		agentDir := filepath.Join(lingtaiDir, name)
+		declaredKeyEnvs = append(declaredKeyEnvs, config.ReadAgentAPIKeyEnv(agentDir))
+		if preset.UsesLoginCredential(config.ReadAgentProvider(agentDir)) {
+			loginOrchestrator = true
+		}
+	}
+	return declaredKeyEnvs, loginOrchestrator
+}
+
 // checkStartupDecisionAt emits the D1-D5 set given the network root
 // (lingtaiDir, the .lingtai directory) and the agent dir to inspect for D4.
 // Splitting the two levels is what makes the CLI escape hatch correct: D1 must
@@ -738,10 +755,11 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 
 	// D1: agents running / orchestrators detected (R1).
 	orchestrators := DetectOrchestrators(lingtaiDir)
-	var declaredKeyEnvs []string
-	for _, name := range orchestrators {
-		declaredKeyEnvs = append(declaredKeyEnvs, config.ReadAgentAPIKeyEnv(filepath.Join(lingtaiDir, name)))
-	}
+	declaredKeyEnvs, loginOrchestrator := OrchestratorCredentials(lingtaiDir, orchestrators)
+	// Mirrors startupDecision: a login-credential orchestrator (claude-code,
+	// codex OAuth) satisfies R2 with no API key, and then R3.1 has nothing to
+	// mirror.
+	loginOnly := loginOrchestrator && !config.HasAPIKeys(resolvedKeys, declaredKeyEnvs...)
 	if len(orchestrators) == 0 {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d1_no_agents"),
@@ -756,7 +774,11 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 	// Content-based like the decision table (fable F7): a present-but-keyless
 	// mirror degrades exactly like an absent file, so the check must not report
 	// the surface OK while the launcher shows the degraded banner.
-	if configOK && config.HasAPIKeys(mirror.Keys, declaredKeyEnvs...) {
+	if loginOnly {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d2_config_login_only"), OK: true,
+		})
+	} else if configOK && config.HasAPIKeys(mirror.Keys, declaredKeyEnvs...) {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d2_config_ok"), OK: true,
 		})
@@ -792,6 +814,10 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 		// with provenance instead of predicting a wizard.
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.d3_mirror_only"), OK: true,
+		})
+	case loginOnly:
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.d3_login_credential"), OK: true,
 		})
 	default:
 		lines = append(lines, doctorLine{

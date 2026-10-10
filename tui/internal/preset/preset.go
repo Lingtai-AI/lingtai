@@ -696,6 +696,14 @@ func ClassifyCredentialFamily(provider string) CredentialFamily {
 	}
 }
 
+// UsesLoginCredential reports whether provider authenticates through a local
+// CLI/OAuth login (Claude Code CLI, Codex OAuth) rather than an API key in
+// .env. It is a pure classification of the manifest value — it does not probe
+// whether the login is currently valid.
+func UsesLoginCredential(provider string) bool {
+	return ClassifyCredentialFamily(provider) != CredentialFamilyOther
+}
+
 // ResolvedRef is a credential-aware view of one preset reference.
 type ResolvedRef struct {
 	// Ref is the original input string (e.g. "~/.lingtai-tui/presets/templates/codex.json").

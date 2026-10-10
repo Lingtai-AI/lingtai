@@ -113,6 +113,7 @@ A consented runtime rebuild preserves the previous venv until the replacement pa
 | Requirement | Source | Notes |
 |---|---|---|
 | API keys | `~/.lingtai-tui/.env` (via `ResolveKeys`) and each agent's `manifest.llm.api_key_env` | agents load this at boot; `.env` is authoritative. The declared variable name is valid even without an `_API_KEY` suffix. |
+| Login credential (keyless) | orchestrator `manifest.llm.provider` classified by `preset.ClassifyCredentialFamily` | an orchestrator whose provider is a CLI/OAuth login family (`claude-code`/`claude_code`/`claude-agent-sdk`/`claude_agent_sdk` via the local Claude Code CLI login; `codex`/`codex_oauth` via Codex OAuth) satisfies R2 without any API key. This is a provider-family classification only; the login itself is checked by the provider at boot, not by the startup gate. |
 
 ### R3 · Purely additive (user-level, loss must not block launch)
 
@@ -123,7 +124,7 @@ examined by the doctor.
 
 | ID | Item | Location | Default | Degradation when missing |
 |---|---|---|---|---|
-| R3.1 | `keys` mirror | `~/.lingtai-tui/config.json` `keys` | none (derived from `.env`) | Keys still resolve from `.env` (R2) and every TUI key consumer reads through `ResolveKeys`, so the mirror is a cache, not a gate. Mirror is regenerable — self-heal rewrites it from `.env` on demand. |
+| R3.1 | `keys` mirror | `~/.lingtai-tui/config.json` `keys` | none (derived from `.env`) | Keys still resolve from `.env` (R2) and every TUI key consumer reads through `ResolveKeys`, so the mirror is a cache, not a gate. Mirror is regenerable — self-heal rewrites it from `.env` on demand. Vacuous when R2 holds only through a login-credential orchestrator and no API key resolves anywhere: there is nothing to mirror, so an absent or keyless `config.json` is not a degraded state. |
 | R3.2 | TUI preferences | `~/.lingtai-tui/tui_config.json` | `language: en`, `theme: ink-dark`, `mail_page_size: 200`, `tool_call_truncate: 0` (no truncation), `auto_refresh: on`, `home_telemetry_display: absent` (the Home telemetry row's built-in default expression) | Loaded defaults replace the file silently; no banner (fable F9). `home_telemetry_display` additionally fails closed per key: any invalid value (empty, over-long, repeated, unknown name, wrong type) is discarded on load — the row renders its built-in default expression, the other preferences in the file are untouched — and is omitted on save, so an invalid value is never re-written as durable config. |
 | R3.3 | Legacy `language` | `~/.lingtai-tui/config.json` `language` | n/a (deprecated) | Migrated to `tui_config.json` by `MigrateLegacyLanguage`; ignored once migrated. |
 
@@ -140,7 +141,8 @@ appears as the degraded state below.
 |---|---|
 | No agents in `.lingtai/` (R1 fail) | first-run wizard (create first agent) |
 | Agents exist, `config.json` missing or its keys mirror empty (R3.1 loss), `.env` has API keys (R2 ok) | **degraded launch** — derive keys from `.env`, show persistent banner, key-dependent features limited; self-heal offered to regenerate the R3.1 mirror; recovery wizard not forced. Content-based (fable F7): a present-but-keyless mirror degrades exactly like an absent file. |
-| Agents exist, resolved keys have neither a conventional `_API_KEY` nor a nonempty agent-declared `api_key_env` (R2 fail) | recovery wizard (real missing key → setup) |
+| Agents exist, no orchestrator uses a login credential, resolved keys have neither a conventional `_API_KEY` nor a nonempty agent-declared `api_key_env` (R2 fail) | recovery wizard (real missing key → setup) |
+| Agents exist, an orchestrator uses a login credential (`claude-code`/`codex` family), no API key resolves (R2 ok, R3.1 vacuous) | normal launch — no API key or keys mirror required |
 | Agents exist, everything present | normal launch |
 
 ## Alignment rules
@@ -150,7 +152,8 @@ appears as the degraded state below.
    mirror for legacy setups. Startup and doctor also accept the exact
    `manifest.llm.api_key_env` named by an orchestrator, even if that name does
    not use the conventional `_API_KEY` suffix; unrelated env variables do not
-   satisfy R2.
+   satisfy R2. An orchestrator whose `manifest.llm.provider` is a CLI/OAuth
+   login family (`preset.UsesLoginCredential`) satisfies R2 with no key at all.
 2. Losing `~/.lingtai-tui/config.json` (or its keys mirror) is an R3 degraded
    condition, not a setup event — the TUI launches with a banner and offers
    self-heal for the regenerable mirror (R3.1). Losing `tui_config.json`
@@ -388,8 +391,8 @@ so that race can have platform-dependent behavior.
 ## Doctor checks (TUI-can't-start diagnostic set)
 
 - [x] D1 agents running / orchestrators detected (R1)
-- [x] D2 config.json present, readable, and keys mirror non-empty — `ResolveKeys` configOK + `HasAPIKeys(mirror, declaredKeyEnvs...)` using all detected orchestrators' declarations (R3.1, content-based fable F7)
-- [x] D3 effective API keys present — `HasAPIKeys(resolved, declaredKeyEnvs...)` using the same network-wide declarations (.env + mirror gap-fill, matching the gate)
+- [x] D2 config.json present, readable, and keys mirror non-empty — `ResolveKeys` configOK + `HasAPIKeys(mirror, declaredKeyEnvs...)` using all detected orchestrators' declarations (R3.1, content-based fable F7); reported OK ("no keys mirror needed") when a login-credential orchestrator is present and no API key resolves
+- [x] D3 effective API keys present — `HasAPIKeys(resolved, declaredKeyEnvs...)` using the same network-wide declarations (.env + mirror gap-fill, matching the gate); a login-credential orchestrator (`claude-code`/`codex` family) satisfies it with no key
 - [x] D4 addon `.secrets`/config present for declared addons (R1; honors declared `mcp.<addon>.env` / legacy `addons.<name>.config` paths)
 - [x] D5 runtime/version skew reported (R1, extends existing doctor; plain-release stamps only)
 
