@@ -10,7 +10,7 @@ description: >
   conflate. Do NOT use for one-off exports of a single agent (that's
   just `cp -r`), or for in-network behaviour edits to the live system.
 version: 3.2.0
-last_changed_at: "2026-09-05T00:00:00Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -50,6 +50,10 @@ files, not standalone top-level skills.
 |---|---|
 | Understand or author a recipe bundle: structure, `recipe.json`, optional layers, locale fallback, library sibling, validation, testing | `reference/recipe-format/SKILL.md` |
 | Export a standalone recipe: distill culture into optional `greet/comment/covenant/procedures` plus optional skill library; no agents, no mailboxes | `reference/export-recipe/SKILL.md` |
+
+For the complete bot/project creation path beyond recipe authoring, discover
+`lingtai-bot-guide`; it separates TUI recipes from installed kernel and avatar
+creation.
 
 ## Disambiguate scope BEFORE picking a sub-guide
 

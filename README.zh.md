@@ -123,6 +123,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 更深入的 TUI/portal 更新、安装方式检测、Homebrew 与中国大陆构建路由，见内置的 [`lingtai-update` 技能](tui/internal/preset/skills/lingtai-update/SKILL.md)。
 
+制作、连接、验证或维护灵台机器人，从一级 [`lingtai-bot-guide` 技能](tui/internal/preset/skills/lingtai-bot-guide/SKILL.md) 进入；它统一指向项目、配方、预设、各渠道与生命周期的当前权威文档。
+
 ## 与它协作的几种方式
 
 **Desktop——`lingtai-desktop`（macOS）** 是灵台的原生 App：在一处查看项目和科学家、对话与收发信件、调整设置和预设，也能随时管理它们的工作。

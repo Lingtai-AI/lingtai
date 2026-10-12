@@ -85,6 +85,13 @@ related_files:
   - tui/internal/preset/recipe_assets/recommended/adaptive/.recipe/greet/wen/greet.md
   - tui/internal/preset/recipe_assets/recommended/adaptive/.recipe/greet/zh/greet.md
   - tui/internal/preset/recipe_assets/recommended/adaptive/.recipe/recipe.json
+  - tui/internal/preset/bot_guide_populate_test.go
+  - tui/internal/preset/skills/lingtai-bot-guide/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/avatars/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/channels/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/coverage/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/initiation/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/operations/SKILL.md
   - tui/internal/preset/skill_metadata_test.go
   - tui/internal/preset/skills/lingtai-dev-guide/reference/architecture/SKILL.md
   - tui/internal/preset/skills/lingtai-dev-guide/reference/cache-hit-rate/SKILL.md
@@ -131,8 +138,8 @@ related_files:
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/SKILL.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/anti-pattern-text-consistency-vs-data-correspondence.md
   - tui/internal/preset/skills/swiss-knife/reference/academic-research/reference/evidence-verification-gate.md
-  - tui/internal/preset/skills/swiss-knife/reference/headless-bot/SKILL.md
-  - tui/internal/preset/skills/swiss-knife/reference/headless-bot/scripts/create_telegram_bot_project.py
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/headless-bot/SKILL.md
+  - tui/internal/preset/skills/lingtai-bot-guide/reference/headless-bot/scripts/create_telegram_bot_project.py
   - tui/internal/preset/skills/swiss-knife/reference/html-report/SKILL.md
   - tui/internal/preset/skills/swiss-knife/reference/html-report/assets/template.html
   - tui/internal/preset/skills/swiss-knife/reference/minimax-cli/SKILL.md
@@ -196,6 +203,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for canonical provider `claude-code`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
 | `Validate()` | `tui/internal/preset/preset.go:366` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty; `base_url` optional for every family |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, recipe_assets, skills |
+| `skills/lingtai-bot-guide/` | `tui/internal/preset/skills/lingtai-bot-guide/SKILL.md:1`, `tui/internal/preset/bot_guide_populate_test.go:1` | First-level bot creation/operation router with six focused references. Owns the promoted headless-bot helper subtree (standard-library-only imports, no assets); routes other channels and kernel lifecycle/auth/version to their existing owners. Embedded by `skillsFS`, materialized by `PopulateBundledLibrary`, and exposed by `BundledSkillNames`; no runtime Project API. |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` / `CopyEmbeddedBundle` | `tui/internal/preset/recipe_apply.go:59,122` | copies disk or compiled `.recipe/` (replace) plus recipe siblings into a project |
 | `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
@@ -211,12 +219,12 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Called by `tui/internal/tui/`** — all Bubble Tea screens (network home, preset editor, first-run wizard, recipe selector).
 - **Calls `tui/internal/config/`** — for `GlobalDirName` constant.
 - **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Also reads/writes per-project `.lingtai/<agent>/init.json` and `.lingtai/.tui-asset/`.
-- **Embeds prompt fragments** — covenant, principle, procedures, templates, recipe_assets, skills — via `//go:embed`. The former `soul/` fragment is retired and no longer embedded or extracted; an existing `~/.lingtai-tui/soul/` left by an older Bootstrap is simply ignored, never deleted. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router. The bundled utility catalog keeps LingTai operations, provider guidance, reporting and academic evidence gates; general paper-fetch/API pipelines, local audio/VLM helpers, journal DJ, idle-curiosity exercises and textbook lesson generation are not shipped.
+- **Embeds prompt fragments** — covenant, principle, procedures, templates, recipe_assets, skills — via `//go:embed`. The former `soul/` fragment is retired and no longer embedded or extracted; an existing `~/.lingtai-tui/soul/` left by an older Bootstrap is simply ignored, never deleted. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. The bundled catalog has 11 top-level skills and 64 `SKILL.md` files including nested references. Nested utility skills (for example `skills/lingtai-bot-guide/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router. The bundled utility catalog keeps LingTai operations, provider guidance, reporting and academic evidence gates; general paper-fetch/API pipelines, local audio/VLM helpers, journal DJ, idle-curiosity exercises and textbook lesson generation are not shipped.
 
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 4 direct family children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/lingtai-bot-guide/` is the first-level bot router with six references and the moved Telegram helper; it is distinct from `skills/swiss-knife/`, which is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`. `skills/lingtai-preset-skill/` is another top-level router with a dual-axis nested shape: 4 direct family children mirroring `BuiltinPresets()` under `skills/lingtai-preset-skill/reference/*/SKILL.md`, plus 5 unchanged operation children under `skills/lingtai-preset-skill/reference/operations/*/SKILL.md` for cross-cutting lifecycle mechanics that apply across providers.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State

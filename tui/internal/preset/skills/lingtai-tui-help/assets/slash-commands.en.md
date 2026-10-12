@@ -288,6 +288,10 @@ compatibility alias. Follow the current MCP/curated-addon documentation for
 setup, and obtain explicit authorization before making changes. After changing
 MCP config, run `/refresh` to apply it.
 
+For the full bot-creation and maintenance path, open the first-level
+`lingtai-bot-guide` skill. It routes to current channel setup owners; it is not
+a new slash command or a replacement MCP editor.
+
 ### `/doctor` — diagnose connection issues
 **Usage:** `/doctor`
 

@@ -487,3 +487,45 @@ func TestBuildSkillFolderEntries_TutorialGuideNestedReferences(t *testing.T) {
 		t.Error("nested orientation child should identify itself as a nested tutorial-guide reference")
 	}
 }
+
+// The bot guide is one first-level folder; all six children and its moved helper
+// must remain visible through the real skill drill-in, not sibling skill entries.
+func TestBuildSkillFolderEntries_BotGuide(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "lingtai-bot-guide")
+	entries := buildSkillFolderEntries(skillDir)
+	if len(entries) != 8 {
+		t.Fatalf("bot guide drill-in entries = %d, want 8 (router, six children, helper)", len(entries))
+	}
+	if entries[0].Label != "SKILL.md" {
+		t.Fatalf("first entry = %q, want SKILL.md", entries[0].Label)
+	}
+	labels := make(map[string]MarkdownEntry)
+	for _, entry := range entries {
+		labels[entry.Label] = entry
+	}
+	for _, child := range []string{"initiation", "headless-bot", "channels", "operations", "avatars", "coverage"} {
+		label := child + "/SKILL.md"
+		entry, ok := labels[label]
+		if !ok || entry.Group != "reference" {
+			t.Errorf("missing reference entry %q (found=%v, group=%q)", label, ok, entry.Group)
+		}
+		body, err := os.ReadFile(entry.Path) // Markdown entries are loaded lazily by the viewer.
+		if err != nil {
+			t.Fatalf("read %s: %v", label, err)
+		}
+		if !strings.Contains(string(body), "Nested lingtai-bot-guide reference") {
+			t.Errorf("%s does not identify its parent", label)
+		}
+	}
+	helper, ok := labels["headless-bot/scripts/create_telegram_bot_project.py"]
+	if !ok || helper.Group != "reference" || !strings.Contains(helper.Content, "```python") {
+		t.Error("moved Telegram helper is not a fenced Python reference entry")
+	}
+	swissDir := filepath.Join(filepath.Dir(skillDir), "swiss-knife")
+	for _, entry := range buildSkillFolderEntries(swissDir) {
+		if strings.HasPrefix(entry.Label, "headless-bot/") {
+			t.Errorf("stale Swiss Knife drill-in entry %q", entry.Label)
+		}
+	}
+}

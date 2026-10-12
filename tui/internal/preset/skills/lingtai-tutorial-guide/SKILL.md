@@ -6,7 +6,7 @@ description: >
   operations, addons, and graduation. Invoke this skill when the human is
   ready to begin or continue the tutorial.
 version: 2.0.1
-last_changed_at: "2026-09-05T00:00:00Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -49,6 +49,9 @@ Start at Lesson 1 unless the human asks to jump elsewhere; the routing table bel
 | L8: intrinsics, the five memory layers, molt, charge, forced-molt risk, lifecycle continuity | `reference/memory-and-molt/SKILL.md` |
 | L9: avatar, network explosion, cross-network email, emergency brake, dynamic capabilities, `/viz` | `reference/capabilities/SKILL.md` |
 | L10–12: `commands.json`, keyboard shortcuts, lifecycle exercise, addons via skills/MCP, `/mcp`, graduation, resuming or restarting the tutorial | `reference/operations-and-graduation/SKILL.md` |
+
+For an actual new bot or channel setup outside the lesson sequence, discover
+`lingtai-bot-guide` for initiation, current channel owners and acceptance checks.
 
 ## Teaching Style
 

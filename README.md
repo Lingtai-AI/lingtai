@@ -124,6 +124,10 @@ It checks Git, Go, and supported 64-bit CPython 3.11–3.13 in one pass, then us
 
 For deeper TUI/portal update operations, install-method detection, Homebrew, and mainland-China build routing, see the bundled [`lingtai-update` skill](tui/internal/preset/skills/lingtai-update/SKILL.md).
 
+For creating, connecting, verifying or maintaining bots, start with the first-level
+[`lingtai-bot-guide` skill](tui/internal/preset/skills/lingtai-bot-guide/SKILL.md):
+one entry to the current project, recipe, preset, channel and lifecycle owners.
+
 ## Ways to work with it
 
 **Desktop — `lingtai-desktop` (macOS)** is the native app for LingTai: see your projects and scientists, chat and exchange mail, adjust setup and presets, and manage their work in one place.

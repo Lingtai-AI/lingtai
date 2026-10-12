@@ -9,7 +9,7 @@ description: >
   skills.
 version: 1.1.0
 tags: [tui, help, routing, lifecycle, slash-commands, reference, lingtai-tui]
-last_changed_at: "2026-09-05T00:00:00Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -69,6 +69,8 @@ load; `next` is optional deeper evidence.
   route: assets/slash-commands.en.md
   localized_routes: [assets/slash-commands.zh.md, assets/slash-commands.wen.md]
   next: lingtai-tui-anatomy
+- feature: bot-creation-and-operation
+  route: lingtai-bot-guide
 - feature: addons-and-external-channels
   route: mcp-manual
 ```
@@ -86,6 +88,7 @@ load; `next` is optional deeper evidence.
 | How do I contribute, set up a dev checkout, or troubleshoot source? | `lingtai-dev-guide` | Its focused contributor/debug references |
 | Is an agent offline, unreachable, or inconsistent across process/heartbeat/log surfaces? | `lingtai-doctor` | Its layered read-only health diagnostics |
 | How do `/projects` and running-agent inventory work? | Localized slash-command asset | `lingtai-tui list --detailed`, `/projects`, then `lingtai-tui-anatomy` for source |
+| How do I create, connect, verify or maintain a LingTai bot? | `lingtai-bot-guide` | Its focused references and current recipe/preset/kernel/channel owners |
 | How do I configure addons or external messaging channels? | `mcp-manual` | The curated addon documentation it routes to |
 
 ## Slash-command assets
