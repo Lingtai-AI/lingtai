@@ -7,6 +7,16 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
+// helpLangs is retained here because this surviving help check owns its use.
+var helpLangs = []struct {
+	lang  string
+	asset string
+}{
+	{"en", "assets/slash-commands.en.md"},
+	{"zh", "assets/slash-commands.zh.md"},
+	{"wen", "assets/slash-commands.wen.md"},
+}
+
 // The /agora command and its AgoraModel browser were removed. These tests guard
 // against the command (or its help/docs) creeping back in. The underlying
 // network/recipe import infrastructure (NewAgoraProjectsModel, ScanAgoraRecipes,

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -233,10 +234,10 @@ func TestResolvePresetInAllowed_NotInAllowed(t *testing.T) {
 		t.Fatal("expected error for non-allowed preset")
 	}
 	msg := err.Error()
-	if !contains(msg, "ghost-preset") {
+	if !strings.Contains(msg, "ghost-preset") {
 		t.Errorf("error %q missing requested name", msg)
 	}
-	if !contains(msg, "minimax") {
+	if !strings.Contains(msg, "minimax") {
 		t.Errorf("error %q missing list of available stems", msg)
 	}
 }
@@ -261,7 +262,7 @@ func TestResolvePresetInAllowed_AmbiguousStem(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ambiguity error")
 	}
-	if !contains(err.Error(), "ambiguous") {
+	if !strings.Contains(err.Error(), "ambiguous") {
 		t.Errorf("error %q missing 'ambiguous'", err.Error())
 	}
 }

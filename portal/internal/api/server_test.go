@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServerStartDefaultsToLoopbackAndKeepsPortFilePortOnly(t *testing.T) {
@@ -18,7 +21,42 @@ func TestServerStartDefaultsToLoopbackAndKeepsPortFilePortOnly(t *testing.T) {
 	if err := srv.Start(portFile, "", 0); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer srv.Stop(context.Background())
+	address := net.JoinHostPort(defaultHost, strconv.Itoa(srv.Port()))
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := srv.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+		if conn, err := net.DialTimeout("tcp", address, time.Second); err == nil {
+			conn.Close()
+			t.Error("listener remains reachable after Stop")
+		}
+	}()
+
+	// Exercise the registered router and JSON encoder over a real loopback
+	// connection, rather than only calling a handler with a recorder.
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get("http://" + address + "/api/network")
+	if err != nil {
+		t.Fatalf("network request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("network response: status=%d content-type=%q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	var network struct {
+		Nodes        []json.RawMessage `json:"nodes"`
+		AvatarEdges  []json.RawMessage `json:"avatar_edges"`
+		ContactEdges []json.RawMessage `json:"contact_edges"`
+		MailEdges    []json.RawMessage `json:"mail_edges"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&network); err != nil {
+		t.Fatalf("decode network wire response: %v", err)
+	}
+	if network.Nodes == nil || network.AvatarEdges == nil || network.ContactEdges == nil || network.MailEdges == nil {
+		t.Fatalf("network arrays missing or null: %+v", network)
+	}
 
 	if got := srv.Host(); got != defaultHost {
 		t.Fatalf("Host() = %q, want %q", got, defaultHost)
