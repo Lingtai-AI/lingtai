@@ -7,9 +7,9 @@
 > share the same evidence layer. Search-result summaries are **leads, not
 > citations**. If the user asks you to go fast, reduce *scope*, never *verification*.
 
-This is the writing-side gate that wraps [academic-research](../SKILL.md). The
-research skill can *find and fetch* papers; this gate decides **whether you have
-earned the right to write them up as evidence yet.**
+This is the writing-side gate owned by [academic-research](../SKILL.md). It
+decides **whether you have earned the right to write sources up as evidence**;
+it does not require a bundled fetching tool.
 
 ---
 
@@ -77,10 +77,10 @@ claims. Do not warn on every text file; that is guard fatigue.
 ## The gate: verified literature matrix BEFORE draft
 
 Before any submission-like draft, produce a **verified literature matrix**. One
-row per source. Use [academic-research](../SKILL.md) to fetch and verify —
-`fetch_paper.py <id>`, then the [DOI resolver](api-doi-resolver.md) /
-[CrossRef](api-crossref.md) / [OpenAlex](api-openalex.md) /
-[Unpaywall](api-unpaywall.md) / [Europe PMC](api-europe-pmc.md) cards as needed.
+row per source. Verify identifiers and publication status against current
+official publisher, repository or bibliographic records (for example Crossref,
+arXiv, PubMed or OpenAlex). Record the actual verification source; do not infer
+verification from a search snippet or a successful PDF download.
 
 ### Minimum row schema
 
@@ -190,16 +190,8 @@ submission-ready. Verify (or downgrade the claim) before shipping.
 
 ## Related
 
-- [SKILL.md](../SKILL.md) — the research skill this gate routes into for fetching
-  and verifying sources (`fetch_paper.py`, the API cards).
-- [decision-tree.md](decision-tree.md) — "I have X — which API verifies it?"
-- [api-crossref.md](api-crossref.md), [api-doi-resolver.md](api-doi-resolver.md),
-  [api-openalex.md](api-openalex.md), [api-unpaywall.md](api-unpaywall.md),
-  [api-europe-pmc.md](api-europe-pmc.md) — the verification sources behind
-  `verified_by`.
-- [pipeline-latex-writing.md](pipeline-latex-writing.md) — the writing workflow
-  this gate precedes; do not enter it until the matrix exists.
+- [SKILL.md](../SKILL.md) — owner and authorized-source boundary.
 - [anti-pattern-text-consistency-vs-data-correspondence.md](anti-pattern-text-consistency-vs-data-correspondence.md) —
-  the sibling guard for **empirical** writing (prose drifting from your own
-  data). This gate guards **citation** evidence; that one guards **experimental**
-  evidence. Both forbid confident prose ahead of verified provenance.
+  the sibling guard for empirical writing. This gate guards citation evidence;
+  that one guards experimental evidence. Both forbid confident prose ahead of
+  verified provenance.

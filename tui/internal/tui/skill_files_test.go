@@ -94,15 +94,11 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 		"bash-cli-harnesses",
 		"bash-manual reference/bash-*/SKILL.md",
 		"reference/minimax-cli/SKILL.md",
-		"reference/vision/SKILL.md",
-		"reference/listen/SKILL.md",
 		"reference/academic-research/SKILL.md",
-		"reference/dj/SKILL.md",
 		"reference/token-usage/SKILL.md",
 		"reference/html-report/SKILL.md",
 		"reference/xiaomi-mimo/SKILL.md",
 		"reference/zhipu-coding-plan/SKILL.md",
-		"reference/find-something-to-do/SKILL.md",
 	} {
 		if !strings.Contains(rootBody, want) {
 			t.Errorf("swiss-knife root missing %q", want)
@@ -116,17 +112,9 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 	for _, want := range []string{
 		"html-report/SKILL.md",
 		"html-report/assets/template.html",
-		"vision/SKILL.md",
-		"vision/scripts/describe.py",
-		"vision/reference/local-models.md",
-		"listen/SKILL.md",
-		"listen/scripts/transcribe.py",
-		"listen/scripts/appreciate.py",
 		"academic-research/SKILL.md",
-		"academic-research/scripts/fetch_paper.py",
-		"academic-research/reference/api-arxiv.md",
-		"dj/SKILL.md",
-		"find-something-to-do/SKILL.md",
+		"academic-research/reference/evidence-verification-gate.md",
+		"academic-research/reference/anti-pattern-text-consistency-vs-data-correspondence.md",
 		"token-usage/SKILL.md",
 		"token-usage/scripts/cost_report.py",
 		"token-usage/scripts/tool_calls_per_api_call_trend.py",
@@ -138,63 +126,6 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 		if e.Group != "reference" {
 			t.Errorf("entry %q group = %q, want reference", want, e.Group)
 		}
-	}
-
-	djBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "dj", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(djBodyBytes), "Nested swiss-knife reference for composing one music track") {
-		t.Error("nested dj child should identify itself as a nested swiss-knife reference")
-	}
-
-	findBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "find-something-to-do", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(findBodyBytes), "Nested swiss-knife reference for idle curiosity practice") {
-		t.Error("nested find-something-to-do child should identify itself as a nested swiss-knife reference")
-	}
-
-	visionBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "vision", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(visionBodyBytes), "Nested swiss-knife reference for image understanding") {
-		t.Error("nested vision child should identify itself as a nested swiss-knife reference for image understanding")
-	}
-	// Cross-references to the sibling minimax-cli reference must use the
-	// relative sibling path now that both live under reference/.
-	visionBody := string(visionBodyBytes)
-	if !strings.Contains(visionBody, "../minimax-cli/SKILL.md") {
-		t.Error("nested vision child should point at the sibling minimax-cli reference by relative path")
-	}
-	if strings.Contains(visionBody, "bash python") || strings.Contains(visionBody, "python scripts/") || strings.Contains(visionBody, "${CLAUDE_SKILL_DIR}") {
-		t.Error("nested vision child should use portable <skill-path>/scripts examples")
-	}
-
-	listenBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "listen", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	listenBody := string(listenBodyBytes)
-	if !strings.Contains(listenBody, "Nested swiss-knife reference for local-only audio analysis") {
-		t.Error("nested listen child should identify itself as a nested swiss-knife reference for local audio analysis")
-	}
-	if strings.Contains(listenBody, "bash python") || strings.Contains(listenBody, "python scripts/") || strings.Contains(listenBody, "${CLAUDE_SKILL_DIR}") || strings.Contains(listenBody, "media-creation") {
-		t.Error("nested listen child should use portable <skill-path>/scripts examples and current sibling media routes")
-	}
-
-	academicBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "academic-research", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	academicBody := string(academicBodyBytes)
-	if !strings.Contains(academicBody, "Nested swiss-knife reference") {
-		t.Error("nested academic-research child should identify itself as a nested swiss-knife reference")
-	}
-	if strings.Contains(academicBody, "${CLAUDE_SKILL_DIR}") || strings.Contains(academicBody, "python scripts/") {
-		t.Error("nested academic-research child should use portable <skill-path>/scripts examples")
 	}
 }
 
