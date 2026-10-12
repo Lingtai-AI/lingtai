@@ -143,9 +143,9 @@ correspondence. Re-anchor before shipping.
 
 ## Related
 
-- [pipeline-latex-writing.md](pipeline-latex-writing.md) — the writing workflow this guard wraps; see its pre-writing data-anchoring note.
 - **Multi-agent echo chamber / circular citation** — the general form: a group of
   agents converging on a shared but unverified belief. If a `multi-agent-echo-chamber`
   reference or skill is available in your environment, read it; the dynamics are
   identical, only the artifact (manuscript vs. citation graph) differs.
-- [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md) — when the claims are about *other* papers' results, verify against the source, not your summary of it.
+
+- [evidence-verification-gate.md](evidence-verification-gate.md) — verify claims about other papers against their sources, not your summaries.

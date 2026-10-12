@@ -1,19 +1,12 @@
 ---
 name: swiss-knife
 description: >
-  Umbrella router for small, focused CLI tools: minimax-cli for MiniMax
-  media/TTS/vision; vision for image OCR/critique; listen for local audio
-  transcription and music analysis; academic-research for papers, citation
-  networks, and LaTeX; dj for music generation; token-usage for token/cost
-  and API-call trend reports; html-report for standalone browser
-  deliverables; xiaomi-mimo and zhipu-coding-plan for provider discovery;
-  headless-bot for provisioning fresh LingTai bot projects (e.g. Telegram);
-  find-something-to-do for idle curiosity; preset-health for read-only
-  saved-preset health checks. Each nested reference is self-contained
-  under `reference/<name>/SKILL.md`.
+  Use when operating LingTai headless bots, checking saved presets, reporting
+  token usage, preparing HTML deliverables or verifying academic evidence.
+  Also routes to retained MiniMax, Xiaomi MiMo and Zhipu provider references.
 version: 2.4.0
 tags: [utilities, umbrella, toolkit, nested-skill]
-last_changed_at: "2026-09-05T00:00:00Z"
+last_changed_at: "2026-10-12T17:13:18Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -43,33 +36,12 @@ nested_references:
     description: >
       Nested swiss-knife reference for the MiniMax `mmx` CLI. Read this for
       MiniMax-backed image, video, music, TTS, or ad-hoc shell vision tasks.
-  - name: vision
-    location: reference/vision/SKILL.md
-    description: >
-      Nested swiss-knife reference for image understanding. Read this when you
-      need to describe, OCR, or critique an image and aren't sure which path
-      applies — it routes between the built-in `vision` tool, the sibling
-      `minimax-cli` reference, and a local Hugging Face VLM fallback.
-  - name: listen
-    location: reference/listen/SKILL.md
-    description: >
-      Nested swiss-knife reference for local audio analysis. Read this when the
-      human asks you to transcribe a voice note, extract lyrics, critique
-      generated music, or measure audio characteristics — all local, no API key
-      (Whisper transcription and librosa music analysis).
   - name: academic-research
     location: reference/academic-research/SKILL.md
     description: >
-      Nested swiss-knife reference for academic literature work. Read this to
-      fetch full-text papers by DOI/arXiv-ID/PMID, trace citation networks, run
-      scholar analysis, or write/compile LaTeX manuscripts — indexes 12 API
-      references and 6 pipeline workflows.
-  - name: dj
-    location: reference/dj/SKILL.md
-    description: >
-      Nested swiss-knife reference for composing one music track from a project
-      journal entry. Read this when the human asks for music for a journal day,
-      project vibe, session mood, or a specific generated genre.
+      Nested swiss-knife reference for citation and empirical evidence gates.
+      Verify sources before drafting and anchor claims to data and runner code;
+      no bundled paper-fetch scripts or API/pipeline cookbook.
   - name: token-usage
     location: reference/token-usage/SKILL.md
     description: >
@@ -101,12 +73,6 @@ nested_references:
       bot projects from `lingtai-tui spawn`. The current helper provisions a
       Telegram MCP bot, and the workflow also covers preset-policy replication,
       addon wiring, secret hygiene, refresh/relaunch, and verification.
-  - name: find-something-to-do
-    location: reference/find-something-to-do/SKILL.md
-    description: >
-      Nested swiss-knife reference for idle curiosity practice. Read this when
-      you have no pending task, no human waiting, and want a reflective way to
-      notice quiet impulses or choose a small autonomous exploration.
   - name: preset-health
     location: reference/preset-health/SKILL.md
     description: >
@@ -125,16 +91,12 @@ nested_references:
 |---|---|
 | Run or compare coding-agent CLIs such as Claude Code, Codex, OpenCode, Cursor Agent, MiMo Code, Qwen Code, Oh-My-Pi, Gemini CLI, Aider, Goose, OpenHands, or Crush | Load `bash-manual`, then the matching `reference/bash-*/SKILL.md` |
 | Generate images, video, music, TTS, or MiniMax shell vision | `reference/minimax-cli/SKILL.md` |
-| Describe, OCR, or critique an image (pick the cheapest available path) | `reference/vision/SKILL.md` |
-| Transcribe speech/voice notes or analyze music locally (no API key) | `reference/listen/SKILL.md` |
-| Fetch papers, trace citations, run scholar analysis, or write LaTeX | `reference/academic-research/SKILL.md` |
-| Compose music from a project journal, session mood, or requested genre | `reference/dj/SKILL.md` |
+| Verify citation-bearing writing or empirical manuscript claims | `reference/academic-research/SKILL.md` |
 | Report token usage, model costs, cache rates, or tool-call/API-call trends | `reference/token-usage/SKILL.md` |
 | Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |
 | Discover/configure Xiaomi MiMo provider/model access | `reference/xiaomi-mimo/SKILL.md`; for `mimocode` shell execution, load `bash-manual` → `reference/bash-mimocode/SKILL.md` |
 | Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md`; for shell CLI harness execution, load `bash-manual` first |
 | Create or automate a headless LingTai bot project, including Telegram bots | `reference/headless-bot/SKILL.md` |
-| Practice idle curiosity when there is no pending task or human waiting | `reference/find-something-to-do/SKILL.md` |
 | Health-check saved presets (read-only): classify expired keys, missing credentials, unreachable endpoints, invalid model/config | `reference/preset-health/SKILL.md` |
 
 ## How to use this router

@@ -1,6 +1,7 @@
 package preset
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,19 +21,9 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	for _, rel := range []string{
 		"SKILL.md",
 		"reference/minimax-cli/SKILL.md",
-		"reference/vision/SKILL.md",
-		"reference/vision/scripts/describe.py",
-		"reference/vision/reference/local-models.md",
-		"reference/listen/SKILL.md",
-		"reference/listen/scripts/transcribe.py",
-		"reference/listen/scripts/appreciate.py",
 		"reference/academic-research/SKILL.md",
-		"reference/academic-research/scripts/fetch_paper.py",
-		"reference/academic-research/reference/api-arxiv.md",
-		"reference/academic-research/reference/pipeline-latex-writing.md",
 		"reference/academic-research/reference/anti-pattern-text-consistency-vs-data-correspondence.md",
 		"reference/academic-research/reference/evidence-verification-gate.md",
-		"reference/dj/SKILL.md",
 		"reference/token-usage/SKILL.md",
 		"reference/token-usage/scripts/cost_report.py",
 		"reference/token-usage/scripts/tool_calls_per_api_call_trend.py",
@@ -43,12 +34,31 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 		"reference/headless-bot/scripts/create_telegram_bot_project.py",
 		"reference/xiaomi-mimo/SKILL.md",
 		"reference/zhipu-coding-plan/SKILL.md",
-		"reference/find-something-to-do/SKILL.md",
 		"reference/preset-health/SKILL.md",
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
 			t.Fatalf("expected bundled swiss-knife file %s to be extracted: %v", rel, err)
 		}
+	}
+
+	// Retired optional toolkits must not return through embedding or extraction.
+	for _, retired := range []string{
+		"reference/vision",
+		"reference/listen",
+		"reference/dj",
+		"reference/find-something-to-do",
+		"reference/academic-research/scripts",
+		"reference/academic-research/reference/api-arxiv.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, retired)); !os.IsNotExist(err) {
+			t.Fatalf("retired bundled utility %s should not be extracted (err=%v)", retired, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(globalDir, "utilities", "textbook-distillation")); !os.IsNotExist(err) {
+		t.Fatalf("retired textbook-distillation should not be extracted (err=%v)", err)
+	}
+	if BundledSkillNames()["textbook-distillation"] {
+		t.Fatal("retired textbook-distillation should not be a bundled skill name")
 	}
 
 	for _, old := range []string{
@@ -80,6 +90,52 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	} {
 		if _, err := os.Stat(oldTopLevel); !os.IsNotExist(err) {
 			t.Fatalf("old top-level utility skill %s should not be extracted after moving under swiss-knife (err=%v)", oldTopLevel, err)
+		}
+	}
+}
+
+// TestBundledAcademicEvidenceGates protects the retained safeguards while
+// ensuring none of the retired fetching/API/pipeline toolkit is embedded.
+func TestBundledAcademicEvidenceGates(t *testing.T) {
+	root := "skills/swiss-knife/reference/academic-research"
+	wantFiles := map[string]bool{
+		root + "/SKILL.md": true,
+		root + "/reference/evidence-verification-gate.md":                           true,
+		root + "/reference/anti-pattern-text-consistency-vs-data-correspondence.md": true,
+	}
+	err := fs.WalkDir(skillsFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && !wantFiles[path] {
+			t.Errorf("retired academic toolkit file is still embedded: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path := range wantFiles {
+		if _, err := skillsFS.ReadFile(path); err != nil {
+			t.Errorf("retained academic gate missing: %s: %v", path, err)
+		}
+	}
+	for _, check := range []struct {
+		path string
+		want string
+	}{
+		{root + "/SKILL.md", "do not bypass"},
+		{root + "/reference/evidence-verification-gate.md", "verified literature matrix"},
+		{root + "/reference/anti-pattern-text-consistency-vs-data-correspondence.md", "data correspondence"},
+		{"skills/swiss-knife/reference/html-report/SKILL.md", "Confirm authorized access"},
+		{"skills/swiss-knife/reference/html-report/SKILL.md", "Distill, do not reproduce"},
+	} {
+		body, err := skillsFS.ReadFile(check.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), check.want) {
+			t.Errorf("retained safety reference %s missing %q", check.path, check.want)
 		}
 	}
 }

@@ -11,7 +11,7 @@ description: >
   especially anything containing equations.
 version: 1.0.0
 tags: [html, report, mathjax, deliverable, artifact]
-last_changed_at: "2026-07-18T00:00:00Z"
+last_changed_at: "2026-10-12T17:13:18Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -85,6 +85,37 @@ If the artifact contains equations:
    - Pre-render equations to SVG/PNG at generation time and embed them as `<img>` (most robust, no JS needed).
 
    Pick the offline path explicitly if the human said "must work offline." Otherwise CDN is the default.
+
+## Source-derived study notes
+
+For study notes, agree the source, goal, scope/order and lesson granularity with
+the human before generating a batch of artifacts. These source boundaries also
+apply to research memos and literature maps. For citation-bearing claims, read
+[the academic evidence gate](../academic-research/SKILL.md) before drafting.
+
+These boundaries are not optional. They apply from intake onward.
+
+- **Distill, do not reproduce.** Re-explain concepts in your own words with your
+  own examples. Do not copy the author's prose, do not paste chapters or long
+  passages, and do not recreate the book's figures/tables verbatim. Short quotes
+  for commentary are fine; wholesale reproduction is not.
+- **No piracy enabler.** Decline requests framed as "summarize the whole book so
+  I don't have to buy/read it" or "give me the full text." Offer legitimate
+  distillation (concepts, your own worked examples, study aids) instead.
+- **Always cite the source.** Every artifact names title, author, edition, and
+  the page/section range it draws from, plus a provenance caveat that these are
+  re-explained study notes, not the original.
+- **Confirm authorized access.** Only work from material the human can point to a
+  legitimate source for (owned copy, library/institutional access, open-access,
+  their own notes). If they cannot, stop and say so.
+- **Flag the limits of your knowledge.** When you teach from your own knowledge
+  rather than the specific source (e.g. you only have the ToC), label it clearly
+  so the learner knows what is the book's treatment vs. general background. Note
+  that your knowledge has a cutoff and the edition may differ — tell the human to
+  verify specifics against the actual source.
+- **Stay in the learner's interest.** No fabricated citations, no invented page
+  numbers, no confidently wrong technical claims. If unsure of a fact, say so and
+  point the learner to the source section to confirm.
 
 ## Artifact hygiene
 

@@ -8,7 +8,7 @@ description: >
   or one-shot shell vision.
 version: 2.2.0
 tags: [manual, cli, minimax, mmx, image, video, music, speech, tts, vision, media-generation]
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-10-12T17:13:18Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -24,9 +24,7 @@ Use this skill when a task needs MiniMax-backed media generation or one-shot she
 |---|---|
 | Generate image, video, music, or TTS | `mmx image/video/music/speech ...` after reading the subcommand's `--help` |
 | Understand an image from a shell script | `mmx vision ...` for ad-hoc one-shots |
-| Vision as an in-turn tool call | Read the sibling `../vision/SKILL.md` first; it may expose the kernel `vision` tool or a registered MCP |
-| Music tied to project journals | Use the sibling `../dj/SKILL.md` for the workflow, then this skill for the MiniMax provider step |
-| Transcribe speech or analyze audio numerically | Use the sibling `../listen/SKILL.md` (local, no MiniMax key needed) |
+| Vision as an in-turn tool call | Use the built-in `vision` tool if available; registered MCP setup belongs to `mcp-manual` |
 
 This skill is the **canonical MiniMax CLI reference** shipped with the TUI. The top-level `minimax-cli` skill is only a discoverability pointer into this nested reference, so keep MiniMax command recipes and credential guidance here rather than duplicating them there.
 
@@ -208,7 +206,7 @@ mmx music --help
 
 MiniMax vision can appear through multiple LingTai paths:
 
-- **Kernel `vision` tool**: best when present in the agent's tool list; use the `vision` skill's decision tree.
+- **Kernel `vision` tool**: best when present in the agent's tool list; follow the tool's current manual.
 - **MiniMax CLI (`mmx vision ...`)**: best for one-shot shell/OCR/image-description jobs.
 - **MCP vision tools**: only if an MCP is already registered; MCP setup belongs to `mcp-manual`.
 
