@@ -137,3 +137,19 @@ func TestMailViewCtrlYDoesNotSetGlobalSelectMode(t *testing.T) {
 		t.Fatalf("ctrl+y in mail view must still toggle mail.copyMode")
 	}
 }
+
+// budgetApp builds an App parked in the /help view with the given startup
+// banner. The help view has a real constructor (unlike a zero-value MailModel,
+// whose textarea is nil) and records the height it is sized to in
+// help.inner.height — which is what these tests inspect to prove the child
+// received the reduced budget. The startupBanner is root-owned chrome,
+// independent of which view is current, so the help view exercises the same
+// layout contract the mail banner uses in production.
+func budgetApp(t *testing.T, banner string) App {
+	t.Helper()
+	return App{
+		currentView:   appViewHelp,
+		help:          NewHelpModel(),
+		startupBanner: banner,
+	}
+}

@@ -12,7 +12,6 @@ related_files:
   - tui/internal/tui/puffo_acp_lifecycle_test.go
   - tui/internal/tui/launch_heartbeat_test.go
   - tui/internal/tui/layout.go
-  - tui/internal/tui/layout_test.go
   - tui/internal/tui/auto_refresh.go
   - tui/internal/tui/firstrun.go
   - tui/internal/tui/firstrun_test.go
@@ -68,10 +67,8 @@ related_files:
   - tui/internal/tui/agent_rail_collapse_test.go
   - tui/internal/tui/agents_direct_conversation_boundary_test.go
   - tui/internal/tui/agora_removed_test.go
-  - tui/internal/tui/app_cursor_test.go
   - tui/internal/tui/app_recipe_test.go
   - tui/internal/tui/app_recovery_esc_test.go
-  - tui/internal/tui/apriori_summary_render_test.go
   - tui/internal/tui/auto_refresh_test.go
   - tui/internal/tui/claude_auth_test.go
   - tui/internal/tui/clear.go
@@ -97,21 +94,13 @@ related_files:
   - tui/internal/tui/direct_visibility_unread_red_test.go
   - tui/internal/tui/doctor_intrinsic_test.go
   - tui/internal/tui/doctor_startup_test.go
-  - tui/internal/tui/doctor_view_test.go
   - tui/internal/tui/firstrun_legacy_init_fields_test.go
   - tui/internal/tui/global_select_mode_test.go
   - tui/internal/tui/goal_test.go
-  - tui/internal/tui/help_test.go
   - tui/internal/tui/home_telemetry.go
   - tui/internal/tui/home_telemetry_agent_record_test.go
   - tui/internal/tui/home_telemetry_async_test.go
-  - tui/internal/tui/home_telemetry_display_test.go
-  - tui/internal/tui/home_telemetry_height_test.go
-  - tui/internal/tui/home_telemetry_kanban_consistency_test.go
-  - tui/internal/tui/home_telemetry_test.go
   - tui/internal/tui/home_telemetry_ui_no_io_test.go
-  - tui/internal/tui/home_telemetry_view_test.go
-  - tui/internal/tui/input_test.go
   - tui/internal/tui/issue_report_nested_test.go
   - tui/internal/tui/knowledge_entries_test.go
   - tui/internal/tui/knowledge_files.go
@@ -124,11 +113,8 @@ related_files:
   - tui/internal/tui/login_account_name_test.go
   - tui/internal/tui/login_active_test.go
   - tui/internal/tui/login_test.go
-  - tui/internal/tui/mail_activity_footer_test.go
   - tui/internal/tui/mail_activity_indicator_test.go
   - tui/internal/tui/mail_ctrl_end_test.go
-  - tui/internal/tui/mail_header_center_test.go
-  - tui/internal/tui/mail_input_height_test.go
   - tui/internal/tui/mail_launch_defer_test.go
   - tui/internal/tui/mail_loading_state_test.go
   - tui/internal/tui/mail_mailbox_source_test.go
@@ -142,22 +128,17 @@ related_files:
   - tui/internal/tui/message_limit_env_test.go
   - tui/internal/tui/network_mail_edges_scope_test.go
   - tui/internal/tui/mcp_command_test.go
-  - tui/internal/tui/mdviewer_test.go
   - tui/internal/tui/network_activity_i18n.go
-  - tui/internal/tui/network_activity_i18n_test.go
   - tui/internal/tui/nirvana.go
   - tui/internal/tui/nirvana_loading_test.go
   - tui/internal/tui/nirvana_retirement_red_test.go
-  - tui/internal/tui/notification_meta_footer_test.go
   - tui/internal/tui/notification_test.go
   - tui/internal/tui/oauth_test.go
-  - tui/internal/tui/palette_test.go
   - tui/internal/tui/portal_guide_nested_test.go
   - tui/internal/tui/portal_url_test.go
   - tui/internal/tui/preset_library_test.go
   - tui/internal/tui/presets.go
   - tui/internal/tui/props_test.go
-  - tui/internal/tui/rebuild_separator_test.go
   - tui/internal/tui/recipe_location_test.go
   - tui/internal/tui/recipe_save.go
   - tui/internal/tui/refresh_test.go
@@ -169,14 +150,9 @@ related_files:
   - tui/internal/tui/skill_remote.go
   - tui/internal/tui/skill_remote_test.go
   - tui/internal/tui/snapshot_test.go
-  - tui/internal/tui/status_hint_copy_test.go
-  - tui/internal/tui/styles_test.go
   - tui/internal/tui/taskcard_test.go
   - tui/internal/tui/testhome_test.go
   - tui/internal/tui/token_usage_footer.go
-  - tui/internal/tui/token_usage_footer_test.go
-  - tui/internal/tui/token_usage_render_test.go
-  - tui/internal/tui/toolcall_display_test.go
   - tui/internal/tui/update.go
   - tui/internal/tui/update_test.go
   - tui/internal/tui/update_tui.go
@@ -184,7 +160,6 @@ related_files:
   - tui/internal/tui/visible_rail_v2_test.go
   - tui/internal/tui/wizard_footer.go
   - tui/internal/tui/codex_cli_import_test.go
-  - tui/internal/tui/thinking_preview_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
