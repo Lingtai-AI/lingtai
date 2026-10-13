@@ -508,10 +508,17 @@ projection in `internal/preset/project_configuration.go` and real composition in
 - Existing init custom env/venv/pad/MCP/settings and blueprint identity/history,
   unknown fields and exact integers are preserved by the kernel, not a second Go
   merger. Displayed setup prompt defaults are not edits. Explicit covenant file
-  edits map only to current Psyche; comment file content maps to current Pad.
+  edits still map to current Psyche; comment file content maps to current Pad.
+  The public projection also supplies the inherited legacy init covenant path:
+  explicit `covenant_file` and outer language `default_covenant_file`. Kernel Core
+  selects explicit, existing nonempty, then default; fallback alone never edits
+  Psyche or reactivates ignored legacy prompt loading.
 - Policy propagation preserves the wizard's empty-allowed no-op. Go reads only
   selected post-save default/allowed values; Core owns active authorization and
-  member filtering. Config propagation is kernel-owned too; no silent partial green.
+  member filtering. Policy-only writes preserve the old parsed-preset-block
+  input domain without imposing whole-runtime Pad/env/owner readiness; no reader
+  effectiveness is claimed. Config propagation is kernel-owned too and retains
+  actual owner checks; no silent partial green.
 - Import replaces the old source-configure/worker-copy pair with one rehydrate
   request. All-present is unchanged, mixed refused before init writes, all-absent
   configures source then absent workers once. App does not immediately re-propagate

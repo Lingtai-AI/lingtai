@@ -224,6 +224,8 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
   existing-project mutation to the concrete process driver. `project_configuration.go`
   projects only public reference/path/options and curated MCP seeds, reads selected
   saved policy without reconciliation, and maps explicit covenant/Pad edits.
+  Its legacy covenant metadata carries explicit and outer language-default paths;
+  preservation/precedence stays in kernel Core, not a Go read/merge fallback.
   No Go init/blueprint merge or imported-worker mutation remains here.
   `project_configuration_test.go` uses the byte-identical kernel matrix in
   `testdata/project_configuration.json`; actual installed CLI acceptance is parent-owned.

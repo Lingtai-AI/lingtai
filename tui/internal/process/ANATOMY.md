@@ -55,6 +55,8 @@ maintenance: |
   configure, policy/config propagation and combined rehydrate. It reuses sibling
   executable resolution, strict JSON and bounded capture, retains typed source
   receipts/counts, and rejects unknown transport without retry/repair/fallback.
+  Public configure options include the existing writer's explicit/default legacy
+  covenant paths; policy-only receipts do not assert whole-runtime readiness.
   `project_configuration_test.go` extends the existing portable child fixture.
 
 ## Connections

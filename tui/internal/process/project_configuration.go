@@ -27,6 +27,10 @@ type ProjectConfigurationOptions struct {
 	Addons         []string               `json:"addons,omitempty"`
 	AllowedPresets []string               `json:"allowed_presets,omitempty"`
 	MCP            map[string]interface{} `json:"mcp,omitempty"`
+
+	// Legacy writer path metadata; only explicit Prompts edits write Psyche.
+	CovenantFile        string `json:"covenant_file,omitempty"`
+	DefaultCovenantFile string `json:"default_covenant_file,omitempty"`
 }
 
 // Only explicit edits are sent. Nil preserves the current Psyche owner bytes;

@@ -36,6 +36,7 @@ func ProjectConfigurationRequest(p Preset, agentName, dirName, lingtaiDir, globa
 	}
 	options := process.ProjectConfigurationOptions{
 		EnvFile: envFile, VenvPath: venvPath, Language: language,
+		CovenantFile: opts.CovenantFile, DefaultCovenantFile: CovenantPath(globalDir, language),
 		Karma: opts.Karma, Nirvana: opts.Nirvana, PreserveActive: opts.PreserveActivePreset || keep,
 		ContextLimit: opts.ContextLimit, MaxRPM: opts.MaxRpm, MaxAEDAttempts: ClampAedAttempts(opts.MaxAedAttempts),
 		Addons: opts.Addons, AllowedPresets: opts.AllowedPresets,

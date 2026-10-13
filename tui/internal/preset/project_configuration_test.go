@@ -101,6 +101,9 @@ func TestProjectConfigurationPublicProjection(t *testing.T) {
 	if request.ProjectDir != root || request.PresetRef != "" || !request.KeepCurrent || !request.Options.PreserveActive || request.Prompts != nil || request.Options.Pad != nil {
 		t.Fatalf("wrong projection %+v", request)
 	}
+	if request.Options.DefaultCovenantFile != CovenantPath(global, "en") || request.Options.CovenantFile != "" {
+		t.Fatal("legacy covenant fallback must be public metadata, not a Psyche edit")
+	}
 	if request.Options.EnvFile != opts.EnvFile || request.Options.VenvPath != opts.VenvPath {
 		t.Fatal("explicit public fallbacks lost")
 	}
