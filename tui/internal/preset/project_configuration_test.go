@@ -30,11 +30,7 @@ func fixturePresetDocument(t *testing.T, p Preset) {
 	if isSyntheticPreset(p) {
 		return
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixturePresetReference(t, filepath.Join(home, RefFor(p)[2:]), p)
+	fixturePresetReference(t, RefFor(p), p)
 }
 
 func fixturePresetReference(t *testing.T, ref string, p Preset) {

@@ -45,13 +45,7 @@ func newFirstRunRecipeProject(t *testing.T, recipeName string) string {
 	t.Helper()
 	// Transport fixture only: preserve ALL original first-run assertions while
 	// selecting the parent's explicit installed kernel through the real resolver.
-	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
-	if python == "" || !filepath.IsAbs(python) {
-		t.Fatal("set LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON to parent-verified installed interpreter")
-	}
-	if _, err := os.Stat(python); err != nil {
-		t.Fatal(err)
-	}
+	python := fixtureUIProjectPython(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

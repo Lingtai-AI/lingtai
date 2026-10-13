@@ -268,24 +268,11 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 
 ## Existing Recipe exchange consumer
 
-`RecipeNeedsApply`, `ApplyRecipe` and `ApplyRecipeToLingTaiDir` retain their
-original signatures. `project_recipe.go` selects the existing installed kernel
-with `config.GlobalDirPath`/`config.LingtaiCmd`, without creating global state.
-The process owner (`tui/internal/process/project_recipe.go`) uses the frozen
-PRJ004 synchronous-member ABI. Kernel owns metadata/layer selection, one native
-directory enumeration, direct prompt/additive skills writes and snapshot. Go
-executes the original arbitrary function immediately before each prompt phase;
-nil uses kernel identity. The explicit destination is independent of bundle root.
-The count is `legacy_applied`, not the diagnostic successful-member count.
-Reader-only/removal-only diagnostics never manufacture an old apply error.
-Unknown transport is nonnil error; the bool-only observation API conservatively
-returns true on unknown transport (not proof of change/absence/equality).
-
-`AppendSkillsPath` remains a public, directly unit-tested helper with no
-production Recipe apply caller; it is not a fallback writer. `copyTree`/`copyFile`
-remain for unmigrated bundle/import materialization. The obsolete local comparison
-walker was removed. `project_recipe_test.go` authors installed-CLI cases through
-the original public APIs; baseline `recipe_apply_test.go` assertions stay intact
-with test-only installed-runtime selection. Exact decoder/error formatting and
-native-platform acceptance are not proved by authored source. The nearest
-behavior owner is `tui/CONTRACT.md` (Existing Recipe consumer section).
+`RecipeNeedsApply`, `ApplyRecipe` and `ApplyRecipeToLingTaiDir` retain their signatures;
+`project_recipe.go` delegates to the [process owner](../process/ANATOMY.md#existing-recipe-synchronous-exchange).
+It selects the installed kernel with `config.GlobalDirPath`/`config.LingtaiCmd`, without global writes,
+and owns `legacy_applied` return-count and legacy phase-error mapping.
+Installed cases: `project_recipe_test.go`; baseline assertions: `recipe_apply_test.go`.
+`AppendSkillsPath` remains public/unit-tested, not a fallback writer;
+`copyTree`/`copyFile` retain unmigrated bundle/import materialization.
+Promises/acceptance limits: [Existing Recipe contract](../../CONTRACT.md#existing-recipe-consumer-prj004-source-candidate).

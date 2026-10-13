@@ -83,46 +83,17 @@ maintenance: |
 
 ## Existing Recipe synchronous exchange
 
-`project_recipe.go` is the specialized PRJ004 consumer using the SAME
-`kernelCLI` resolver and literal `project recipe-observe`/`recipe-apply` argv.
-The new-form apply request is closed and newline-terminated, with independent
-bundle/destination and callback or identity mode. A growing `bufio.Reader`
-validates each closed frame, canonical base64, byte length and sequence before
-calling the original Go function synchronously. One bound ack is encoded/flushed
-before the next read. No configuration/creation Scanner cap, whole-output cap,
-request deadline or callback goroutine is inherited. Standard `exec` lifecycle
-copying drains stderr; normal terminal/exit/EOF and stderr are all validated.
-Panic/Goexit unwind closes input, terminates only the owned child and reaps it,
-without recovering or sending a substitute ack.
-
-Typed native failure evidence supports factual errno/path matching and retains
-parse offsets; exact old syscall/decoder formatting cannot be inferred from the
-frozen evidence. Stopped receipts remain distinct from normal snapshots. Lost
-ack/terminal/crash or malformed evidence means unknown partial physical effects,
-never rollback, zero-write proof, retry or a Go mutation fallback. Two thin test
-groups extend the existing portable test-binary fixture for wire/evidence/reap;
-actual mutation acceptance is the preset owner's installed-CLI source tests.
-The nearest behavior owner is `tui/CONTRACT.md`.
+`project_recipe.go` owns `ApplyProjectRecipe`/`ObserveProjectRecipe` (PRJ004),
+using `kernelCLI` and literal `project recipe-observe`/`recipe-apply` argv.
+It owns synchronous callback wire validation and owned-child unwind/reap.
+Portable wire/evidence/reap tests: `project_recipe_test.go`;
+installed mutation tests: `tui/internal/preset/project_recipe_test.go`.
+Promises/limits: [Existing Recipe contract](../../CONTRACT.md#existing-recipe-consumer-prj004-source-candidate).
 
 ## Native inspection readiness exchange (PRJ006 source candidate)
 
-`project_inspection_exchange.go` implements `InspectProjectReadiness` on the
-same `kernelCLI`/literal `project inspect` command. `main.go:prepareApp` wires
-this supported startup consumer before initialization/registration. Kernel owns
-member roles, eligible order, first-error priority and readiness. Go observes
-only requested native members, `os.Stat` once per frame on the original joined
-path, and renders the kernel reason. The original error object and path remain
-local until the full terminal/transcript, exit and empty stderr match.
-
-A growing Reader and flushed Writer retain live stdin until terminal; no new
-line/output cap, request timeout, callback thread, fallback scan or lifecycle
-mechanism. Mode-specific closed decoding leaves strictProjectObject unchanged,
-requires nullable native facts only where documented, and checks raw JSON
-surrogate codepoints against canonical native identities without replacement
-name selection or Go reordering. Ordinary InspectProject keeps EOF/capped
-transport and now consumes the unchanged ordinary startup_readiness shape.
-Context cancellation releases inherited stdout/stdin; deferred unwind closes
-pipes and kills/reaps only the owned direct child, preserving panic/Goexit.
-Arbitrary descendants are neither terminated nor claimed orphan-free.
-Focused source tests remain in project_interactive_test.go; presentation/wiring
-coverage is main_project_inspection_test.go. See tui/CONTRACT.md for promises.
+`project_inspection_exchange.go` implements `InspectProjectReadiness` through
+`kernelCLI`/literal `project inspect`; `main.go:prepareApp` wires startup consumption.
+Kernel owns readiness; Go owns requested native observations and retained errors.
+Tests: `project_interactive_test.go` and `main_project_inspection_test.go`.
+Promises/limits: [Project inspection contract](../../CONTRACT.md#project-inspection-and-fresh-interactive-creation).
