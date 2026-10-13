@@ -30,8 +30,6 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 		"reference/token-usage/scripts/custom_pricing.json",
 		"reference/html-report/SKILL.md",
 		"reference/html-report/assets/template.html",
-		"reference/headless-bot/SKILL.md",
-		"reference/headless-bot/scripts/create_telegram_bot_project.py",
 		"reference/xiaomi-mimo/SKILL.md",
 		"reference/zhipu-coding-plan/SKILL.md",
 		"reference/preset-health/SKILL.md",
@@ -43,6 +41,7 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 
 	// Retired optional toolkits must not return through embedding or extraction.
 	for _, retired := range []string{
+		"reference/headless-bot",
 		"reference/vision",
 		"reference/listen",
 		"reference/dj",
@@ -136,30 +135,6 @@ func TestBundledAcademicEvidenceGates(t *testing.T) {
 		}
 		if !strings.Contains(string(body), check.want) {
 			t.Errorf("retained safety reference %s missing %q", check.path, check.want)
-		}
-	}
-}
-
-func TestPopulateBundledLibrary_HeadlessBotTelegramModule(t *testing.T) {
-	globalDir := t.TempDir()
-	PopulateBundledLibrary(globalDir)
-
-	utilitiesDir := filepath.Join(globalDir, "utilities", "swiss-knife", "reference", "headless-bot")
-	wantArgs := `"args": ["-m", "lingtai.mcp_servers.telegram"]`
-	for _, rel := range []string{
-		"SKILL.md",
-		"scripts/create_telegram_bot_project.py",
-	} {
-		body, err := os.ReadFile(filepath.Join(utilitiesDir, rel))
-		if err != nil {
-			t.Fatalf("read bundled headless-bot file %s: %v", rel, err)
-		}
-		text := string(body)
-		if strings.Contains(text, "lingtai_telegram") {
-			t.Errorf("bundled headless-bot file %s contains stale Telegram module path", rel)
-		}
-		if !strings.Contains(text, wantArgs) {
-			t.Errorf("bundled headless-bot file %s missing mcp.telegram args %q", rel, wantArgs)
 		}
 	}
 }

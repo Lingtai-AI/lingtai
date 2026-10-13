@@ -8,7 +8,7 @@ description: >
   stewarding a new skill. For developers and contributors; for end-user
   lessons, use tutorial-guide.
 version: 2.9.0
-last_changed_at: "2026-09-09T00:00:00Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -184,6 +184,7 @@ drill-down files, not standalone top-level skills.
 | Navigate Python kernel code structurally | `lingtai-kernel-anatomy` |
 | Develop, register, or troubleshoot MCP servers/addons | `mcp-manual` first, then `lingtai-kernel-anatomy` `reference/mcp-protocol.md` |
 | Author or publish skills, including limit-aware router/reference structure | `skills-manual`, then `reference/skill-stewardship/SKILL.md` |
+| Create, connect, maintain or recover a LingTai bot | `lingtai-bot-guide` |
 | Customize, export, or package project methodology as a recipe | `lingtai-recipe` |
 | Work on portal APIs, topology recording, replay, or `.portal/` state | `lingtai-portal-guide` |
 | Produce a standalone HTML deliverable (skeleton, MathJax, validation) | `swiss-knife` → `reference/html-report/SKILL.md` |

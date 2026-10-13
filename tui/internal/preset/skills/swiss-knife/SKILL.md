@@ -1,12 +1,12 @@
 ---
 name: swiss-knife
 description: >
-  Use when operating LingTai headless bots, checking saved presets, reporting
+  Use when checking saved presets, reporting
   token usage, preparing HTML deliverables or verifying academic evidence.
   Also routes to retained MiniMax, Xiaomi MiMo and Zhipu provider references.
-version: 2.4.0
+version: 2.5.0
 tags: [utilities, umbrella, toolkit, nested-skill]
-last_changed_at: "2026-10-12T17:13:18Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -66,13 +66,6 @@ nested_references:
       Nested swiss-knife reference for the Zhipu / Z.AI / BigModel coding-plan
       subscription. Read this when the human asks about Zhipu credentials or the
       plan's vision, web search, web-read, and zread MCP capabilities.
-  - name: headless-bot
-    location: reference/headless-bot/SKILL.md
-    description: >
-      Nested swiss-knife reference for creating and operating headless LingTai
-      bot projects from `lingtai-tui spawn`. The current helper provisions a
-      Telegram MCP bot, and the workflow also covers preset-policy replication,
-      addon wiring, secret hygiene, refresh/relaunch, and verification.
   - name: preset-health
     location: reference/preset-health/SKILL.md
     description: >
@@ -96,7 +89,7 @@ nested_references:
 | Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |
 | Discover/configure Xiaomi MiMo provider/model access | `reference/xiaomi-mimo/SKILL.md`; for `mimocode` shell execution, load `bash-manual` → `reference/bash-mimocode/SKILL.md` |
 | Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md`; for shell CLI harness execution, load `bash-manual` first |
-| Create or automate a headless LingTai bot project, including Telegram bots | `reference/headless-bot/SKILL.md` |
+| Create, connect or maintain LingTai bots (promoted first-level owner) | `lingtai-bot-guide` |
 | Health-check saved presets (read-only): classify expired keys, missing credentials, unreachable endpoints, invalid model/config | `reference/preset-health/SKILL.md` |
 
 ## How to use this router

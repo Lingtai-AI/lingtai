@@ -2,7 +2,7 @@
 name: lingtai-preset-skill
 description: "Use when asking about built-in TUI presets, the four provider families, or their shared operations."
 version: 4.0.0
-last_changed_at: "2026-09-29T00:00:00Z"
+last_changed_at: "2026-10-12T18:16:58Z"
 related_files:
   - tui/internal/preset/preset.go
   - tui/internal/tui/preset_editor.go
@@ -38,6 +38,9 @@ There are no per-vendor templates. Any other vendor, subscription, gateway,
 or account pool is reached through the `openai` or `anthropic` family pointed
 at that vendor's compatible endpoint (`base_url`) — never through a
 vendor-named provider, which the kernel rejects.
+
+For project/bot initiation around this preset work, discover `lingtai-bot-guide`.
+It routes recipes, channels, verification and lifecycle to their separate owners.
 
 ## Direct children: the 4 BuiltinPresets names
 

@@ -71,6 +71,8 @@ func TestBundledLingtaiTuiHelpRuntimeBoundaryAndRouting(t *testing.T) {
 		"route: lingtai-tui-anatomy",
 		"route: assets/slash-commands.en.md",
 		"route: lingtai-preset-skill",
+		"feature: bot-creation-and-operation",
+		"route: lingtai-bot-guide",
 		"route: lingtai-portal-guide",
 		"route: tutorial-guide",
 		"route: lingtai-update",
