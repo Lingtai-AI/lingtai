@@ -2387,6 +2387,7 @@ func TestPresetEditorEmptyBaseURLShowsOfficialDefault(t *testing.T) {
 }
 
 func TestPresetEditorCodexCreditsOptInRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("LINGTAI_TUI_DIR", t.TempDir())
 	p := testCodexPresetEditorPreset(nil)
 	p.Source = preset.SourceSaved
@@ -2418,8 +2419,13 @@ func TestPresetEditorCodexCreditsOptInRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project := t.TempDir()
-	if err := preset.GenerateInitJSON(loaded, "credit-agent", "credit-agent", project, t.TempDir()); err != nil {
+	project := filepath.Join(t.TempDir(), ".lingtai")
+	opts := preset.DefaultAgentOpts()
+	opts.EnvFile = filepath.Join(t.TempDir(), "fixture.env")
+	if err := os.WriteFile(opts.EnvFile, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := preset.GenerateInitJSONWithOpts(loaded, "credit-agent", "credit-agent", project, t.TempDir(), opts, fixtureUIProjectPython(t)); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(project, "credit-agent", "init.json"))

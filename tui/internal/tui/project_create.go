@@ -1,14 +1,17 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
-	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
@@ -23,8 +26,8 @@ import (
 // pattern must never be blind-deleted (see design doc Invariant 5).
 const stagingMarkerName = ".lingtai-launcher-staging"
 
-// CreatePhase identifies a mutating step of the staging finalizer, used both
-// for user-facing phase reporting and for failure-injection in tests.
+// CreatePhase identifies outer validation/dependency/UI work. Historical domain
+// phase labels remain source-compatible, but Go no longer executes those phases.
 type CreatePhase int
 
 const (
@@ -70,21 +73,15 @@ func (p CreatePhase) String() string {
 	}
 }
 
-// preRenamePhase reports whether a phase runs before the atomic rename —
-// i.e. whether its failure must leave NO final .lingtai (pre-commit) versus
-// leaving a valid, already-published project that is merely unfinished
-// (post-commit). See the design doc's commit-matrix / failure-semantics
-// table.
-func (p CreatePhase) preRenamePhase() bool {
-	return p <= PhaseRename
-}
-
 // CreateResult reports the outcome of RunProjectCreate.
 type CreateResult struct {
-	// Committed is true once os.Rename(staging, final) has succeeded. A
+	// Committed is true only after accepted kernel created output and exit 0. A
 	// true value means the final .lingtai/ exists and must never be rolled
 	// back, even if a later post-commit phase failed.
 	Committed bool
+	// Unknown means publication was not proved or disproved. The launcher must
+	// not offer another confirmation until the operator leaves and reconciles.
+	Unknown bool
 	// FailedPhase is the phase that failed, valid only when Err != nil.
 	FailedPhase CreatePhase
 	Err         error
@@ -109,8 +106,11 @@ type createFailureInjector func(phase CreatePhase) error
 // see RuntimeReady), then resolves the command again before deciding whether
 // an agent can be launched.
 type CreateOptions struct {
-	GlobalDir  string
-	LingtaiCmd string
+	Context context.Context
+	// Test seam for this real subprocess boundary, not a Go creation fallback.
+	CreateInteractive func(context.Context, string, process.InteractiveProjectRequest, func() bool) (process.InteractiveProjectResult, error)
+	GlobalDir         string
+	LingtaiCmd        string
 	// RuntimeReady/ResolveLingtaiCmd replace their config counterparts in
 	// tests. Nil uses the real post-publish readiness check and resolver.
 	// RuntimeReady is READ-ONLY: it must never create, repair, or upgrade
@@ -132,8 +132,8 @@ type CreateOptions struct {
 	// Test-only seam.
 	InjectFailure createFailureInjector
 	// ScanInventory, when non-nil, replaces the real inventory.Scan call
-	// RunProjectCreate makes to recheck for a phantom project immediately
-	// before staging (see runPhantomRecheck). Nil (the default/production
+	// RunProjectCreate makes to observe matching processes immediately
+	// before its one request (see createProcessEvidence). Nil (the default/production
 	// case) uses the real scan against the OS process table. Tests inject
 	// a fake here instead of needing real background processes to exercise
 	// the phantom/scan-error paths.
@@ -143,7 +143,7 @@ type CreateOptions struct {
 // validateDraftForCommit revalidates a *ProjectDraft and its destination
 // PURELY (no filesystem writes — Lstat/Stat reads only) at the commit
 // boundary, immediately before RunProjectCreate performs its first mutation
-// (os.MkdirTemp). This exists because a crafted or stale draft — e.g. one
+// (the kernel creation request). This exists because a crafted or stale draft — e.g. one
 // assembled directly in a test, or one whose AgentDirName somehow contains
 // "../escape" — must never reach MkdirTemp/directory-creation at all. A
 // parent review found NO such revalidation existed: RunProjectCreate's only
@@ -169,7 +169,11 @@ func validateDraftForCommit(draft *ProjectDraft, expectedProjectRoot string) err
 	if !filepath.IsAbs(draft.ProjectRoot) {
 		return fmt.Errorf("project directory must be an absolute path, got %q", draft.ProjectRoot)
 	}
-	if filepath.Clean(draft.ProjectRoot) != filepath.Clean(expectedProjectRoot) {
+	actualRoot, actualErr := filepath.EvalSymlinks(draft.ProjectRoot)
+	approvedRoot, approvedErr := filepath.EvalSymlinks(expectedProjectRoot)
+	actualInfo, actualStatErr := os.Stat(actualRoot)
+	approvedInfo, approvedStatErr := os.Stat(approvedRoot)
+	if actualErr != nil || approvedErr != nil || actualStatErr != nil || approvedStatErr != nil || !os.SameFile(actualInfo, approvedInfo) {
 		return fmt.Errorf("project directory %q does not match approved destination %q", draft.ProjectRoot, expectedProjectRoot)
 	}
 	if info, err := os.Stat(draft.ProjectRoot); err != nil {
@@ -206,7 +210,8 @@ func validateDraftForCommit(draft *ProjectDraft, expectedProjectRoot string) err
 	if draft.DraftPreset.Name == "" {
 		return fmt.Errorf("selected preset has no name")
 	}
-	if errs := draft.DraftPreset.Validate(); len(errs) > 0 {
+	reviewed := preset.Clone(*draft.DraftPreset, draft.DraftPreset.Name)
+	if errs := reviewed.Validate(); len(errs) > 0 {
 		return fmt.Errorf("selected preset %q is invalid: %w", draft.DraftPreset.Name, errs[0])
 	}
 
@@ -233,328 +238,201 @@ func validateSafeRelativeDirName(name string) error {
 	return nil
 }
 
-// runPhantomRecheck performs a typed, read-only inventory scan of
-// draft.ProjectRoot immediately before staging and fails closed on either a
-// phantom result (a LEFTOVER PROCESS references an agent dir under this
-// project even though .lingtai doesn't exist yet — almost always a remnant
-// of an interrupted prior attempt or a stale registration) or a scan error
-// itself. The former main (non-launcher) startup path had exactly this
-// phantom check via a shelled-out `self list` subprocess and "[PHANTOM]"
-// string match; the new strict launcher path bypassed it entirely until
-// this fix. This reimplements the same semantics using the typed
-// inventory.Scan/Options seam the `list` command itself is built on (see
-// list_unix.go), not the subprocess+string-match approach — and
-// additionally fails closed on a scan error (the legacy code silently
-// ignored `exec.Command(...).Output()`'s error return, which would fail
-// OPEN on a broken `list` subprocess).
-//
-// IMPORTANT: inventory.Snapshot.PhantomDirs is NOT by itself "there is a
-// leftover process" — detectPhantomDirs's FilterDir branch reports
-// filterDir as phantom purely because <filterDir>/.lingtai doesn't exist,
-// with NO regard for whether any process actually matched the filter. That
-// is trivially true for every never-yet-created project (including the
-// entire reason this launcher exists), so using PhantomDirs directly here
-// would reject creating a project in ANY empty directory. list_unix.go's
-// listMain already knows this and gates on it: it zeroes snap.PhantomDirs
-// whenever len(snap.Records) == 0 before ever consulting it. This function
-// applies that exact same gate — phantom means "there are matching records
-// for this project AND no .lingtai exists", never "no .lingtai exists" on
-// its own.
-//
-// opts.ScanInventory lets tests substitute a fake scanner; production always
-// leaves it nil and gets the real inventory.Scan against the OS process
-// table.
-func runPhantomRecheck(draft *ProjectDraft, opts CreateOptions) error {
-	scan := opts.ScanInventory
-	if scan == nil {
-		scan = func(projectRoot string) (inventory.Snapshot, error) {
-			return inventory.Scan(inventory.Options{FilterDir: projectRoot, SelfPID: os.Getpid()})
-		}
-	}
-	snap, err := scan(draft.ProjectRoot)
-	if err != nil {
-		return fmt.Errorf("phantom-project recheck failed: %w", err)
-	}
-	if len(snap.Records) > 0 && len(snap.PhantomDirs) > 0 {
-		return fmt.Errorf("phantom project state detected at %s — run `lingtai-tui list` / `lingtai-tui purge` before creating a project here", draft.ProjectRoot)
-	}
-	return nil
-}
-
-// RunProjectCreate is the SOLE product-visible project commit point (design
-// doc Invariant 4). It stages a new project in a sibling directory, builds
-// and validates it there, then publishes it with a single os.Rename. No
-// step before the rename touches draft.ProjectRoot itself except the final
-// Lstat-and-rename; no step after the rename is allowed to delete or
-// rewrite the already-published .lingtai/.
-//
-// Sequence:
-//  0. Validate: validateDraftForCommit (pure) revalidates the draft and
-//     destination — traversal-safe agent dir name, non-blank required
-//     fields, coherent preset, recipe invariants — then runPhantomRecheck
-//     (read-only inventory scan) fails closed on phantom process state or a
-//     scan error. Both run BEFORE any write; see design doc's commit-
-//     boundary validation requirement.
-//  1. Revalidate: Lstat draft.ProjectRoot/.lingtai must still be absent —
-//     rejects concurrent creation and symlinks (Lstat, not Stat: a symlink
-//     counts as "exists", never followed/created through).
-//  2. Create staging: os.MkdirTemp(draft.ProjectRoot, ".lingtai.create-*")
-//     — guaranteed sibling, same filesystem as the final path, so the
-//     eventual rename is atomic. A marker file naming this attempt is
-//     written FIRST, before any build step, so cleanup can always prove
-//     ownership before deleting.
-//  3. Build: process.InitProject on the staging dir (called as-is, not
-//     forked), then resolveDraftPreset + preset.GenerateInitJSONWithOpts +
-//     the recipe apply chain, all against the staging dir. A dirty draft is
-//     normalized/stamped once, forced to SourceSaved, and used in memory.
-//  4. Validate: exactly one orchestrator, using the same DetectOrchestrators/
-//     IsOrchestrator helpers main.go's own invariant checks use.
-//  5. Persist dependencies: save a dirty preset (or materialize a cold
-//     TUI-owned template), verify the exact RefFor, and persist/verify any
-//     pending API key and Codex token bundle. Failure cleans staging and
-//     returns Committed=false. These valid global writes are not rolled back
-//     if a later dependency or rename step fails.
-//  6. Publish: os.Rename(staging, final). This is the ONLY line in this
-//     file that may cause draft.ProjectRoot/.lingtai to start existing.
-//  7. Post-commit (best-effort, never rolls back): save theme/language,
-//     config.Register, PopulateBundledLibrary, and attempt agent launch.
-//     Failures here are warnings, not CreateResult.Err.
+// RunProjectCreate consumes fresh interactive creation, not a second domain
+// owner. Kernel owns staging, Recipe, readers and exclusive publication. Go
+// persists prerequisites after readiness and runs UI work after created exit 0.
 func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
-	result := CreateResult{}
-	if draft == nil {
-		result.Err = fmt.Errorf("no project draft")
-		result.FailedPhase = PhaseCreateStaging
+	result := CreateResult{FailedPhase: PhaseValidateDraft}
+	if err := validateDraftForCommit(draft, opts.ExpectedProjectRoot); err != nil {
+		// Do not surface arbitrary preset validation values (they may be credentials).
+		result.Err = fmt.Errorf("project draft validation failed; review destination, identity and selected preset")
 		return result
 	}
-	root := draft.ProjectRoot
-	finalDir := filepath.Join(root, ".lingtai")
-
-	fail := func(phase CreatePhase, err error) CreateResult {
-		result.FailedPhase = phase
+	chosen, err := resolveDraftPreset(draft)
+	if err != nil {
+		result.Err = fmt.Errorf("selected preset unavailable")
+		return result
+	}
+	// Deep copy with UseNumber: normalization/stamping must not mutate Review or
+	// round large/unknown preset fields through float64.
+	data, err := json.Marshal(chosen.Manifest)
+	if err != nil {
+		result.Err = fmt.Errorf("selected preset cannot be serialized")
+		return result
+	}
+	chosen.Manifest = nil // Decoder must not reuse the Review map.
+	if err := preset.DecodeJSONUseNumber(data, &chosen.Manifest); err != nil {
+		result.Err = fmt.Errorf("selected preset cannot be read")
+		return result
+	}
+	// The exchange is JSON, not the older UI float64 context representation.
+	// Relocate legacy context metadata without rounding exact JSON integers.
+	if legacy, exists := chosen.Manifest["context_limit"]; exists {
+		delete(chosen.Manifest, "context_limit")
+		if llm, ok := chosen.Manifest["llm"].(map[string]interface{}); ok {
+			if _, canonical := llm["context_limit"]; !canonical {
+				llm["context_limit"] = legacy
+			}
+		}
+	}
+	if err := chosen.NormalizeLegacyCapabilities(); err != nil {
+		result.Err = fmt.Errorf("selected preset cannot be normalized")
+		return result
+	}
+	if draft.DraftPresetDirty {
+		chosen = stampAutoEnvVar(chosen, draft.ExistingKeys.keyNames())
+		preset.SyncCapabilityAPIKeyEnv(chosen.Manifest)
+		chosen.Source = preset.SourceSaved
+	}
+	request, err := interactiveRequest(draft, opts, chosen)
+	if err != nil {
 		result.Err = err
 		return result
 	}
-	injected := func(phase CreatePhase) error {
-		if opts.InjectFailure == nil {
-			return nil
+	python := opts.LingtaiCmd
+	if python == "" {
+		resolve := opts.ResolveLingtaiCmd
+		if resolve == nil {
+			resolve = config.LingtaiCmd
 		}
-		return opts.InjectFailure(phase)
+		python = resolve(opts.GlobalDir)
 	}
-
-	// 0a. Pure revalidation of the draft/destination — see
-	// validateDraftForCommit's doc comment. Must run before ANY write,
-	// including the injected-failure seam below (there is nothing to
-	// "inject a failure into" here — an invalid draft is refused
-	// unconditionally, the same way it would be in production).
-	if err := validateDraftForCommit(draft, opts.ExpectedProjectRoot); err != nil {
-		return fail(PhaseValidateDraft, err)
+	if python == "" {
+		result.Err = fmt.Errorf("installed kernel unavailable; use the normal installer explicitly; no legacy creation fallback")
+		return result
 	}
-	if err := injected(PhaseValidateDraft); err != nil {
-		return fail(PhaseValidateDraft, err)
+	driver := opts.CreateInteractive
+	if driver == nil {
+		driver = process.CreateInteractiveProject
 	}
-
-	// 0b. Phantom-project recheck — read-only inventory scan, fails closed
-	// on phantom state or a scan error. See runPhantomRecheck's doc
-	// comment for why this reuses inventory.Scan instead of reviving the
-	// legacy shelled-out `self list` + "[PHANTOM]" string match.
-	if err := runPhantomRecheck(draft, opts); err != nil {
-		return fail(PhaseValidateDraft, err)
-	}
-
-	// 1. Revalidate: Lstat (never Stat) so a symlink is treated as
-	// "exists" rather than followed/created through, and a concurrently
-	// created project is rejected rather than merged/overwritten.
-	if _, err := os.Lstat(finalDir); err == nil {
-		return fail(PhaseCreateStaging, fmt.Errorf("%s already exists (concurrent creation?)", finalDir))
-	} else if !os.IsNotExist(err) {
-		return fail(PhaseCreateStaging, fmt.Errorf("checking %s: %w", finalDir, err))
-	}
-	if err := injected(PhaseCreateStaging); err != nil {
-		return fail(PhaseCreateStaging, err)
-	}
-
-	// 2. Create staging as a sibling of the final dir (same filesystem —
-	// MkdirTemp with a dir argument guarantees this, which is what makes
-	// step 6's rename atomic).
-	stagingDir, err := os.MkdirTemp(root, ".lingtai.create-*")
+	// Last outer observation immediately before the one physical request. No
+	// absence-only phantom heuristic, subprocess list parsing or mutation here.
+	request.ProcessEvidence = createProcessEvidence(draft.ProjectRoot, opts)
+	published, err := driver(opts.Context, python, request, func() bool {
+		result.FailedPhase = PhasePersistDependencies
+		if opts.InjectFailure != nil && opts.InjectFailure(PhasePersistDependencies) != nil {
+			return false
+		}
+		// Never serialize these errors or send them to the child: the ack is a bool.
+		return persistCreateDependencies(draft, opts, chosen) == nil
+	})
 	if err != nil {
-		return fail(PhaseCreateStaging, fmt.Errorf("create staging dir: %w", err))
+		result.Err = err
+		var outcome *process.ProjectOperationError
+		result.Unknown = !errors.As(err, &outcome) || !outcome.Known
+		return result
 	}
-	nonce := filepath.Base(stagingDir)
-	cleanupStaging := func() {
-		removeOwnedStaging(stagingDir, nonce)
-	}
-	// Marker written FIRST, before any build step, so a later cleanup
-	// (normal failure path here, or a future launcher-side Discard after a
-	// kill -9) can always prove this directory belongs to this attempt
-	// before deleting it. See design doc Invariant 5.
-	if err := os.WriteFile(filepath.Join(stagingDir, stagingMarkerName), []byte(nonce+"\n"), 0o600); err != nil {
-		cleanupStaging()
-		return fail(PhaseCreateStaging, fmt.Errorf("write staging marker: %w", err))
-	}
+	result.Committed = true
+	result.OrchName = published.AgentName
+	finalDir := filepath.Join(draft.ProjectRoot, ".lingtai")
+	result.OrchDir = filepath.Join(finalDir, published.DirectoryName)
+	result.PostCommitWarnings = append(result.PostCommitWarnings, published.Warnings...)
+	runPostCommit(draft, opts, finalDir, &result)
+	return result
+}
 
-	// 3a. process.InitProject against staging — called as-is, never
-	// forked/duplicated.
-	if err := injected(PhaseInitProject); err != nil {
-		cleanupStaging()
-		return fail(PhaseInitProject, err)
-	}
-	if err := process.InitProject(stagingDir); err != nil {
-		cleanupStaging()
-		return fail(PhaseInitProject, fmt.Errorf("init staging project: %w", err))
-	}
-
-	// 3b. Resolve the draft's preset choice in memory. Dirty presets are
-	// normalized/stamped here so staged init.json and the later saved file use
-	// one object, but no preset dependency is persisted until AFTER every
-	// staged build/recipe/orchestrator validation succeeds.
-	if err := injected(PhaseApplyPreset); err != nil {
-		cleanupStaging()
-		return fail(PhaseApplyPreset, err)
-	}
-	chosenPreset, err := resolveDraftPreset(draft)
+// createProcessEvidence reports a fresh matching OS inventory, not liveness or
+// a kernel lease. A failed/mismatched observation is unknown, never clean.
+func createProcessEvidence(root string, opts CreateOptions) string {
+	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		cleanupStaging()
-		return fail(PhaseApplyPreset, err)
+		return "unknown"
 	}
-	if draft.DraftPresetDirty && draft.DraftPreset != nil {
-		toSave := stampAutoEnvVar(*draft.DraftPreset, draft.ExistingKeys.keyNames())
-		preset.SyncCapabilityAPIKeyEnv(toSave.Manifest)
-		// Every editor result is hosted by preset.Save in saved/. Stamp the
-		// same normalized object before init.json is generated so its RefFor
-		// names the exact file the dependency phase will persist.
-		toSave.Source = preset.SourceSaved
-		chosenPreset = toSave
+	rootInfo, err := os.Stat(resolved)
+	if err != nil || !rootInfo.IsDir() {
+		return "unknown"
 	}
+	scan := opts.ScanInventory
+	if scan == nil {
+		scan = func(root string) (inventory.Snapshot, error) {
+			// Observe all rows so lexical symlink aliases cannot be filtered out before
+			// we compare the independently resolved existing project root.
+			return inventory.Scan(inventory.Options{SelfPID: os.Getpid()})
+		}
+	}
+	snap, err := scan(resolved)
+	if err != nil {
+		return "unknown"
+	}
+	sameRoot := func(candidate string) (bool, bool) {
+		path, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			return false, false
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, false
+		}
+		return os.SameFile(info, rootInfo), true
+	}
+	if snap.FilterDir != "" {
+		same, valid := sameRoot(snap.FilterDir)
+		if !valid || !same {
+			return "unknown"
+		}
+	}
+	for _, r := range snap.Records {
+		candidate := r.Project
+		if candidate == "" && r.AgentDir != "" {
+			candidate = inventory.ProjectFromAgentDir(r.AgentDir)
+		}
+		if candidate == "" {
+			return "unknown"
+		}
+		same, valid := sameRoot(candidate)
+		if !valid {
+			return "unknown"
+		} // Incomplete evidence is not a clean scan.
+		if same {
+			return "blocked"
+		}
+	}
+	return "clean"
+}
 
-	agentName := draft.AgentName
-	if agentName == "" {
-		agentName = "orchestrator"
-	}
-	dirName := draft.AgentDirName
-	if dirName == "" {
-		dirName = agentName
-	}
-	orchDir := filepath.Join(stagingDir, dirName)
-	result.OrchDir = filepath.Join(finalDir, dirName) // final path, post-rename
-	result.OrchName = agentName
-
+func interactiveRequest(draft *ProjectDraft, opts CreateOptions, chosen preset.Preset) (process.InteractiveProjectRequest, error) {
 	lang := draft.AgentOpts.Language
 	if lang == "" {
 		lang = "en"
 	}
-
-	// 3c. Recipe bundle staging + init.json + apply — all against the
-	// staging dir, exactly mirroring firstrun.go's performRecipeSave but
-	// targeting stagingDir instead of the real project. The wizard always
-	// stages the adaptive recipe (preset.DefaultRecipe), resolved by name
-	// from the global recipes tree.
-	if err := injected(PhaseApplyRecipe); err != nil {
-		cleanupStaging()
-		return fail(PhaseApplyRecipe, err)
+	covenant, err := preset.CreationCovenant(opts.GlobalDir, lang, draft.AgentOpts.CovenantFile)
+	if err != nil {
+		return process.InteractiveProjectRequest{}, fmt.Errorf("creation covenant must be readable nonempty UTF-8 text")
 	}
-	if draft.RecipeName != "" {
-		stagedProjectRoot, err := copyRecipeBundle(stagingDir, opts.GlobalDir, preset.DefaultRecipe)
-		if err != nil {
-			cleanupStaging()
-			return fail(PhaseApplyRecipe, fmt.Errorf("stage recipe bundle: %w", err))
+	pad := ""
+	if draft.AgentOpts.CommentFile != "" {
+		data, err := os.ReadFile(draft.AgentOpts.CommentFile)
+		if err != nil || !utf8.Valid(data) {
+			return process.InteractiveProjectRequest{}, fmt.Errorf("creation Pad input must be readable UTF-8 text")
 		}
-		agentOpts := draft.AgentOpts
-		if commentPath := resolveRecipeComment(stagedProjectRoot, lang); commentPath != "" {
-			agentOpts.CommentFile = commentPath
+		pad = string(data) // Current Pad input, NOT a retired comment_file setting.
+	}
+	dir := draft.AgentDirName
+	if dir == "" {
+		dir = draft.AgentName
+	}
+	// Public normalized snapshot retains unknown manifest extensions and exact
+	// numbers. It is not the preset profile, credential store or wizard draft.
+	manifest := chosen.Manifest
+	mcp := map[string]interface{}{}
+	for _, name := range draft.AgentOpts.Addons {
+		module, env, rel, ok := preset.DefaultMCPSpec(name)
+		if !ok {
+			continue
 		}
-		if covenantPath := resolveRecipeCovenant(stagedProjectRoot, lang); covenantPath != "" {
-			agentOpts.CovenantFile = covenantPath
-		}
-		if err := preset.GenerateInitJSONWithOpts(chosenPreset, agentName, dirName, stagingDir, opts.GlobalDir, agentOpts); err != nil {
-			cleanupStaging()
-			return fail(PhaseApplyRecipe, fmt.Errorf("write staged init.json: %w", err))
-		}
-		humanDir := filepath.Join(stagingDir, "human")
-		humanAddr := "human"
-		if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
-			humanAddr = humanNode.Address
-		}
-		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, preset.DefaultRecipe, lang); err != nil {
-			cleanupStaging()
-			return fail(PhaseApplyRecipe, fmt.Errorf("apply staged recipe: %w", err))
-		}
-	} else {
-		// No recipe on the draft (defensive — the wizard always stages
-		// adaptive) — still need a valid init.json for the orchestrator so
-		// the "exactly one orchestrator" invariant and the eventual launch
-		// succeed.
-		if err := preset.GenerateInitJSONWithOpts(chosenPreset, agentName, dirName, stagingDir, opts.GlobalDir, draft.AgentOpts); err != nil {
-			cleanupStaging()
-			return fail(PhaseApplyRecipe, fmt.Errorf("write staged init.json: %w", err))
-		}
+		mcp[name] = map[string]interface{}{"type": "stdio", "command": config.VenvPython(filepath.Join(opts.GlobalDir, "runtime", "venv")), "args": []string{"-m", module}, "env": map[string]string{env: rel}}
 	}
-
-	// 4. Validate the staged tree: exactly one orchestrator (the same
-	// invariant main.go enforces on every launch, reused via the tui
-	// package's exported detection helpers rather than re-implemented).
-	if err := injected(PhaseValidate); err != nil {
-		cleanupStaging()
-		return fail(PhaseValidate, err)
+	var commands []string
+	for _, command := range DefaultCommands() {
+		commands = append(commands, fmt.Sprintf("  - /%s — %s", command.Name, i18n.TIn(lang, command.Detail)))
 	}
-	orchestrators := DetectOrchestrators(stagingDir)
-	if len(orchestrators) != 1 {
-		cleanupStaging()
-		return fail(PhaseValidate, fmt.Errorf("staged project has %d orchestrators, want exactly 1", len(orchestrators)))
-	}
-	if _, err := os.Stat(filepath.Join(orchDir, "init.json")); err != nil {
-		cleanupStaging()
-		return fail(PhaseValidate, fmt.Errorf("staged orchestrator missing init.json: %w", err))
-	}
-
-	// 5. Persist and verify every launch-critical dependency only after the
-	// staged project has passed validation, but before the project becomes
-	// visible at its final path. These writes are intentionally not rolled
-	// back if the later rename fails: they are valid user-owned preset or
-	// credential state, and deleting a pre-existing/replaced value would be
-	// unsafe. The project itself remains uncommitted until rename succeeds.
-	if err := injected(PhasePersistDependencies); err != nil {
-		cleanupStaging()
-		return fail(PhasePersistDependencies, err)
-	}
-	if err := persistCreateDependencies(draft, opts, chosenPreset); err != nil {
-		cleanupStaging()
-		return fail(PhasePersistDependencies, err)
-	}
-
-	// 6. Publish. This is the single product-visible commit point: the
-	// instant this os.Rename succeeds, the final .lingtai/ exists and
-	// nothing below this line may delete or roll it back.
-	if err := injected(PhaseRename); err != nil {
-		cleanupStaging()
-		return fail(PhaseRename, err)
-	}
-	// Re-check immediately before rename to narrow (not eliminate — a
-	// true TOCTOU race remains theoretically possible, os.Rename itself
-	// has no "fail if destination exists and is a directory" atomic
-	// primitive on all platforms) the concurrent-creation window opened
-	// since step 1.
-	if _, err := os.Lstat(finalDir); err == nil {
-		cleanupStaging()
-		return fail(PhaseRename, fmt.Errorf("%s appeared during staging (concurrent creation?)", finalDir))
-	}
-	if err := os.Rename(stagingDir, finalDir); err != nil {
-		cleanupStaging()
-		return fail(PhaseRename, fmt.Errorf("publish project: %w", err))
-	}
-	result.Committed = true
-	result.OrchDir = filepath.Join(finalDir, dirName)
-
-	// Staging is gone (renamed away) — the marker file travelled with it
-	// into the final directory. Remove it now that it has served its
-	// purpose; a failure here is cosmetic and does not affect validity.
-	_ = os.Remove(filepath.Join(finalDir, stagingMarkerName))
-
-	// 7. Post-commit: never rolls back. Every failure below is collected
-	// as a warning; RunProjectCreate still returns Committed=true.
-	runPostCommit(draft, opts, finalDir, &result)
-
-	return result
+	return process.InteractiveProjectRequest{
+		ProjectDir: draft.ProjectRoot, ApprovedRoot: opts.ExpectedProjectRoot,
+		AgentName: draft.AgentName, DirectoryName: dir, PresetRef: preset.RefFor(chosen), PresetManifest: manifest,
+		Options: process.InteractiveProjectOptions{Language: lang, Covenant: covenant, Karma: draft.AgentOpts.Karma, Nirvana: draft.AgentOpts.Nirvana, Pad: pad,
+			EnvFile: config.EnvFilePath(opts.GlobalDir), VenvPath: filepath.Join(opts.GlobalDir, "runtime", "venv"), Addons: draft.AgentOpts.Addons, MCP: mcp, AllowedPresets: draft.AgentOpts.AllowedPresets},
+		Recipe: draft.RecipeName, Location: "unknown", Commands: strings.Join(commands, "\n"),
+	}, nil
 }
 
 // persistCreateDependencies makes the selected preset reference and any
@@ -756,28 +634,11 @@ func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, res
 	}
 }
 
-// removeOwnedStaging deletes a staging directory ONLY after confirming its
-// marker file exists and matches the expected nonce — cleanup must never
-// blind-delete a ".lingtai.create-*" directory it cannot prove it created
-// (design doc Invariant 5). Safe to call even if the directory was already
-// partially built or removed.
-func removeOwnedStaging(stagingDir, nonce string) {
-	markerPath := filepath.Join(stagingDir, stagingMarkerName)
-	data, err := os.ReadFile(markerPath)
-	if err != nil {
-		return // no marker (or unreadable) — cannot prove ownership, refuse to delete
-	}
-	if strings.TrimSpace(string(data)) != nonce {
-		return // marker present but doesn't match — not ours, refuse to delete
-	}
-	_ = os.RemoveAll(stagingDir)
-}
-
 // DetectUnfinishedStaging performs a READ-ONLY scan of root for leftover
 // ".lingtai.create-*" directories (e.g. left behind by a kill -9 mid-build)
 // and returns the ones that carry a valid ownership marker WHOSE CONTENT
-// matches the directory's own name — the same check removeOwnedStaging/
-// DiscardUnfinishedStaging require before deleting. A directory that merely
+// matches the directory's own name — the same check the legacy explicit
+// DiscardUnfinishedStaging requires before deleting. A directory that merely
 // has *a* marker file present, with stale/foreign/corrupt content, must
 // never be offered as "yours to discard" any more than a directory with no
 // marker at all: presence-only used to be sufficient here (a narrower check
@@ -814,8 +675,7 @@ func DetectUnfinishedStaging(root string) []string {
 }
 
 // DiscardUnfinishedStaging removes a leftover staging directory found by
-// DetectUnfinishedStaging, gated by the same ownership-marker check
-// removeOwnedStaging uses. stagingDir must be an absolute path previously
+// DetectUnfinishedStaging, gated by the legacy ownership-marker check. stagingDir must be an absolute path previously
 // returned by DetectUnfinishedStaging.
 func DiscardUnfinishedStaging(stagingDir string) error {
 	markerPath := filepath.Join(stagingDir, stagingMarkerName)

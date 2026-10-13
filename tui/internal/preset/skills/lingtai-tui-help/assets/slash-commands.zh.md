@@ -2,6 +2,27 @@
 
 斜杠命令驱动 `lingtai-tui` 中除普通对话之外的一切：打开视图、管理智能体生命周期、配置运行时。
 
+## 新项目确认与结果不确定时的处理
+
+无项目启动页的 Review 在按下 **Start project** 之前保持零写入。需要已安装的
+内核支持 `project inspect` 与 `project create-interactive`；旧内核不支持时会提示
+显式使用正常安装器，不会暗中升级，也不会回退到 Go 创建项目。既有登录、setup、
+无界面命令及 Avatar 均保留。
+
+确认后，内核在隐藏暂存目录构建项目、应用本地／adaptive Recipe 并验证 reader，
+随后 Go 才保存并核验所选 preset 与待写凭证，再由内核发布 `.lingtai/`。若后续
+发布失败，外部 preset、凭证或 `.recipe` 写入可能保留；已确认创建后，注册、偏好
+或启动的警告不会撤销项目。
+
+超时、取消、交换中断或非预期响应表示**结果未知**，并不证明项目未创建。不要
+反复确认、删除最终项目或批量清扫隐藏暂存目录。应退出当前尝试，先检查已批准的
+项目目录。只读命令 `lingtai-agent project inspect` 从 stdin 接收
+`{"project_dir":"/absolute/project"}`；它不初始化目录骨架，也不判断进程存活。
+旧启动页 Discard 只识别旧 Go 标记，不接管新的内核尝试。本次仅迁移检查与全新
+交互创建；既有项目、导入、Recipe 协调及生命周期迁移另行继续。
+
+实现与所有者承诺：[TUI 契约](../../../../../CONTRACT.md#project-inspection-and-fresh-interactive-creation)。
+
 ## 使用命令面板
 
 - 在消息框中输入 `/` 打开**命令面板**。

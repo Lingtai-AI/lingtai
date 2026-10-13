@@ -299,8 +299,8 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ProjectDraftConfirmedMsg:
-		if m.view != launcherViewCreate {
-			return m, nil
+		if m.view != launcherViewCreate || (m.createResult != nil && m.createResult.Unknown) {
+			return m, nil // Unknown publication is never replayed from the review screen.
 		}
 		// This is the one point where the launcher performs a real
 		// filesystem mutation: RunProjectCreate's staging→validate→rename
@@ -313,10 +313,8 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.createResult = &res
 		if res.Err != nil && !res.Committed {
 			m.createErr = res.Err.Error()
-			// Pre-rename failure: no project was created. Stay on the
-			// review step (already the current firstRun step) so the
-			// user sees the error and can retry/adjust without losing
-			// their draft.
+			// Known refusal can be reviewed; unknown publication requires
+			// leaving this attempt and explicit filesystem reconciliation.
 			return m, nil
 		}
 		m.result = LauncherResult{

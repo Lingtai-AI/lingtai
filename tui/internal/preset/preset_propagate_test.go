@@ -15,9 +15,25 @@ func seedAgent(t *testing.T, lingtaiDir, name string, presetBlock map[string]int
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Policy writes run through the actual init reader, not an unvalidated
+	// preset-block-only document. Persist each referenced input first.
+	for _, key := range []string{"default", "active"} {
+		if ref, ok := presetBlock[key].(string); ok {
+			fixturePresetReference(t, ref, codexPreset())
+		}
+	}
+	for _, ref := range presetBlock["allowed"].([]interface{}) {
+		fixturePresetReference(t, ref.(string), codexPreset())
+	}
+	env := filepath.Join(t.TempDir(), "fixture.env")
+	if err := os.WriteFile(env, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	init := map[string]interface{}{
+		"env_file": env,
 		"manifest": map[string]interface{}{
 			"agent_name": name,
+			"llm":        codexPreset().Manifest["llm"],
 			"preset":     presetBlock,
 		},
 	}
@@ -44,9 +60,11 @@ func readPresetBlock(t *testing.T, lingtaiDir, name string) map[string]interface
 // the new {default, allowed} to every agent and demotes active when
 // the agent's old active is no longer in the allowed list.
 func TestPropagatePresetPolicy_RewritesAllAgents(t *testing.T) {
-	tmp := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	tmp := filepath.Join(t.TempDir(), ".lingtai")
 
 	mimo := "~/.lingtai-tui/presets/saved/mimo-pro.json"
+	fixturePresetReference(t, mimo, codexPreset())
 	codex := "~/.lingtai-tui/presets/saved/codex-gpt5.5.json"
 	deepseek := "~/.lingtai-tui/presets/saved/deepseek_flash.json"
 	zhipu := "~/.lingtai-tui/presets/templates/zhipu.json"
@@ -75,7 +93,7 @@ func TestPropagatePresetPolicy_RewritesAllAgents(t *testing.T) {
 
 	// New network policy: only mimo and deepseek are allowed; mimo is default.
 	count, err := PropagatePresetPolicy(tmp, "" /* no skip */, mimo,
-		[]string{mimo, deepseek})
+		[]string{mimo, deepseek}, fixtureProjectPython(t))
 	if err != nil {
 		t.Fatalf("PropagatePresetPolicy: %v", err)
 	}
@@ -130,8 +148,10 @@ func TestPropagatePresetPolicy_RewritesAllAgents(t *testing.T) {
 // passed via skipDir (the wizard's primary target — already saved) and
 // the human pseudo-agent are not rewritten.
 func TestPropagatePresetPolicy_SkipsTargetAndHuman(t *testing.T) {
-	tmp := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	tmp := filepath.Join(t.TempDir(), ".lingtai")
 	mimo := "~/.lingtai-tui/presets/saved/mimo-pro.json"
+	fixturePresetReference(t, mimo, codexPreset())
 	codex := "~/.lingtai-tui/presets/saved/codex-gpt5.5.json"
 
 	// Wizard's primary target — should NOT be touched by propagation.
@@ -144,7 +164,7 @@ func TestPropagatePresetPolicy_SkipsTargetAndHuman(t *testing.T) {
 		"allowed": []interface{}{codex},
 	})
 
-	count, _ := PropagatePresetPolicy(tmp, "alice", mimo, []string{mimo})
+	count, _ := PropagatePresetPolicy(tmp, "alice", mimo, []string{mimo}, fixtureProjectPython(t))
 	if count != 1 {
 		t.Errorf("count = %d, want 1 (only bob propagated)", count)
 	}
@@ -172,8 +192,10 @@ func TestPropagatePresetPolicy_SkipsTargetAndHuman(t *testing.T) {
 // without init.json are silently skipped (e.g. anatomy_* sub-projects,
 // .secrets, etc).
 func TestPropagatePresetPolicy_SkipsNonAgentDirs(t *testing.T) {
-	tmp := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	tmp := filepath.Join(t.TempDir(), ".lingtai")
 	mimo := "~/.lingtai-tui/presets/saved/mimo-pro.json"
+	fixturePresetReference(t, mimo, codexPreset())
 	codex := "~/.lingtai-tui/presets/saved/codex.json"
 
 	seedAgent(t, tmp, "alice", map[string]interface{}{
@@ -186,7 +208,7 @@ func TestPropagatePresetPolicy_SkipsNonAgentDirs(t *testing.T) {
 		}
 	}
 
-	count, err := PropagatePresetPolicy(tmp, "", mimo, []string{mimo})
+	count, err := PropagatePresetPolicy(tmp, "", mimo, []string{mimo}, fixtureProjectPython(t))
 	if err != nil {
 		t.Fatalf("PropagatePresetPolicy: %v", err)
 	}
@@ -199,8 +221,10 @@ func TestPropagatePresetPolicy_SkipsNonAgentDirs(t *testing.T) {
 // that one bad init.json doesn't prevent the rest of the network from
 // being rewritten.
 func TestPropagatePresetPolicy_MalformedAgentDoesntBlockOthers(t *testing.T) {
-	tmp := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	tmp := filepath.Join(t.TempDir(), ".lingtai")
 	mimo := "~/.lingtai-tui/presets/saved/mimo-pro.json"
+	fixturePresetReference(t, mimo, codexPreset())
 	codex := "~/.lingtai-tui/presets/saved/codex.json"
 
 	seedAgent(t, tmp, "alice", map[string]interface{}{
@@ -214,7 +238,7 @@ func TestPropagatePresetPolicy_MalformedAgentDoesntBlockOthers(t *testing.T) {
 	os.MkdirAll(bobDir, 0o755)
 	os.WriteFile(filepath.Join(bobDir, "init.json"), []byte("not json"), 0o644)
 
-	count, err := PropagatePresetPolicy(tmp, "", mimo, []string{mimo})
+	count, err := PropagatePresetPolicy(tmp, "", mimo, []string{mimo}, fixtureProjectPython(t))
 	// One agent failed (bob); error should be reported, count should be 2.
 	if err == nil {
 		t.Errorf("expected first-error reported for malformed agent, got nil")

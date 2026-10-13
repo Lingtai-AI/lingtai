@@ -11,6 +11,14 @@ related_files:
   - tui/internal/process/kill_windows.go
   - tui/internal/process/launcher.go
   - tui/internal/process/launcher_test.go
+  - tui/internal/process/project_interactive.go
+  - tui/internal/process/project_inspection_exchange.go
+  - tui/internal/process/project_interactive_test.go
+  - tui/internal/process/project_configuration.go
+  - tui/internal/process/project_recipe.go
+  - tui/internal/process/project_recipe_test.go
+  - tui/internal/process/project_configuration_test.go
+  - tui/internal/preset/ANATOMY.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -23,7 +31,7 @@ maintenance: |
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in the same commit as code changes.
 
-`process` is the TUI's subprocess boundary with the Python kernel: it runs the noninteractive fresh-seed `lingtai-agent project create` command with literal argv and captured output, and it starts/terminates the guarded `lingtai-agent run <dir>` child under the managed runtime venv. On POSIX, the run child receives a canonical-agent-directory environment marker so compatible kernels expose the resident ACP socket for Puffo attachment; the TUI never connects to that socket. It is the *only* direct process-level coupling between the two languages — after a create or launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation. Puffo ACP processes are detected for launch prevention but are not owned or terminated by this package.
+`process` is the TUI's subprocess boundary with the Python kernel: it runs read-only Project inspection, the two-phase interactive creation exchange, the noninteractive fresh-seed `lingtai-agent project create` command with literal argv and captured output, and it starts/terminates the guarded `lingtai-agent run <dir>` child under the managed runtime venv. On POSIX, the run child receives a canonical-agent-directory environment marker so compatible kernels expose the resident ACP socket for Puffo attachment; the TUI never connects to that socket. It is the *only* direct process-level coupling between the two languages — after a create or launch, the TUI observes the agent purely through its working directory (`tui/internal/fs/`). Detection logic itself lives one layer down in `tui/internal/processscan/`, which this package re-exports so low-level callers that cannot import `process` still share one tested implementation. Puffo ACP processes are detected for launch prevention but are not owned or terminated by this package.
 
 ## Components
 
@@ -34,18 +42,26 @@ maintenance: |
 | `IsAgentRunning` | `tui/internal/process/check.go:40` | the boolean launch/refresh gate built on that scan |
 | `ErrAgentAlreadyRunning` / `ErrPuffoManagedAgent` | `tui/internal/process/launcher.go:21-35` | sentinels for duplicate launch and Puffo-owned lifecycle rejection, with `HasPuffoManagedAgent` scan |
 | `ProjectCreateRequest` / `ProjectCreateResult` / `ProjectCreateError` | `tui/internal/process/launcher.go:39,49,70` | literal create inputs plus captured accepted output or classified handler/transport failure |
-| `kernelCLI` / `kernelCLIForOS` | `tui/internal/process/launcher.go:164,170` | resolves the managed sibling executable; the production resolver supplies `runtime.GOOS` while the suffix decision remains platform-neutral and unit-testable |
-| `CreateProject` | `tui/internal/process/launcher.go:183` | synchronously runs `lingtai-agent project create --dir --name --preset --covenant-file --json`; accepts only exit-0 one-object `created` output for the requested agent with a nonempty canonical `preset_ref`, and preserves all other terminal outcomes for conservative callers |
-| `InitProject` | `tui/internal/process/launcher.go:96` | legacy TUI-owned `.lingtai/` skeleton helper retained for its independent callers; headless spawn does not use it |
-| `LaunchAgent` | `tui/internal/process/launcher.go:308` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking; the launch boundary scopes the POSIX resident ACP opt-in to the canonical agent directory |
-| `ForceLaunchAgent` | `tui/internal/process/launcher.go:321` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
+| `kernelCLI` / `kernelCLIForOS` | `tui/internal/process/launcher.go:131,137` | resolves the managed sibling executable; the production resolver supplies `runtime.GOOS` while the suffix decision remains platform-neutral and unit-testable |
+| `CreateProject` | `tui/internal/process/launcher.go:150` | synchronously runs `lingtai-agent project create --dir --name --preset --covenant-file --json`; accepts only exit-0 one-object `created` output for the requested agent with a nonempty canonical `preset_ref`, and preserves all other terminal outcomes for conservative callers |
+| `InitProject` | `tui/internal/process/launcher.go:96` | kernel `project initialize` adapter taking the parent project root and existing runtime resolver; no Go skeleton writes |
+| `LaunchAgent` | `tui/internal/process/launcher.go:275` | the guarded launch: refuses when an agent is already running in the workdir, then spawns the kernel with the resolved venv interpreter, log redirection, and PID tracking; the launch boundary scopes the POSIX resident ACP opt-in to the canonical agent directory |
+| `ForceLaunchAgent` | `tui/internal/process/launcher.go:288` | the same spawn with the already-running guard deliberately skipped, for explicit operator override |
 | `TerminateAgentProcesses` | `tui/internal/process/kill_unix.go:18`, `tui/internal/process/kill_windows.go:18` | per-OS termination of TUI-owned run processes; `terminateError` (`kill_unix.go:71`, `kill_windows.go:52`) names the PIDs that survived |
+
+- `InspectProject` and `CreateInteractiveProject` (`tui/internal/process/project_interactive.go`) use the existing `kernelCLI` interpreter-sibling selection with literal operation argv and explicit JSON stdin. Strict envelopes, bounded capture, attempt/ref acknowledgement, child exit and deadline distinguish known refusal from unknown publication; neither path retries or deletes a tree. `project_interactive_test.go` supplies portable real child-process fixtures (source alone is not cross-language acceptance).
+
+- `project_configuration.go` is the concrete PRJ003 CLI consumer for initialize,
+  configure, policy/config propagation and combined rehydrate. It reuses sibling
+  executable resolution, strict JSON and bounded capture, retains typed source
+  receipts/counts, and rejects unknown transport without retry/repair/fallback.
+  `project_configuration_test.go` extends the existing portable child fixture.
 
 ## Connections
 
 - **Calls `tui/internal/processscan/`** for all process-table matching — this package adds launch/terminate policy, not parsing.
 - **Calls `tui/internal/config/`** to resolve the runtime venv interpreter (`~/.lingtai-tui/runtime/venv`) whose sibling `lingtai-agent` executable handles both create and run.
-- **Called by `tui/main.go`** (interactive start, `purge`, `suspend`), by `tui/internal/tui/` (`launcher.go`, the network home's start/stop actions), and by `tui/internal/headless/spawn.go`, which alone uses `CreateProject` for noninteractive fresh seeding before the existing launch path.
+- **Called by `tui/main.go`** (interactive start, `purge`, `suspend`), by `tui/internal/tui/` (`launcher.go`, the network home's start/stop actions), and by `tui/internal/headless/spawn.go`, which uses `CreateProject` for noninteractive fresh seeding before the existing launch path.
 - **Starts kernel CLI commands only.** It never speaks to a running agent afterward; all further communication is filesystem-only through `tui/internal/fs/`.
 
 ## Composition
@@ -62,3 +78,49 @@ maintenance: |
 - **Process-table detection is advisory.** Same caveat as `processscan`: matching is best-effort and racy. The kernel's own workdir lock is the authoritative gate; never rely on `IsAgentRunning` alone for correctness under concurrency.
 - **Keep the import direction clean.** `processscan` exists precisely because `process` imports `migrate`; packages below that line must import `processscan`, never `process`.
 - **Termination reports survivors.** `TerminateAgentProcesses` returns a `terminateError` naming the PIDs it could not stop instead of silently reporting success — callers surface that to the user.
+
+## Existing Recipe synchronous exchange
+
+`project_recipe.go` is the specialized PRJ004 consumer using the SAME
+`kernelCLI` resolver and literal `project recipe-observe`/`recipe-apply` argv.
+The new-form apply request is closed and newline-terminated, with independent
+bundle/destination and callback or identity mode. A growing `bufio.Reader`
+validates each closed frame, canonical base64, byte length and sequence before
+calling the original Go function synchronously. One bound ack is encoded/flushed
+before the next read. No configuration/creation Scanner cap, whole-output cap,
+request deadline or callback goroutine is inherited. Standard `exec` lifecycle
+copying drains stderr; normal terminal/exit/EOF and stderr are all validated.
+Panic/Goexit unwind closes input, terminates only the owned child and reaps it,
+without recovering or sending a substitute ack.
+
+Typed native failure evidence supports factual errno/path matching and retains
+parse offsets; exact old syscall/decoder formatting cannot be inferred from the
+frozen evidence. Stopped receipts remain distinct from normal snapshots. Lost
+ack/terminal/crash or malformed evidence means unknown partial physical effects,
+never rollback, zero-write proof, retry or a Go mutation fallback. Two thin test
+groups extend the existing portable test-binary fixture for wire/evidence/reap;
+actual mutation acceptance is the preset owner's installed-CLI source tests.
+The nearest behavior owner is `tui/CONTRACT.md`.
+
+## Native inspection readiness exchange (PRJ006 source candidate)
+
+`project_inspection_exchange.go` implements `InspectProjectReadiness` on the
+same `kernelCLI`/literal `project inspect` command. `main.go:prepareApp` wires
+this supported startup consumer before initialization/registration. Kernel owns
+member roles, eligible order, first-error priority and readiness. Go observes
+only requested native members, `os.Stat` once per frame on the original joined
+path, and renders the kernel reason. The original error object and path remain
+local until the full terminal/transcript, exit and empty stderr match.
+
+A growing Reader and flushed Writer retain live stdin until terminal; no new
+line/output cap, request timeout, callback thread, fallback scan or lifecycle
+mechanism. Mode-specific closed decoding leaves strictProjectObject unchanged,
+requires nullable native facts only where documented, and checks raw JSON
+surrogate codepoints against canonical native identities without replacement
+name selection or Go reordering. Ordinary InspectProject keeps EOF/capped
+transport and now consumes the unchanged ordinary startup_readiness shape.
+Context cancellation releases inherited stdout/stdin; deferred unwind closes
+pipes and kills/reaps only the owned direct child, preserving panic/Goexit.
+Arbitrary descendants are neither terminated nor claimed orphan-free.
+Focused source tests remain in project_interactive_test.go; presentation/wiring
+coverage is main_project_inspection_test.go. See tui/CONTRACT.md for promises.

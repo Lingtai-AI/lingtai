@@ -560,7 +560,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ensure human folder exists before launching — InitProject is
 		// idempotent and prevents the race where the agent tries to
 		// send mail before the human mailbox is ready.
-		if err := process.InitProject(a.projectDir); err != nil {
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -570,24 +570,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
-		// Propagate LLM config to all agents in the network
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		// Combined rehydrate already initialized workers with the import-specific
+		// admin/identity rules. Do not immediately overwrite them via normal config
+		// propagation, including the all-present unchanged branch.
+		if msg.ProjectResult == nil || msg.ProjectResult.Status != "rehydrated" {
+			if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+				return a.projectConfigurationFailed(err)
+			}
+		}
 
-		// Recipe application: when the project carries a .recipe/ bundle
-		// (set by the first-run wizard or imported from a bundle), make
-		// sure every agent's .prompt + skills.paths + .tui-asset/.recipe/
-		// snapshot are in sync before the agent process boots. This
-		// catches the rehydration case: RehydrateNetwork just generated
-		// init.json for each imported agent, but .prompt and library
-		// registration haven't run yet for this launch. The startup
-		// reconciliation in main.go covers subsequent launches, but the
-		// very first launch after rehydration needs this hook too.
-		//
+		// Ordinary first-run Recipe reconcile uses the kernel consumer. Combined import
+		// already performed its separate Recipe step after kernel completion,
+		// or was all-present unchanged; do not repeat it here.
 		// a.projectDir is the .lingtai/ dir (main.go passes lingtaiDir to
 		// NewApp); the recipe resolvers want the parent project root that
 		// contains both .recipe/ and .lingtai/, so derive it here.
 		projectRoot := filepath.Dir(a.projectDir)
-		if preset.RecipeNeedsApply(projectRoot) {
+		if (msg.ProjectResult == nil || msg.ProjectResult.Status != "rehydrated") && preset.RecipeNeedsApply(projectRoot) {
 			humanDir := filepath.Join(a.projectDir, "human")
 			haddr := "human"
 			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
@@ -632,6 +631,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		addr := humanAddr(a.projectDir)
 		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 
+		if msg.ProjectResult != nil && msg.ProjectResult.Source.ReaderStatus == "READ_OK_WITH_IGNORED_FIELDS" {
+			a.mail.AddSystemMessage(fmt.Sprintf("Project source reader: %s; init writes=%d (not whole-network readiness)", msg.ProjectResult.Source.ReaderStatus, msg.ProjectResult.Updated))
+		}
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
@@ -643,7 +645,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// deliver mail once the new orchestrator starts.
 		a.nirvanaCleanupPending = false
 		a.nirvanaCleanupStarted = false
-		process.InitProject(a.projectDir)
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -660,14 +664,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Recovery: global config was lost but agents are intact.
 			// Propagate the new LLM + capabilities to all agents, init
 			// the mail view, and launch the orchestrator.
-			a.recoveryMode = false
 			a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 			// Persist config.json so the recovery wizard does not
 			// re-trigger on next launch for OAuth / no-key presets
 			// (codex etc.). Without this, recovery would loop forever
 			// because config.json was never created. See issue #181.
 			config.EnsureConfigPersisted(a.globalDir)
-			PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+			if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+				return a.projectConfigurationFailed(err)
+			}
+			a.recoveryMode = false
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -679,20 +685,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 
 	case UsePresetMsg:
 		// Create agent from preset
-		process.InitProject(a.projectDir)
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil
 		}
 		agentName := p.Name
-		if err := preset.GenerateInitJSON(p, agentName, agentName, a.projectDir, a.globalDir); err != nil {
-			return a, nil
+		opts := preset.DefaultAgentOpts()
+		if language, ok := p.Manifest["language"].(string); ok && language != "" {
+			opts.Language = language
+		}
+		if err := preset.GenerateInitJSONWithOpts(p, agentName, agentName, a.projectDir, a.globalDir, opts, a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
 		}
 		orchDir := filepath.Join(a.projectDir, agentName)
 		var launchErr string
@@ -2413,4 +2427,26 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 		}
 	}
 	return ""
+}
+
+// projectPython keeps launch's existing selected-init venv resolver and the
+// actual App/global fallback; no feature flag or installer is involved.
+func (a App) projectPython() string {
+	fallback := a.lingtaiCmd
+	if fallback == "" {
+		fallback = config.LingtaiCmd(a.globalDir)
+	}
+	return process.ProjectPython(a.orchDir, fallback)
+}
+
+// Failure, including partial/unknown, blocks subsequent recipe/launch actions.
+// The typed driver's static text retains writes/counts/reader status, not raw
+// documents or child stderr. Mail is display only, not a global readiness claim.
+func (a App) projectConfigurationFailed(err error) (tea.Model, tea.Cmd) {
+	a.currentView = appViewMail
+	humanDir := filepath.Join(a.projectDir, "human")
+	addr := humanAddr(a.projectDir)
+	a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
+	a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
+	return a, tea.Batch(a.mail.Init(), a.sendSize())
 }

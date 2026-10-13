@@ -90,55 +90,22 @@ func (e *ProjectCreateError) Error() string {
 
 func (e *ProjectCreateError) Unwrap() error { return e.Cause }
 
-// InitProject creates the legacy TUI-owned project skeleton. It remains for
-// its independent callers; headless spawn seeds fresh projects through
-// CreateProject instead.
-func InitProject(lingtaiDir string) error {
-	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
-		return fmt.Errorf("create .lingtai: %w", err)
-	}
-	humanDir := filepath.Join(lingtaiDir, "human")
-	manifestPath := filepath.Join(humanDir, ".agent.json")
-	if _, err := os.Stat(manifestPath); err == nil {
-		return nil
-	}
-	for _, sub := range []string{
-		"mailbox/inbox",
-		"mailbox/sent",
-		"mailbox/archive",
-	} {
-		if err := os.MkdirAll(filepath.Join(humanDir, sub), 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", sub, err)
+// InitProject delegates skeleton policy and writes to the kernel. projectRoot
+// is the parent of .lingtai. The optional interpreter is a narrow subprocess
+// selection seam; production callers always supply their existing resolver.
+func InitProject(projectRoot string, python ...string) error {
+	cmd := ""
+	if len(python) > 0 {
+		cmd = python[0]
+	} else {
+		globalDir, err := config.GlobalDirPath()
+		if err != nil {
+			return &ProjectConfigurationError{Result: ProjectConfigurationResult{Outcome: "unknown"}}
 		}
+		cmd = config.LingtaiCmd(globalDir)
 	}
-	manifest := map[string]interface{}{
-		"agent_name": "human",
-		"address":    "human",
-		"admin":      nil,
-	}
-	data, _ := json.MarshalIndent(manifest, "", "  ")
-	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
-	contactsPath := filepath.Join(humanDir, "mailbox", "contacts.json")
-	if err := os.WriteFile(contactsPath, []byte("[]"), 0o644); err != nil {
-		return fmt.Errorf("write contacts: %w", err)
-	}
-	// TUI asset directory — viz data, topology snapshots, NOT agent state
-	tuiAssetDir := filepath.Join(lingtaiDir, ".tui-asset")
-	if err := os.MkdirAll(tuiAssetDir, 0o755); err != nil {
-		return fmt.Errorf("create .tui-asset: %w", err)
-	}
-	// Network-shared library — the collective knowledge base that agents
-	// reach through the default library.paths entry "../.library_shared"
-	// (relative to <agent>/). Create it empty so the kernel's library cap
-	// doesn't warn about a missing Tier-1 path on first launch. Idempotent;
-	// m018 also creates this for legacy projects during upgrade.
-	libraryShared := filepath.Join(lingtaiDir, ".library_shared")
-	if err := os.MkdirAll(libraryShared, 0o755); err != nil {
-		return fmt.Errorf("create .library_shared: %w", err)
-	}
-	return nil
+	_, err := InitializeProject(context.Background(), cmd, projectRoot)
+	return err
 }
 
 // resolvePython returns the Python executable for an agent.

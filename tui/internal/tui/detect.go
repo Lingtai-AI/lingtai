@@ -1,13 +1,15 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
-	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // DetectOrchestrators scans baseDir for .agent.json files with admin privileges.
@@ -38,103 +40,22 @@ func DetectOrchestrators(baseDir string) []string {
 	return orchestrators
 }
 
-// PropagateOrchestratorConfig reads the orchestrator's init.json and copies
-// its LLM config, capabilities, and runtime settings (context limit)
-// to every other agent in the .lingtai/
-// network. Admin privileges and addons are stripped from non-orchestrators.
-// Skips directories that are not agents (no init.json) and "human".
-func PropagateOrchestratorConfig(baseDir, orchDir string) error {
-	orchInitPath := filepath.Join(orchDir, "init.json")
-	orchData, err := os.ReadFile(orchInitPath)
-	if err != nil {
-		return err
-	}
-	var orchInit map[string]interface{}
-	if err := preset.DecodeJSONUseNumber(orchData, &orchInit); err != nil {
-		return err
-	}
-	orchManifest, _ := orchInit["manifest"].(map[string]interface{})
-	if orchManifest == nil {
-		return nil
-	}
-	orchLLM, _ := orchManifest["llm"].(map[string]interface{})
-	if orchLLM == nil {
-		return nil
-	}
-	orchCaps, _ := orchManifest["capabilities"].(map[string]interface{})
-	if orchCaps != nil {
-		if _, err := preset.CanonicalizeCapabilities(orchCaps); err != nil {
-			return fmt.Errorf("canonicalize orchestrator capabilities: %w", err)
-		}
-	}
-	orchEnvFile, _ := orchInit["env_file"].(string)
-
-	entries, err := os.ReadDir(baseDir)
-	if err != nil {
-		return nil
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "human" {
-			continue
-		}
-		agentDir := filepath.Join(baseDir, entry.Name())
-		if agentDir == orchDir {
-			continue
-		}
-		initPath := filepath.Join(agentDir, "init.json")
-		data, err := os.ReadFile(initPath)
+// PropagateOrchestratorConfig is the concrete CLI adapter; Project Core owns
+// selected-member filtering, merge/stripping and partial propagation policy.
+func PropagateOrchestratorConfig(baseDir, orchDir string, python ...string) error {
+	cmd := ""
+	if len(python) > 0 {
+		cmd = python[0]
+	} else {
+		globalDir, err := config.GlobalDirPath()
 		if err != nil {
-			continue
+			return fmt.Errorf("Project kernel interpreter unavailable")
 		}
-		var initJSON map[string]interface{}
-		if err := preset.DecodeJSONUseNumber(data, &initJSON); err != nil {
-			continue
-		}
-		manifest, _ := initJSON["manifest"].(map[string]interface{})
-		if manifest == nil {
-			continue
-		}
-
-		// Replace LLM config (shallow copy to avoid shared references)
-		llmCopy := make(map[string]interface{}, len(orchLLM))
-		for k, v := range orchLLM {
-			llmCopy[k] = v
-		}
-		manifest["llm"] = llmCopy
-
-		// Replace capabilities — strip admin and addons
-		if orchCaps != nil {
-			capsCopy := make(map[string]interface{}, len(orchCaps))
-			for k, v := range orchCaps {
-				capsCopy[k] = v
-			}
-			manifest["capabilities"] = capsCopy
-		} else {
-			delete(manifest, "capabilities")
-		}
-		// Propagate runtime settings. A legacy `soul` block on the
-		// orchestrator is deliberately NOT copied: the Soul subsystem is
-		// retired and no new Soul config is spread to other agents.
-		for _, key := range []string{"context_limit"} {
-			if v, ok := orchManifest[key]; ok {
-				manifest[key] = v
-			}
-		}
-
-		manifest["admin"] = map[string]interface{}{"karma": false, "nirvana": false}
-		delete(initJSON, "addons")
-
-		if orchEnvFile != "" {
-			initJSON["env_file"] = orchEnvFile
-		}
-
-		out, err := json.MarshalIndent(initJSON, "", "  ")
-		if err != nil {
-			continue
-		}
-		fs.WriteFileAtomic(initPath, out, 0o644)
+		cmd = config.LingtaiCmd(globalDir)
 	}
-	return nil
+	cmd = process.ProjectPython(orchDir, cmd)
+	_, err := process.PropagateProjectConfig(context.Background(), cmd, filepath.Dir(baseDir), filepath.Base(orchDir))
+	return err
 }
 
 // IsOrchestrator checks if a manifest has admin with at least one truthy value.

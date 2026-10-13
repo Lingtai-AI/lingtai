@@ -13,6 +13,7 @@ import (
 )
 
 func TestGenerateInitJSONOmitsMoltPressure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -24,7 +25,7 @@ func TestGenerateInitJSONOmitsMoltPressure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatal(err)
 	}
 

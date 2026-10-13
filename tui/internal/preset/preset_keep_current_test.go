@@ -19,6 +19,7 @@ import (
 //   - preserve codex as active (PreserveActivePreset semantics)
 //   - include both codex and zhipu-2 in allowed
 func TestSetupModeKeepCurrentPresetPolicyDoesNotWriteSyntheticPreset(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -28,13 +29,16 @@ func TestSetupModeKeepCurrentPresetPolicyDoesNotWriteSyntheticPreset(t *testing.
 	}
 
 	codexRef := "~/.lingtai-tui/presets/templates/codex.json"
+	fixturePresetReference(t, codexRef, codexPreset())
 	zhipuRef := "~/.lingtai-tui/presets/saved/zhipu-2.json"
+	fixturePresetReference(t, zhipuRef, codexPreset())
 
 	// Seed an existing init.json where active/default/allowed all point at
 	// the codex template preset.
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "codex-agent",
+			"llm":        codexPreset().Manifest["llm"],
 			"preset": map[string]interface{}{
 				"active":  codexRef,
 				"default": codexRef,
@@ -65,7 +69,7 @@ func TestSetupModeKeepCurrentPresetPolicyDoesNotWriteSyntheticPreset(t *testing.
 	opts.AllowedPresets = []string{codexRef, zhipuRef}
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(synthetic, "codex-agent", "codex-agent", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, synthetic, "codex-agent", "codex-agent", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -131,6 +135,7 @@ func TestSetupModeKeepCurrentPresetPolicyDoesNotWriteSyntheticPreset(t *testing.
 // existing allowed list from init.json unchanged and never writes
 // keep_current.json as the default.
 func TestSetupModeKeepCurrentNoExtraAllowed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -140,11 +145,14 @@ func TestSetupModeKeepCurrentNoExtraAllowed(t *testing.T) {
 	}
 
 	codexRef := "~/.lingtai-tui/presets/templates/codex.json"
+	fixturePresetReference(t, codexRef, codexPreset())
 	zhipuRef := "~/.lingtai-tui/presets/saved/zhipu-1.json"
+	fixturePresetReference(t, zhipuRef, codexPreset())
 
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "alice",
+			"llm":        codexPreset().Manifest["llm"],
 			"preset": map[string]interface{}{
 				"active":  codexRef,
 				"default": codexRef,
@@ -168,7 +176,7 @@ func TestSetupModeKeepCurrentNoExtraAllowed(t *testing.T) {
 	opts.PreserveActivePreset = true
 	// AllowedPresets deliberately not set — user skipped the preset-policy page
 
-	if err := GenerateInitJSONWithOpts(synthetic, "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, synthetic, "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 

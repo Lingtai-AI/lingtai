@@ -16,7 +16,11 @@ func TestInitProject(t *testing.T) {
 	dir := t.TempDir()
 	lingtaiDir := filepath.Join(dir, ".lingtai")
 
-	if err := InitProject(lingtaiDir); err != nil {
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("explicit matching installed kernel interpreter required")
+	}
+	if err := InitProject(dir, python); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 

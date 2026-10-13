@@ -16,6 +16,7 @@ import (
 // so the user could not actually remove the running preset from the
 // allowed surface via the /setup wizard.
 func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -28,6 +29,7 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 	// to an alternate preset (active != default).
 	defaultRef := "~/.lingtai-tui/presets/templates/codex.json"
 	swappedRef := "~/.lingtai-tui/presets/saved/openai-1.json"
+	fixturePresetReference(t, swappedRef, codexPreset())
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "alice",
@@ -50,7 +52,7 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 	opts.AllowedPresets = []string{defaultRef} // user deselected swappedRef
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -91,6 +93,7 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 // active is preserved (PreserveActivePreset=true semantics) and the
 // running agent is not yanked off its current preset.
 func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -101,6 +104,7 @@ func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
 
 	defaultRef := "~/.lingtai-tui/presets/templates/codex.json"
 	swappedRef := "~/.lingtai-tui/presets/saved/openai-1.json"
+	fixturePresetReference(t, swappedRef, codexPreset())
 	seed := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "bob",
@@ -120,7 +124,7 @@ func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
 	opts.AllowedPresets = []string{defaultRef, swappedRef} // both still allowed
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 

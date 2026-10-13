@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -561,6 +562,11 @@ func checkOrchestratorInvariant(lingtaiDir string) error {
 		}
 	}
 
+	return checkObservedOrchestratorInvariant(allAgents, orchestrators)
+}
+
+// App policy remains stricter than the global kernel membership rule.
+func checkObservedOrchestratorInvariant(allAgents, orchestrators []string) error {
 	// Zero agents: corrupt under strict rules. A complete network must
 	// have at least one orchestrator. An empty .lingtai/ means something
 	// created the directory without finishing setup (most commonly: the
@@ -613,6 +619,102 @@ func checkOrchestratorInvariant(lingtaiDir string) error {
 
 	// Exactly one orchestrator: healthy.
 	return nil
+}
+
+// renderProjectStartupReadiness renders kernel-selected reasons only. It does
+// not stat, enumerate, classify manifests, or choose a replacement policy.
+func renderProjectStartupReadiness(readiness process.ProjectStartupReadiness) error {
+	allAgents, orchestrators := readiness.Agents, readiness.Orchestrators
+	switch readiness.Reason {
+	case "ready":
+		return nil
+	case "mixed_init":
+		var withInit, withoutInit []string
+		for _, item := range readiness.InitEvidence {
+			if item.Presence == "present" {
+				withInit = append(withInit, item.DirectoryName)
+			}
+			if item.Presence == "absent" {
+				withoutInit = append(withoutInit, item.DirectoryName)
+			}
+		}
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — init.json is present in some agents but missing in others\n\n")
+		msg.WriteString(fmt.Sprintf("  with init.json (%d):\n", len(withInit)))
+		for _, n := range withInit {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString(fmt.Sprintf("\n  missing init.json (%d):\n", len(withoutInit)))
+		for _, n := range withoutInit {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nA healthy network has init.json in either every agent or none.\n")
+		msg.WriteString("Mixed state usually means an interrupted rehydration, a partial\n")
+		msg.WriteString("publish, or manual tampering.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("This suspends any running agents and removes .lingtai/ so you can start over.\n")
+		return fmt.Errorf("%s", msg.String())
+	case "no_agents":
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — .lingtai/ exists but contains no agents\n\n")
+		msg.WriteString("A complete network must have at least one orchestrator agent. An empty\n")
+		msg.WriteString(".lingtai/ usually means the first-run wizard was cancelled mid-flow,\n")
+		msg.WriteString("leaving behind a partially-created directory.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		return fmt.Errorf("%s", msg.String())
+	case "no_orchestrator":
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — no orchestrator found\n\n")
+		msg.WriteString(fmt.Sprintf("Found %d agent(s), but none has admin privileges:\n", len(allAgents)))
+		for _, n := range allAgents {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nEvery network must have exactly one orchestrator — an agent whose\n")
+		msg.WriteString(".agent.json contains an `admin` field with at least one truthy value\n")
+		msg.WriteString("(e.g. `\"admin\": {\"karma\": true}`). Without an orchestrator, there is\n")
+		msg.WriteString("no root will to launch.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		return fmt.Errorf("%s", msg.String())
+	case "multiple_orchestrators":
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — multiple orchestrators found\n\n")
+		msg.WriteString(fmt.Sprintf("Found %d orchestrator agents (a network must have exactly one):\n", len(orchestrators)))
+		for _, n := range orchestrators {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nA network has exactly one root will. Multiple orchestrators usually\n")
+		msg.WriteString("mean two networks were merged, or someone manually edited an agent's\n")
+		msg.WriteString(".agent.json to add an admin flag.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		msg.WriteString("\nIf you want to keep the existing agents, edit each non-orchestrator's\n")
+		msg.WriteString(".agent.json to set `\"admin\": {}` (empty map) before re-running.\n")
+		return fmt.Errorf("%s", msg.String())
+	default:
+		// Native stat failures are returned by the correlated process adapter.
+		// Absent outer projects retain their separate existing initialization route.
+		return errors.New("kernel Project startup readiness is not usable for an existing network")
+	}
+}
+
+// appInspectionMembers preserves legacy app filtering: null/missing-admin
+// humans, malformed directories and dot helpers do not count. Kernel owns role
+// classification; this consumer selects directory identities only.
+func appInspectionMembers(inspection process.ProjectInspection) (agents, orchestrators []string) {
+	for _, member := range inspection.Members {
+		if strings.HasPrefix(member.DirectoryName, ".") || member.ManifestKind != "valid" {
+			continue
+		}
+		if member.Role == "worker" || member.Role == "orchestrator" {
+			agents = append(agents, member.DirectoryName)
+		}
+		if member.Role == "orchestrator" {
+			orchestrators = append(orchestrators, member.DirectoryName)
+		}
+	}
+	return
 }
 
 // findOrchestratorBlueprint returns the (dirName, agentName) of the single
@@ -1575,6 +1677,14 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 		}
 	}
 
+	// Read-only kernel observations feed real startup/selection. No skeleton
+	// initialization or silent installation/old-kernel fallback occurs here.
+	inspection, inspectErr := process.InspectProjectReadiness(context.Background(), config.LingtaiCmd(globalDir), projectDir, lingtaiDir)
+	if inspectErr != nil {
+		return startupResult{kind: startupFatal, err: inspectErr}
+	}
+	observedOrchestrators := inspection.StartupReadiness.Orchestrators
+
 	// Rehydration state: set below if the network needs rehydration (cloned
 	// agora network with no init.json files but an intact .agent.json blueprint).
 	var needsRehydration bool
@@ -1588,18 +1698,21 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 		// Both refuse to launch on failure rather than limp along with a
 		// broken network. Run before any mutation so the on-disk state is
 		// preserved exactly as the user left it.
-		nr, err := checkInitJSONInvariant(lingtaiDir)
-		if err != nil {
+		if err := renderProjectStartupReadiness(inspection.StartupReadiness); err != nil {
 			return startupResult{kind: startupFatal, err: err}
 		}
-		needsRehydration = nr
-		if err := checkOrchestratorInvariant(lingtaiDir); err != nil {
-			return startupResult{kind: startupFatal, err: err}
-		}
+		needsRehydration = inspection.StartupReadiness.NeedsRehydration
 		// If the network needs rehydration, find the orchestrator's dir and
 		// name from its .agent.json blueprint so the wizard can prefill them.
 		if needsRehydration {
-			rehydrateOrchDir, rehydrateOrchName = findOrchestratorBlueprint(lingtaiDir)
+			for _, member := range inspection.Members {
+				if len(observedOrchestrators) == 1 && member.DirectoryName == observedOrchestrators[0] {
+					rehydrateOrchDir, rehydrateOrchName = member.DirectoryName, member.AgentName
+					if rehydrateOrchName == "" {
+						rehydrateOrchName = rehydrateOrchDir
+					}
+				}
+			}
 			if rehydrateOrchDir == "" {
 				return startupResult{kind: startupFatal, err: errors.New("error: rehydration needed but could not locate orchestrator")}
 			}
@@ -1607,7 +1720,7 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	}
 
 	// Init project (create human dir)
-	if err := process.InitProject(lingtaiDir); err != nil {
+	if err := process.InitProject(projectDir, config.LingtaiCmd(globalDir)); err != nil {
 		return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
 	}
 	// Register this project in the global registry for /projects discovery.
@@ -1629,7 +1742,7 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// loss and degrades exactly like an absent file, so the original incident
 	// cannot silently recur. Zero orchestrators force first-run (the
 	// `lingtai-tui clean` recreated-empty-.lingtai case).
-	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+	orchestrators := observedOrchestrators
 	declaredKeyEnvs, loginOrchestrator := tui.OrchestratorCredentials(lingtaiDir, orchestrators)
 	keys, configOK := config.ResolveKeys(globalDir)
 	mirror, _ := config.LoadConfigReadOnly(globalDir)

@@ -19,7 +19,11 @@ import (
 func newNirvanaRetirementTestApp(t *testing.T) App {
 	t.Helper()
 	a := visitTestApp(t)
-	if err := process.InitProject(a.projectDir); err != nil {
+	fixtureUIKernel(t, a.globalDir)
+	if err := os.MkdirAll(filepath.Dir(a.projectDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.InitProject(filepath.Dir(a.projectDir), fixtureUIProjectPython(t)); err != nil {
 		t.Fatalf("initialize Nirvana test project: %v", err)
 	}
 	a.currentView = appViewNirvana
@@ -188,7 +192,7 @@ func waitNirvanaCleanup(t *testing.T, result <-chan tea.Msg) tea.Msg {
 
 func TestNirvanaCleanupHandoffWaitsForLocationWriter(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".lingtai")
-	if err := process.InitProject(root); err != nil {
+	if err := process.InitProject(filepath.Dir(root), fixtureUIProjectPython(t)); err != nil {
 		t.Fatalf("initialize project: %v", err)
 	}
 	humanDir := filepath.Join(root, "human")
@@ -247,7 +251,7 @@ func TestNirvanaCleanupHandoffWaitsForLocationWriter(t *testing.T) {
 		t.Fatalf("project tree survived or was resurrected after writer drain: %v", err)
 	}
 
-	if err := process.InitProject(root); err != nil {
+	if err := process.InitProject(filepath.Dir(root), fixtureUIProjectPython(t)); err != nil {
 		t.Fatalf("reinitialize project after cleanup: %v", err)
 	}
 	for _, relative := range []string{

@@ -1,16 +1,19 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // minimalDraftPreset returns a preset with just enough manifest shape to
@@ -33,8 +36,7 @@ func minimalDraftPreset() preset.Preset {
 	}
 }
 
-// newTestDraft builds a ProjectDraft with no recipe (so RunProjectCreate
-// takes the no-recipe init.json-only branch) rooted at a fresh temp dir.
+// newTestDraft builds a reviewed public preset with no Recipe selection.
 func newTestDraft(t *testing.T) (*ProjectDraft, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -61,6 +63,8 @@ func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 	}
 	return CreateOptions{
 		GlobalDir:           filepath.Join(home, ".lingtai-tui"),
+		LingtaiCmd:          "fixture-python",
+		ScanInventory:       func(root string) (inventory.Snapshot, error) { return inventory.Snapshot{FilterDir: root}, nil },
 		ExpectedProjectRoot: expectedProjectRoot,
 		// Production still checks runtime readiness (read-only) when
 		// LingtaiCmd was empty at launcher entry. Tests inject a no-op so
@@ -68,734 +72,6 @@ func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 		// warning instead of launching.
 		RuntimeReady:      func(string) error { return nil },
 		ResolveLingtaiCmd: func(string) string { return "" },
-	}
-}
-
-func activePresetRefFromInit(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read init.json: %v", err)
-	}
-	var doc struct {
-		Manifest struct {
-			Preset struct {
-				Active string `json:"active"`
-			} `json:"preset"`
-		} `json:"manifest"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("parse init.json: %v", err)
-	}
-	if doc.Manifest.Preset.Active == "" {
-		t.Fatal("init.json manifest.preset.active is empty")
-	}
-	return doc.Manifest.Preset.Active
-}
-
-// TestRunProjectCreate_Success proves the happy path: staging disappears,
-// the final .lingtai/ tree is complete with exactly one orchestrator, and
-// the result reports Committed=true with no error.
-func TestRunProjectCreate_Success(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Err != nil {
-		t.Fatalf("unexpected error: %v (phase %v)", res.Err, res.FailedPhase)
-	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true on success")
-	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); err != nil {
-		t.Fatalf("final .lingtai/ missing: %v", err)
-	}
-	orchestrators := DetectOrchestrators(finalDir)
-	if len(orchestrators) != 1 {
-		t.Fatalf("expected exactly 1 orchestrator, got %d: %v", len(orchestrators), orchestrators)
-	}
-	// No leftover staging directories.
-	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".lingtai.create-") {
-			t.Fatalf("leftover staging directory after success: %s", e.Name())
-		}
-	}
-}
-
-func TestRunProjectCreate_AppliesRecipeInsideStagingBeforeRename(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	// The wizard always stages the adaptive recipe, resolved by name from the
-	// global recipes tree. Seed that bundle under the isolated global dir so
-	// the staging phase finds it by name.
-	draft.RecipeName = preset.DefaultRecipe
-	adaptiveRoot := filepath.Join(opts.GlobalDir, "recipes", "intrinsic", preset.DefaultRecipe)
-	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
-		`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
-	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "greet", "greet.md"), "hello {{addr}}")
-
-	var checkedBeforeRename bool
-	opts.InjectFailure = func(phase CreatePhase) error {
-		if phase != PhaseRename {
-			return nil
-		}
-		checkedBeforeRename = true
-		finalDir := filepath.Join(root, ".lingtai")
-		if _, err := os.Lstat(finalDir); !os.IsNotExist(err) {
-			t.Fatalf("final .lingtai existed before atomic rename: %v", err)
-		}
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var stagingDir string
-		for _, entry := range entries {
-			if entry.IsDir() && strings.HasPrefix(entry.Name(), ".lingtai.create-") {
-				stagingDir = filepath.Join(root, entry.Name())
-				break
-			}
-		}
-		if stagingDir == "" {
-			t.Fatal("staging directory missing before rename")
-		}
-		prompt, err := os.ReadFile(filepath.Join(stagingDir, "orchestrator", ".prompt"))
-		if err != nil {
-			t.Fatalf("staged recipe prompt missing: %v", err)
-		}
-		if string(prompt) != "hello human" {
-			t.Fatalf("staged prompt = %q, want %q", prompt, "hello human")
-		}
-		if _, err := os.Stat(filepath.Join(stagingDir, ".tui-asset", ".recipe", "recipe.json")); err != nil {
-			t.Fatalf("staged recipe snapshot missing: %v", err)
-		}
-		return nil
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Err != nil || !res.Committed {
-		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
-	}
-	if !checkedBeforeRename {
-		t.Fatal("rename boundary was not checked")
-	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(filepath.Join(finalDir, "orchestrator", ".prompt")); err != nil {
-		t.Fatalf("published recipe prompt missing: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(finalDir, ".tui-asset", ".recipe", "recipe.json")); err != nil {
-		t.Fatalf("published recipe snapshot missing: %v", err)
-	}
-}
-
-// TestRunProjectCreate_ChecksRuntimeReadinessWhenCommandWasInitiallyUnknown
-// proves the post-commit launch phase checks runtime readiness exactly once
-// (read-only — RuntimeReady must never install/repair on its own) when the
-// launcher entry began with no resolved lingtai command.
-func TestRunProjectCreate_ChecksRuntimeReadinessWhenCommandWasInitiallyUnknown(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	readyCalls := 0
-	opts.RuntimeReady = func(globalDir string) error {
-		readyCalls++
-		if globalDir != opts.GlobalDir {
-			t.Fatalf("RuntimeReady globalDir = %q, want %q", globalDir, opts.GlobalDir)
-		}
-		return nil
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Err != nil || !res.Committed {
-		t.Fatalf("create result = committed %v err %v", res.Committed, res.Err)
-	}
-	if readyCalls != 1 {
-		t.Fatalf("RuntimeReady calls = %d, want 1", readyCalls)
-	}
-	foundUnavailable := false
-	for _, warning := range res.PostCommitWarnings {
-		if strings.Contains(warning, "runtime command unavailable") {
-			foundUnavailable = true
-			break
-		}
-	}
-	if !foundUnavailable {
-		t.Fatalf("post-commit warnings = %v, want unavailable-runtime warning", res.PostCommitWarnings)
-	}
-}
-
-// TestRunProjectCreate_NotReadyRuntimeSurfacesWarningWithoutMutating proves
-// that when RuntimeReady reports the runtime is not ready (e.g. the human
-// declined the preflight's install/repair prompt, or this is a from-scratch
-// machine), RunProjectCreate surfaces that as a post-commit warning and
-// never falls back to installing/repairing on its own — there is no second
-// mutating runtime path in this post-commit phase.
-func TestRunProjectCreate_NotReadyRuntimeSurfacesWarningWithoutMutating(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	readyCalls := 0
-	opts.RuntimeReady = func(string) error {
-		readyCalls++
-		return errors.New("lingtai kernel runtime is not ready")
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Err != nil || !res.Committed {
-		t.Fatalf("create result = committed %v err %v", res.Committed, res.Err)
-	}
-	if readyCalls != 1 {
-		t.Fatalf("RuntimeReady calls = %d, want 1", readyCalls)
-	}
-	foundNotReady := false
-	for _, warning := range res.PostCommitWarnings {
-		if strings.Contains(warning, "not ready") {
-			foundNotReady = true
-			break
-		}
-	}
-	if !foundNotReady {
-		t.Fatalf("post-commit warnings = %v, want a not-ready runtime warning", res.PostCommitWarnings)
-	}
-}
-
-// TestRunProjectCreate_ConcurrentCreationRejected proves that if the final
-// .lingtai/ already exists (simulating a concurrent creation or a symlink),
-// RunProjectCreate refuses to overwrite it and leaves it untouched. This is
-// now caught at PhaseValidateDraft — validateDraftForCommit's own Lstat
-// check, which runs before ANY staging write (see project_create.go) — one
-// phase earlier than the historical PhaseCreateStaging revalidation, which
-// still exists as a defense-in-depth re-check immediately before
-// os.MkdirTemp but is no longer the FIRST place this is caught.
-func TestRunProjectCreate_ConcurrentCreationRejected(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-
-	finalDir := filepath.Join(root, ".lingtai")
-	if err := os.MkdirAll(finalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sentinel := filepath.Join(finalDir, "someone-elses-file")
-	if err := os.WriteFile(sentinel, []byte("do not touch"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false when final dir already exists")
-	}
-	if res.Err == nil {
-		t.Fatal("expected an error for concurrent creation")
-	}
-	if res.FailedPhase != PhaseValidateDraft {
-		t.Fatalf("expected failure at PhaseValidateDraft, got %v", res.FailedPhase)
-	}
-	data, err := os.ReadFile(sentinel)
-	if err != nil || string(data) != "do not touch" {
-		t.Fatalf("existing final dir was modified: err=%v data=%q", err, data)
-	}
-}
-
-// failPhaseInjector returns a createFailureInjector that fails exactly the
-// named phase and no other.
-func failPhaseInjector(target CreatePhase) createFailureInjector {
-	return func(phase CreatePhase) error {
-		if phase == target {
-			return errors.New("injected failure at " + phase.String())
-		}
-		return nil
-	}
-}
-
-// TestRunProjectCreate_PreRenameFailureLeavesNoProject is the commit-matrix
-// test: for every phase strictly before PhaseRename, injecting a failure
-// there must result in (a) no final .lingtai/ directory, and (b) no leftover
-// staging directory (cleanup removed it, gated by the ownership marker).
-func TestRunProjectCreate_PreRenameFailureLeavesNoProject(t *testing.T) {
-	phases := []CreatePhase{
-		PhaseInitProject,
-		PhaseApplyPreset,
-		PhaseApplyRecipe,
-		PhaseValidate,
-		PhasePersistDependencies,
-	}
-	for _, phase := range phases {
-		phase := phase
-		t.Run(phase.String(), func(t *testing.T) {
-			draft, root := newTestDraft(t)
-			opts := testCreateOptions(t, root)
-			opts.InjectFailure = failPhaseInjector(phase)
-
-			res := RunProjectCreate(draft, opts)
-
-			if res.Committed {
-				t.Fatalf("phase %v: expected Committed=false", phase)
-			}
-			if res.Err == nil {
-				t.Fatalf("phase %v: expected an error", phase)
-			}
-			if res.FailedPhase != phase {
-				t.Fatalf("phase %v: expected FailedPhase=%v, got %v", phase, phase, res.FailedPhase)
-			}
-			finalDir := filepath.Join(root, ".lingtai")
-			if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-				t.Fatalf("phase %v: final .lingtai/ must not exist, stat err = %v", phase, err)
-			}
-			entries, _ := os.ReadDir(root)
-			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), ".lingtai.create-") {
-					t.Fatalf("phase %v: leftover staging directory %s not cleaned up", phase, e.Name())
-				}
-			}
-		})
-	}
-}
-
-// TestRunProjectCreate_RenameFailureLeavesNoProjectAndCleansStaging covers
-// the rename phase itself: injecting a failure there must behave exactly
-// like a pre-rename failure (no final dir, staging cleaned up) since the
-// injector runs before the real os.Rename call.
-func TestRunProjectCreate_RenameFailureLeavesNoProjectAndCleansStaging(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	opts.InjectFailure = failPhaseInjector(PhaseRename)
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false when rename is injected to fail")
-	}
-	if res.FailedPhase != PhaseRename {
-		t.Fatalf("expected FailedPhase=PhaseRename, got %v", res.FailedPhase)
-	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after rename failure, stat err = %v", err)
-	}
-	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".lingtai.create-") {
-			t.Fatalf("leftover staging directory %s after rename failure", e.Name())
-		}
-	}
-}
-
-// TestRunProjectCreate_PostRenameFailureLeavesValidRetryableProject is the
-// other half of the commit matrix: for every phase strictly after
-// PhaseRename, injecting a failure there must NOT roll back the already
-// -published project — Committed stays true, the final directory is a
-// complete valid project, and the failure surfaces only as a
-// PostCommitWarning, never as res.Err.
-func TestRunProjectCreate_PostRenameFailureLeavesValidRetryableProject(t *testing.T) {
-	phases := []CreatePhase{
-		PhasePostCommitConfig,
-		PhasePostCommitRegister,
-		PhasePostCommitLaunch,
-	}
-	for _, phase := range phases {
-		phase := phase
-		t.Run(phase.String(), func(t *testing.T) {
-			draft, root := newTestDraft(t)
-			opts := testCreateOptions(t, root)
-			opts.InjectFailure = failPhaseInjector(phase)
-
-			res := RunProjectCreate(draft, opts)
-
-			if !res.Committed {
-				t.Fatalf("phase %v: expected Committed=true (post-rename failures never roll back)", phase)
-			}
-			if res.Err != nil {
-				t.Fatalf("phase %v: post-commit failure must not set res.Err, got %v", phase, res.Err)
-			}
-			if len(res.PostCommitWarnings) == 0 {
-				t.Fatalf("phase %v: expected a PostCommitWarning", phase)
-			}
-			finalDir := filepath.Join(root, ".lingtai")
-			if _, err := os.Stat(finalDir); err != nil {
-				t.Fatalf("phase %v: final .lingtai/ must still exist and be valid: %v", phase, err)
-			}
-			orchestrators := DetectOrchestrators(finalDir)
-			if len(orchestrators) != 1 {
-				t.Fatalf("phase %v: expected exactly 1 orchestrator in the retained project, got %d", phase, len(orchestrators))
-			}
-		})
-	}
-}
-
-// --- Invariant 4: launch dependencies precede publication ------------------
-
-// newTestDraftWithDirtyPreset is newTestDraft but with DraftPresetDirty=true
-// — the exact condition that triggers RunProjectCreate's preset.Save call.
-// The preset name is unique per-call (via t.Name()) so tests can assert on
-// its specific saved/<name>.json path without collisions across parallel
-// subtests sharing the same isolated HOME (they don't, each testCreateOptions
-// call makes a fresh HOME, but keeping names unique is cheap insurance).
-func newTestDraftWithDirtyPreset(t *testing.T) (*ProjectDraft, string, string) {
-	t.Helper()
-	root := t.TempDir()
-	draft := NewProjectDraft(root)
-	p := minimalDraftPreset()
-	p.Name = "dirty-test-preset"
-	draft.DraftPreset = &p
-	draft.DraftPresetDirty = true
-	draft.AgentName = "orchestrator"
-	draft.AgentDirName = "orchestrator"
-	draft.AgentOpts = preset.DefaultAgentOpts()
-	return draft, root, p.Name
-}
-
-// TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset proves
-// the issue-scoped ordering boundary: a dirty preset is not persisted until
-// the staged project passes every build and orchestrator-validation phase.
-// Other pre-validation global writes are a separate contract and
-// deliberately not asserted here.
-func TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset(t *testing.T) {
-	phases := []CreatePhase{
-		PhaseApplyRecipe, // the first phase strictly AFTER PhaseApplyPreset
-		PhaseValidate,
-	}
-	for _, phase := range phases {
-		phase := phase
-		t.Run(phase.String(), func(t *testing.T) {
-			draft, root, presetName := newTestDraftWithDirtyPreset(t)
-			opts := testCreateOptions(t, root)
-			opts.InjectFailure = failPhaseInjector(phase)
-
-			res := RunProjectCreate(draft, opts)
-
-			if res.Committed {
-				t.Fatalf("phase %v: expected Committed=false", phase)
-			}
-			finalDir := filepath.Join(root, ".lingtai")
-			if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-				t.Fatalf("phase %v: final .lingtai/ must not exist, stat err = %v", phase, err)
-			}
-
-			presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
-			if _, err := os.Stat(presetPath); !os.IsNotExist(err) {
-				t.Fatalf("phase %v: dirty preset must NOT be saved to disk when a pre-rename phase fails, but found %s", phase, presetPath)
-			}
-		})
-	}
-}
-
-// TestRunProjectCreate_DirtyPresetSavedAndReferencedOnSuccess proves the
-// successful final state. The separate rename-failure test below observes the
-// stronger ordering guarantee that this dependency exists before publication.
-func TestRunProjectCreate_DirtyPresetSavedAndReferencedOnSuccess(t *testing.T) {
-	draft, root, presetName := newTestDraftWithDirtyPreset(t)
-	opts := testCreateOptions(t, root)
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Err != nil {
-		t.Fatalf("unexpected error: %v (phase %v)", res.Err, res.FailedPhase)
-	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true")
-	}
-	// testCreateOptions intentionally resolves no runtime command so tests
-	// never launch a real agent. The resulting post-commit launch warning is
-	// expected here; this test only requires the config/preset phase to finish
-	// without its own warning.
-	if len(res.PostCommitWarnings) != 1 || !strings.Contains(res.PostCommitWarnings[0], "post_commit_launch: runtime command unavailable") {
-		t.Fatalf("unexpected post-commit warnings: %v", res.PostCommitWarnings)
-	}
-
-	presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
-	savedData, err := os.ReadFile(presetPath)
-	if err != nil {
-		t.Fatalf("read dirty preset saved on successful create: %v", err)
-	}
-	var saved preset.Preset
-	if err := json.Unmarshal(savedData, &saved); err != nil {
-		t.Fatalf("parse saved dirty preset: %v", err)
-	}
-	if saved.Name != presetName {
-		t.Fatalf("saved preset name = %q, want %q", saved.Name, presetName)
-	}
-	savedLLM, _ := saved.Manifest["llm"].(map[string]interface{})
-	if got, _ := savedLLM["api_key_env"].(string); got != "OPENAI_1_API_KEY" {
-		t.Fatalf("saved preset api_key_env = %q, want normalized/stamped OPENAI_1_API_KEY", got)
-	}
-
-	// The staged (now final) init.json must reference the same preset path that
-	// dependency persistence verified before rename.
-	initPath := filepath.Join(root, ".lingtai", "orchestrator", "init.json")
-	data, err := os.ReadFile(initPath)
-	if err != nil {
-		t.Fatalf("read staged init.json: %v", err)
-	}
-	if !strings.Contains(string(data), presetName) {
-		t.Fatalf("expected init.json to reference preset %q, got: %s", presetName, data)
-	}
-}
-
-// TestRunProjectCreate_DirtyPresetPersistenceFailureDoesNotPublishProject is
-// the primary issue-771 RED. A real saved-path collision makes preset.Save
-// fail deterministically; launch-critical dependency failure must happen
-// before rename, clean staging, and leave no final .lingtai/.
-func TestRunProjectCreate_DirtyPresetPersistenceFailureDoesNotPublishProject(t *testing.T) {
-	draft, root, presetName := newTestDraftWithDirtyPreset(t)
-	opts := testCreateOptions(t, root)
-	runtimeReadyCalled := false
-	opts.RuntimeReady = func(string) error {
-		runtimeReadyCalled = true
-		return nil
-	}
-	presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
-	if err := os.Mkdir(presetPath, 0o755); err != nil {
-		t.Fatalf("create deterministic preset save collision: %v", err)
-	}
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false when dirty preset persistence fails")
-	}
-	if res.Err == nil {
-		t.Fatal("expected dirty preset persistence error")
-	}
-	if got := res.FailedPhase.String(); got != "persist_dependencies" {
-		t.Fatalf("failed phase = %q, want persist_dependencies", got)
-	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after dependency failure, stat err = %v", err)
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".lingtai.create-") {
-			t.Fatalf("leftover staging directory after dependency failure: %s", entry.Name())
-		}
-	}
-	if runtimeReadyCalled {
-		t.Fatal("runtime launch boundary ran after dependency persistence failed")
-	}
-}
-
-// Once the staged project is valid, its exact preset and newly staged
-// credentials are persisted before PhaseRename. A rename failure may leave
-// those valid user-owned dependencies behind, but must not publish a project.
-func TestRunProjectCreate_DependenciesPersistBeforeRenameFailure(t *testing.T) {
-	draft, root, presetName := newTestDraftWithDirtyPreset(t)
-	opts := testCreateOptions(t, root)
-	const keyEnv = "ISSUE_771_API_KEY"
-	llm := draft.DraftPreset.Manifest["llm"].(map[string]interface{})
-	llm["api_key_env"] = keyEnv
-	draft.DraftAPIKeyEnv = keyEnv
-	draft.DraftAPIKey = secretString("synthetic-api-key")
-	draft.DraftCodexTokens = secretBytes(`{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`)
-
-	var phases []string
-	opts.InjectFailure = func(phase CreatePhase) error {
-		phases = append(phases, phase.String())
-		if phase == PhaseRename {
-			return errors.New("injected rename failure")
-		}
-		return nil
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Committed {
-		t.Fatal("rename failure must leave Committed=false")
-	}
-	if res.Err == nil || res.FailedPhase != PhaseRename {
-		t.Fatalf("result err=%v phase=%v, want rename failure", res.Err, res.FailedPhase)
-	}
-	persistIndex, renameIndex := -1, -1
-	for i, phase := range phases {
-		switch phase {
-		case "persist_dependencies":
-			persistIndex = i
-		case PhaseRename.String():
-			renameIndex = i
-		}
-	}
-	if persistIndex < 0 || renameIndex < 0 || persistIndex >= renameIndex {
-		t.Fatalf("phase order = %v, want persist_dependencies before rename", phases)
-	}
-
-	ref := preset.RefFor(preset.Preset{Name: presetName, Source: preset.SourceSaved})
-	resolved := preset.ResolveRefs([]string{ref}, map[string]string{keyEnv: "present"})
-	if len(resolved) != 1 || !resolved[0].Exists || !resolved[0].ManifestValid {
-		t.Fatalf("saved dependency %q did not resolve after rename failure: %+v", ref, resolved)
-	}
-	cfg, err := config.LoadConfigReadOnly(opts.GlobalDir)
-	if err != nil {
-		t.Fatalf("read persisted API-key config: %v", err)
-	}
-	if cfg.Keys[keyEnv] == "" {
-		t.Fatalf("pending API key %s was not persisted before rename", keyEnv)
-	}
-	if _, ok := readCodexTokenFile(legacyCodexAuthPath(opts.GlobalDir)); !ok {
-		t.Fatal("pending Codex token bundle was not available before rename")
-	}
-	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after rename failure, stat err = %v", err)
-	}
-}
-
-func TestRunProjectCreate_StaleSelectedPresetDoesNotPublishProject(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	missing := minimalDraftPreset()
-	missing.Name = "deleted-selection"
-	missing.Source = preset.SourceSaved
-	draft.DraftPreset = &missing
-
-	res := RunProjectCreate(draft, opts)
-	if res.Committed {
-		t.Fatal("stale selected preset must not publish a project")
-	}
-	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
-		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist for a stale selection, stat err = %v", err)
-	}
-}
-
-func TestRunProjectCreate_PendingAPIKeyPersistenceFailureDoesNotPublishProject(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	draft.DraftAPIKeyEnv = "ISSUE_771_API_KEY"
-	draft.DraftAPIKey = secretString("synthetic-api-key")
-	opts.InjectFailure = func(phase CreatePhase) error {
-		if phase.String() != "persist_dependencies" {
-			return nil
-		}
-		envPath := filepath.Join(opts.GlobalDir, ".env")
-		if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return os.Mkdir(envPath, 0o755)
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Committed {
-		t.Fatal("API-key persistence failure must not publish a project")
-	}
-	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
-		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after API-key failure, stat err = %v", err)
-	}
-}
-
-// A fresh-home draft may select a compiled built-in before templates have
-// ever been materialized. The TUI-owned template dependency must exist and
-// resolve at its exact template ref before rename, without changing the ref to
-// saved/ or treating a missing user-owned saved selection the same way.
-func TestRunProjectCreate_ColdCompiledTemplateMaterializesExactRefBeforeRename(t *testing.T) {
-	draft, root := newTestDraft(t)
-	var selected preset.Preset
-	for _, candidate := range preset.BuiltinPresets() {
-		if candidate.Name == "codex" {
-			selected = candidate
-			break
-		}
-	}
-	if selected.Name == "" {
-		t.Fatal("codex built-in fixture missing")
-	}
-	selected.Source = preset.SourceTemplate
-	draft.DraftPreset = &selected
-	draft.DraftPresetDirty = false
-	opts := testCreateOptions(t, root)
-
-	var resolvedBeforeRename bool
-	opts.InjectFailure = func(phase CreatePhase) error {
-		if phase == PhaseRename {
-			resolved := preset.ResolveRefs([]string{preset.RefFor(selected)}, nil)
-			resolvedBeforeRename = len(resolved) == 1 && resolved[0].Exists && resolved[0].ManifestValid
-		}
-		return nil
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Err != nil || !res.Committed {
-		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
-	}
-	if !resolvedBeforeRename {
-		t.Fatal("compiled template dependency was not resolvable before rename")
-	}
-	wantRef := preset.RefFor(selected)
-	gotRef := activePresetRefFromInit(t, filepath.Join(root, ".lingtai", "orchestrator", "init.json"))
-	if gotRef != wantRef {
-		t.Fatalf("final init active preset ref = %q, want %q", gotRef, wantRef)
-	}
-}
-
-func TestRunProjectCreate_PendingCodexPersistenceFailureDoesNotPublishProject(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	draft.DraftCodexTokens = secretBytes(`{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`)
-	if err := os.Mkdir(legacyCodexAuthPath(opts.GlobalDir), 0o755); err != nil {
-		t.Fatalf("create deterministic Codex auth collision: %v", err)
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Committed {
-		t.Fatal("Codex token persistence failure must not publish a project")
-	}
-	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
-		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after Codex persistence failure, stat err = %v", err)
-	}
-}
-
-func TestRunProjectCreate_SuccessPublishesResolvableSavedRefAndCredentialsBeforeLaunch(t *testing.T) {
-	draft, root := newTestDraft(t)
-	p := minimalDraftPreset()
-	p.Name = "openai"
-	p.Source = preset.SourceTemplate
-	const (
-		keyEnv         = "ISSUE_771_API_KEY"
-		expectedKey    = "synthetic-api-key"
-		expectedTokens = `{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`
-	)
-	p.Manifest["llm"].(map[string]interface{})["api_key_env"] = keyEnv
-	draft.DraftPreset = &p
-	draft.DraftPresetDirty = true
-	draft.DraftAPIKeyEnv = keyEnv
-	draft.DraftAPIKey = secretString(expectedKey)
-	draft.DraftCodexTokens = secretBytes(expectedTokens)
-	opts := testCreateOptions(t, root)
-
-	var launchSawKey, launchSawTokens bool
-	opts.RuntimeReady = func(globalDir string) error {
-		cfg, err := config.LoadConfigReadOnly(globalDir)
-		launchSawKey = err == nil && cfg.Keys[keyEnv] == expectedKey
-		persistedTokens, readErr := os.ReadFile(legacyCodexAuthPath(globalDir))
-		launchSawTokens = readErr == nil && string(persistedTokens) == expectedTokens
-		return errors.New("test stops before process launch")
-	}
-
-	res := RunProjectCreate(draft, opts)
-	if res.Err != nil || !res.Committed {
-		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
-	}
-	if !launchSawKey || !launchSawTokens {
-		t.Fatalf("launch boundary saw key=%v tokens=%v, want both persisted", launchSawKey, launchSawTokens)
-	}
-
-	initPath := filepath.Join(root, ".lingtai", "orchestrator", "init.json")
-	ref := activePresetRefFromInit(t, initPath)
-	wantRef := "~/.lingtai-tui/presets/saved/openai.json"
-	if ref != wantRef {
-		t.Fatalf("final init active preset ref = %q, want %q", ref, wantRef)
-	}
-	resolved := preset.ResolveRefs([]string{ref}, map[string]string{keyEnv: "present"})
-	if len(resolved) != 1 || !resolved[0].Exists || !resolved[0].ManifestValid || !resolved[0].HasKey {
-		t.Fatalf("final init preset ref did not resolve with its credential: %+v", resolved)
 	}
 }
 
@@ -818,7 +94,7 @@ func TestDetectUnfinishedStaging_ReadOnlyAndMarkerGated(t *testing.T) {
 
 	// A properly marked leftover staging dir. The marker's content must
 	// match the directory's own basename exactly (including the leading
-	// "."), the same content DiscardUnfinishedStaging/removeOwnedStaging
+	// "."), the same content legacy DiscardUnfinishedStaging
 	// require before deleting — DetectUnfinishedStaging now enforces the
 	// identical check so it never offers a directory Discard would refuse.
 	marked := filepath.Join(root, ".lingtai.create-abc123")
@@ -1043,313 +319,254 @@ func TestRunProjectCreate_InvalidDraftNeverWrites(t *testing.T) {
 	}
 }
 
-// TestRunProjectCreate_ProjectRootMustMatchApprovedDestination proves a
-// crafted/stale confirmation cannot redirect creation from the root selected
-// by the launcher to a different, otherwise-valid absolute directory.
-func TestRunProjectCreate_ProjectRootMustMatchApprovedDestination(t *testing.T) {
-	draft, draftRoot := newTestDraft(t)
-	approvedRoot := t.TempDir()
-	opts := testCreateOptions(t, approvedRoot)
-
-	draftBefore := dirSnapshot(t, draftRoot)
-	approvedBefore := dirSnapshot(t, approvedRoot)
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false for mismatched project root")
-	}
-	if res.Err == nil || !strings.Contains(res.Err.Error(), "does not match approved destination") {
-		t.Fatalf("expected approved-destination mismatch error, got %v", res.Err)
-	}
-	if res.FailedPhase != PhaseValidateDraft {
-		t.Fatalf("expected PhaseValidateDraft, got %v", res.FailedPhase)
-	}
-	assertSnapshotsEqual(t, "draft root after destination mismatch", draftBefore, dirSnapshot(t, draftRoot))
-	assertSnapshotsEqual(t, "approved root after destination mismatch", approvedBefore, dirSnapshot(t, approvedRoot))
-}
-
-// TestRunProjectCreate_NilDraftNeverWrites proves the nil-draft guard fails
-// closed without touching disk — nil is the most trivially "invalid" draft of all,
-// and it's worth confirming the same "byte-for-byte parent" standard the
-// other invalid-draft cases are held to.
-func TestRunProjectCreate_NilDraftNeverWrites(t *testing.T) {
-	root := t.TempDir()
-	before := dirSnapshot(t, root)
-	opts := testCreateOptions(t, root)
-
-	res := RunProjectCreate(nil, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false for nil draft")
-	}
-	if res.Err == nil {
-		t.Fatal("expected an error for nil draft")
-	}
-	after := dirSnapshot(t, root)
-	assertSnapshotsEqual(t, "root dir after nil draft", before, after)
-}
-
-// --- Blocker 3: phantom-project recheck -------------------------------------
-//
-// The former main (non-launcher) startup path had a phantom-process check
-// before creating .lingtai/; a parent review found the new strict
-// no-project gate bypassed it entirely. These tests drive RunProjectCreate
-// with an injected opts.ScanInventory fake — never touching the real OS
-// process table — to prove the three required outcomes: phantom result
-// fails closed before staging, a scan error fails closed before staging,
-// and a clean scan proceeds to the existing staged/committed path.
-
-// TestRunProjectCreate_PhantomScanRejectsBeforeStaging proves that when the
-// injected scan reports records AND phantom dirs for this project root
-// (mirroring listMain's own "phantom only when records exist" semantics —
-// see runPhantomRecheck's doc comment), RunProjectCreate fails at
-// PhaseValidateDraft, before any staging write, and the root is left
-// byte-for-byte unchanged.
-func TestRunProjectCreate_PhantomScanRejectsBeforeStaging(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	opts.ScanInventory = func(projectRoot string) (inventory.Snapshot, error) {
-		return inventory.Snapshot{
-			Records:     []inventory.Record{{PID: 12345, Project: projectRoot}},
-			PhantomDirs: []string{projectRoot},
-		}, nil
-	}
-
-	before := dirSnapshot(t, root)
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false on phantom scan result")
-	}
-	if res.Err == nil {
-		t.Fatal("expected an error on phantom scan result")
-	}
-	if res.FailedPhase != PhaseValidateDraft {
-		t.Fatalf("expected failure at PhaseValidateDraft, got %v", res.FailedPhase)
-	}
-	if !strings.Contains(res.Err.Error(), "phantom") {
-		t.Fatalf("expected error to mention phantom state, got %q", res.Err.Error())
-	}
-	after := dirSnapshot(t, root)
-	assertSnapshotsEqual(t, "root dir after phantom scan result", before, after)
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after phantom rejection, stat err = %v", err)
-	}
-}
-
-// TestRunProjectCreate_ScanErrorRejectsBeforeStaging proves a scan failure
-// itself (not just a phantom RESULT) fails closed — the legacy shelled-out
-// `self list` check silently ignored exec errors (fail-open); this must
-// not repeat that mistake.
-func TestRunProjectCreate_ScanErrorRejectsBeforeStaging(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	scanErr := errors.New("boom: ps unavailable")
-	opts.ScanInventory = func(projectRoot string) (inventory.Snapshot, error) {
-		return inventory.Snapshot{}, scanErr
-	}
-
-	before := dirSnapshot(t, root)
-	res := RunProjectCreate(draft, opts)
-
-	if res.Committed {
-		t.Fatal("expected Committed=false on scan error")
-	}
-	if res.Err == nil {
-		t.Fatal("expected an error on scan error")
-	}
-	if res.FailedPhase != PhaseValidateDraft {
-		t.Fatalf("expected failure at PhaseValidateDraft, got %v", res.FailedPhase)
-	}
-	if !errors.Is(res.Err, scanErr) {
-		t.Fatalf("expected res.Err to wrap the scan error, got %v", res.Err)
-	}
-	after := dirSnapshot(t, root)
-	assertSnapshotsEqual(t, "root dir after scan error", before, after)
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
-		t.Fatalf("final .lingtai/ must not exist after scan-error rejection, stat err = %v", err)
-	}
-}
-
-// TestRunProjectCreate_CleanScanProceeds proves the third required case: a
-// clean scan (no records, or records with no phantom dirs) does NOT block
-// creation — the recheck must be a real gate, not an unconditional refusal.
-func TestRunProjectCreate_CleanScanProceeds(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	scanCalled := false
-	opts.ScanInventory = func(projectRoot string) (inventory.Snapshot, error) {
-		scanCalled = true
-		if projectRoot != root {
-			t.Fatalf("expected scan to be called with project root %q, got %q", root, projectRoot)
-		}
-		return inventory.Snapshot{}, nil // no records, no phantoms — clean
-	}
-
-	res := RunProjectCreate(draft, opts)
-
-	if !scanCalled {
-		t.Fatal("expected ScanInventory to be invoked")
-	}
-	if res.Err != nil {
-		t.Fatalf("unexpected error on clean scan: %v (phase %v)", res.Err, res.FailedPhase)
-	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true on clean scan")
-	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); err != nil {
-		t.Fatalf("expected final .lingtai/ to exist after clean scan: %v", err)
-	}
-}
-
-// TestRunProjectCreate_FreshHomeWithoutRecipesTree is the replacement for the
-// deleted TestNewDraftFirstRunModel_FreshHomeShowsEmbeddedRecipesWithoutWrites
-// (fable F1/F4): on a machine where preset.Bootstrap has never run there is no
-// <globalDir>/recipes tree, yet the wizard always stages adaptive
-// (preset.DefaultRecipe). copyRecipeBundle must fall back to the compiled-in
-// bundle instead of failing PhaseApplyRecipe with "could not resolve source
-// bundle".
-func TestRunProjectCreate_FreshHomeWithoutRecipesTree(t *testing.T) {
-	draft, root := newTestDraft(t)
-	opts := testCreateOptions(t, root)
-	draft.RecipeName = preset.DefaultRecipe // what enterReviewStep writes
-	// Precondition: no recipes tree anywhere under the isolated global dir.
-	if _, err := os.Stat(filepath.Join(opts.GlobalDir, "recipes")); !os.IsNotExist(err) {
-		t.Fatalf("precondition: global recipes tree must not exist, stat err = %v", err)
-	}
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Err != nil {
-		t.Fatalf("fresh-home project creation failed at phase %v: %v", res.FailedPhase, res.Err)
-	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true on success")
-	}
-	// The compiled fallback must have staged a real .recipe/ bundle at the
-	// project root and applied it into the published .lingtai/ tree.
-	if _, err := os.Stat(filepath.Join(root, ".recipe", "recipe.json")); err != nil {
-		t.Fatalf("published project missing staged .recipe/: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".lingtai", "orchestrator", ".prompt")); err != nil {
-		t.Fatalf("published project missing applied agent .prompt: %v", err)
-	}
-}
-
-// TestRunProjectCreate_KeepsProjectLocalRecipe reproduces fable F2: creating a
-// project inside a directory that already ships its own .recipe/ (a cloned
-// recipe repo, an imported network, any pre-existing project) must leave the
-// local bundle in place rather than RemoveAll-ing it and replacing it with
-// adaptive from the global tree.
-func TestRunProjectCreate_KeepsProjectLocalRecipe(t *testing.T) {
-	draft, root := newTestDraft(t)
-	// The project dir already carries a hand-authored recipe.
-	writeRecipeFile(t, filepath.Join(root, ".recipe", "recipe.json"),
-		`{"id":"greeter","name":"Greeter","description":"d","library_name":null}`)
-	writeRecipeFile(t, filepath.Join(root, ".recipe", "notes.md"), "project-local notes")
-	opts := testCreateOptions(t, root)
-	// Global adaptive IS available — head's old code would resolve it and
-	// RemoveAll the local bundle.
-	draft.RecipeName = preset.DefaultRecipe
-	adaptiveRoot := filepath.Join(opts.GlobalDir, "recipes", "recommended", preset.DefaultRecipe)
-	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
-		`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
-	writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "greet", "greet.md"), "adaptive greet {{addr}}")
-
-	res := RunProjectCreate(draft, opts)
-
-	if res.Err != nil {
-		t.Fatalf("project creation failed at phase %v: %v", res.FailedPhase, res.Err)
-	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true on success")
-	}
-	// Local bundle survived untouched — not RemoveAll'd, not overwritten.
-	if _, err := os.Stat(filepath.Join(root, ".recipe", "notes.md")); err != nil {
-		t.Fatalf("project-local .recipe/notes.md destroyed: %v", err)
-	}
-	recipeJSON, err := os.ReadFile(filepath.Join(root, ".recipe", "recipe.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(recipeJSON), "greeter") {
-		t.Fatalf("project-local recipe overwritten, now = %q", recipeJSON)
-	}
-}
-
-// TestRunProjectCreate_StrayOrMalformedProjectRecipeDoesNotBlock proves the
-// ProjectLocalRecipeDir early-return is gated on the bundle parsing (fable
-// R2 N1): a stray/empty .recipe/ (interrupted copy) or one with a malformed
-// recipe.json must not hard-block creation, and must NOT be preserved as if
-// it were a real recipe — the normal adaptive staging replaces it.
-func TestRunProjectCreate_StrayOrMalformedProjectRecipeDoesNotBlock(t *testing.T) {
-	for name, recipeJSON := range map[string]string{
-		"empty dir":  "",                     // .recipe/ exists but no recipe.json
-		"malformed":  "{not json",            // unparseable recipe.json
-		"empty name": `{"id":"x","name":""}`, // parses but has empty name
-	} {
-		t.Run(name, func(t *testing.T) {
+// These are consumer fixtures, not replacements for the kernel's staged-reader
+// tests. All domain creation and exclusive publication acceptance runs in Python.
+func TestProjectConsumerFailedOrUnknownDoesNotRegister(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unknown", true: "refused"}[known], func(t *testing.T) {
 			draft, root := newTestDraft(t)
-			writeRecipeFile(t, filepath.Join(root, ".recipe", "recipe.json"), recipeJSON)
 			opts := testCreateOptions(t, root)
-			draft.RecipeName = preset.DefaultRecipe
-			// Global adaptive available.
-			adaptiveRoot := filepath.Join(opts.GlobalDir, "recipes", "recommended", preset.DefaultRecipe)
-			writeRecipeFile(t, filepath.Join(adaptiveRoot, ".recipe", "recipe.json"),
-				`{"id":"adaptive","name":"Adaptive","description":"d","library_name":null}`)
-
+			draft.DraftAPIKey = secretString("fixture-key-never-in-request")
+			draft.DraftAPIKeyEnv = "FIXTURE_API_KEY"
+			before := dirSnapshot(t, opts.GlobalDir)
+			calls := 0
+			opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+				calls++
+				raw, _ := json.Marshal(req)
+				if strings.Contains(string(raw), draft.DraftAPIKey.Reveal()) {
+					t.Fatal("credential in projection")
+				}
+				return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: known, Code: "init_preflight_failed"}
+			}
 			res := RunProjectCreate(draft, opts)
-
-			if res.Err != nil {
-				t.Fatalf("project creation failed at phase %v: %v", res.FailedPhase, res.Err)
+			if res.Committed || res.Err == nil || res.Unknown == known || calls != 1 {
+				t.Fatalf("wrong outcome: %+v calls=%d", res, calls)
 			}
-			if !res.Committed {
-				t.Fatal("expected Committed=true on success")
-			}
-			// The stray/malformed bundle was replaced by the adaptive staging,
-			// not preserved.
-			recipeJSONOut, err := os.ReadFile(filepath.Join(root, ".recipe", "recipe.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(recipeJSONOut), "adaptive") {
-				t.Fatalf("stray .recipe/ not replaced by adaptive, now = %q", recipeJSONOut)
+			assertSnapshotsEqual(t, "no readiness means no dependencies/UI registration", before, dirSnapshot(t, opts.GlobalDir))
+			entries, _ := os.ReadDir(root)
+			if len(entries) != 0 {
+				t.Fatal("Go staged/created a project on failure")
 			}
 		})
 	}
 }
-
-// TestRunProjectCreate_PhantomDirsWithNoRecordsProceeds proves the specific
-// false-positive this recheck must NOT reproduce:
-// inventory.Snapshot.PhantomDirs is populated purely because <root>/.lingtai
-// doesn't exist yet (detectPhantomDirs's FilterDir branch — see
-// runPhantomRecheck's doc comment), which is true for literally every
-// never-yet-created project. Without the "only when Records is non-empty"
-// gate this would reject creating a project in ANY empty directory.
-func TestRunProjectCreate_PhantomDirsWithNoRecordsProceeds(t *testing.T) {
+func TestProjectConsumerPrerequisitesOnlyAfterReadyAndRetainedOnFailure(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
-	opts.ScanInventory = func(projectRoot string) (inventory.Snapshot, error) {
-		return inventory.Snapshot{
-			Records:     nil, // no matching processes at all
-			PhantomDirs: []string{projectRoot},
-		}, nil
+	draft.DraftAPIKey = secretString("fixture-key")
+	draft.DraftAPIKeyEnv = "FIXTURE_API_KEY"
+	phaseSeen := false
+	opts.InjectFailure = func(phase CreatePhase) error {
+		if phase != PhasePersistDependencies {
+			t.Fatal("Go retained a domain phase")
+		}
+		phaseSeen = true
+		return nil
 	}
-
+	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		cfg, _ := config.LoadConfigReadOnly(opts.GlobalDir)
+		if cfg.Keys["FIXTURE_API_KEY"] != "" || phaseSeen {
+			t.Fatal("credentials persisted before readiness")
+		}
+		if !ready() || !phaseSeen {
+			t.Fatal("prerequisite persistence unavailable")
+		}
+		cfg, _ = config.LoadConfigReadOnly(opts.GlobalDir)
+		if cfg.Keys["FIXTURE_API_KEY"] != draft.DraftAPIKey.Reveal() {
+			t.Fatal("ack before verified credential")
+		}
+		return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "project_publication_failed"}
+	}
 	res := RunProjectCreate(draft, opts)
-
-	if res.Err != nil {
-		t.Fatalf("unexpected error when PhantomDirs is set but Records is empty: %v (phase %v)", res.Err, res.FailedPhase)
+	if res.Committed || res.Unknown || res.Err == nil {
+		t.Fatalf("wrong refusal: %+v", res)
 	}
-	if !res.Committed {
-		t.Fatal("expected Committed=true — PhantomDirs alone, without matching Records, must not block creation")
+	cfg, _ := config.LoadConfigReadOnly(opts.GlobalDir)
+	if cfg.Keys["FIXTURE_API_KEY"] != "fixture-key" {
+		t.Fatal("rolled back external prerequisite")
 	}
-	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); err != nil {
-		t.Fatalf("expected final .lingtai/ to exist: %v", err)
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatal("Go created final tree")
+	}
+}
+func TestProjectConsumerProjectionPreservesReaderFieldsAndRefs(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftPreset.Manifest["llm"].(map[string]interface{})["context_limit"] = json.Number("9007199254740993")
+	draft.DraftPreset.Manifest["extension"] = map[string]interface{}{"exact": json.Number("9007199254740993"), "unknown": "preserve"}
+	draft.AgentOpts.AllowedPresets = []string{"~/saved/other.json", "~/saved/other.json"}
+	draft.AgentOpts.Addons = []string{"imap", "unknown-addon"}
+	draft.RecipeName = "adaptive"
+	before, _ := json.Marshal(draft.DraftPreset.Manifest)
+	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		raw, _ := json.Marshal(req)
+		if strings.Count(string(raw), "9007199254740993") != 2 || !strings.Contains(string(raw), "unknown") || req.Recipe != "adaptive" || req.AgentName != draft.AgentName || req.PresetRef != preset.RefFor(*draft.DraftPreset) {
+			t.Fatalf("projection lost reviewed data: %s", raw)
+		}
+		if len(req.Options.AllowedPresets) != 2 || req.Options.AllowedPresets[0] != draft.AgentOpts.AllowedPresets[0] || len(req.Options.Addons) != 2 || req.Options.MCP["imap"] == nil || req.Options.MCP["unknown-addon"] != nil {
+			t.Fatal("caller refs/addon semantics changed")
+		}
+		for _, retired := range []string{"context_limit", "max_rpm", "max_aed_attempts", "comment_file", "covenant_file"} {
+			var wire map[string]interface{}
+			_ = json.Unmarshal(raw, &wire)
+			options := wire["options"].(map[string]interface{})
+			if _, found := options[retired]; found {
+				t.Fatalf("retired knob %s", retired)
+			}
+		}
+		return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "fixture_refusal"}
+	}
+	_ = RunProjectCreate(draft, opts)
+	after, _ := json.Marshal(draft.DraftPreset.Manifest)
+	if string(before) != string(after) {
+		t.Fatal("projection mutated Review")
+	}
+}
+func TestProjectConsumerProcessEvidenceIsFreshAndFailClosed(t *testing.T) {
+	for _, evidence := range []string{"clean", "blocked", "unknown"} {
+		t.Run(evidence, func(t *testing.T) {
+			draft, root := newTestDraft(t)
+			opts := testCreateOptions(t, root)
+			scans := 0
+			opts.ScanInventory = func(path string) (inventory.Snapshot, error) {
+				scans++
+				if evidence == "unknown" {
+					return inventory.Snapshot{}, errors.New("incomplete scan")
+				}
+				snap := inventory.Snapshot{FilterDir: path, PhantomDirs: []string{path}}
+				if evidence == "blocked" {
+					snap.Records = []inventory.Record{{Project: path, AgentDir: filepath.Join(path, ".lingtai", "missing")}}
+				}
+				return snap, nil
+			}
+			opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+				if scans != 1 || req.ProcessEvidence != evidence {
+					t.Fatalf("evidence=%s scans=%d", req.ProcessEvidence, scans)
+				}
+				return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "fixture_refusal"}
+			}
+			_ = RunProjectCreate(draft, opts)
+		})
+	}
+}
+func TestProjectConsumerKnownCommitKeepsUIFailuresAsWarnings(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		if !ready() {
+			t.Fatal("prerequisites failed")
+		}
+		committed := true
+		return process.InteractiveProjectResult{Status: "created", Committed: &committed, AgentName: req.AgentName, DirectoryName: req.DirectoryName, PresetRef: req.PresetRef, AttemptID: "fixture", Warnings: []string{"kernel fixture warning"}}, nil
+	}
+	opts.InjectFailure = func(phase CreatePhase) error {
+		if phase == PhasePostCommitConfig || phase == PhasePostCommitRegister || phase == PhasePostCommitLaunch {
+			return errors.New("UI-only failure")
+		}
+		return nil
+	}
+	res := RunProjectCreate(draft, opts)
+	if !res.Committed || res.Err != nil || len(res.PostCommitWarnings) != 4 {
+		t.Fatalf("postcommit rolled back: %+v", res)
+	}
+}
+func TestProjectConsumerResolvedApprovedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink requires developer mode")
+	}
+	draft, root := newTestDraft(t)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDraftForCommit(draft, alias); err != nil {
+		t.Fatalf("resolved root mismatch: %v", err)
+	}
+	if err := validateDraftForCommit(draft, t.TempDir()); err == nil {
+		t.Fatal("unapproved destination accepted")
+	}
+}
+func TestProjectConsumerRejectedDependenciesDoNotWriteCredentials(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftPreset.Name = "stale-selection"
+	draft.DraftAPIKey = secretString("fixture-key")
+	draft.DraftAPIKeyEnv = "FIXTURE_API_KEY"
+	before := dirSnapshot(t, opts.GlobalDir)
+	opts.CreateInteractive = func(_ context.Context, _ string, _ process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		if ready() {
+			t.Fatal("accepted unresolved selected preset")
+		}
+		return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "prerequisites_rejected"}
+	}
+	res := RunProjectCreate(draft, opts)
+	if res.Err == nil || res.Committed {
+		t.Fatal("prerequisite refusal accepted")
+	}
+	assertSnapshotsEqual(t, "preset must verify before credentials", before, dirSnapshot(t, opts.GlobalDir))
+}
+func TestLauncherUnknownAttemptCannotConfirmAgain(t *testing.T) {
+	model := LauncherRootModel{view: launcherViewCreate, createResult: &CreateResult{Unknown: true}, createErr: "inspect before another attempt"}
+	updated, command := model.Update(ProjectDraftConfirmedMsg{Draft: NewProjectDraft(t.TempDir())})
+	next := updated.(LauncherRootModel)
+	if command != nil || next.createResult == nil || !next.createResult.Unknown || next.done {
+		t.Fatal("unknown creation was replayed")
+	}
+}
+func TestProjectConsumerDirtyPresetIsBoundAndSavedOnlyAfterReady(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftPresetDirty = true
+	draft.DraftPreset.Name = "reviewed-custom"
+	draft.DraftPreset.Source = preset.SourceTemplate
+	draft.DraftPreset.Manifest["extension"] = json.Number("9007199254740993")
+	saved := filepath.Join(opts.GlobalDir, "presets", "saved", "reviewed-custom.json")
+	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		if req.PresetRef != "~/.lingtai-tui/presets/saved/reviewed-custom.json" {
+			t.Fatalf("dirty reference not bound to save: %s", req.PresetRef)
+		}
+		if _, err := os.Stat(saved); !os.IsNotExist(err) {
+			t.Fatal("dirty preset written before readiness")
+		}
+		if !ready() {
+			t.Fatal("dirty preset prerequisite rejected")
+		}
+		data, err := os.ReadFile(saved)
+		if err != nil || !strings.Contains(string(data), "9007199254740993") {
+			t.Fatal("exact dirty snapshot not persisted")
+		}
+		return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "project_publication_failed"}
+	}
+	res := RunProjectCreate(draft, opts)
+	if res.Committed || res.Err == nil || res.Unknown {
+		t.Fatalf("publication refusal changed: %+v", res)
+	}
+	if _, err := os.Stat(saved); err != nil {
+		t.Fatal("valid external preset rolled back")
+	}
+	if draft.DraftPreset.Source != preset.SourceTemplate {
+		t.Fatal("normalized save changed Review source")
+	}
+}
+func TestProjectConsumerInvalidPendingCodexAckIsSecretSafe(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftCodexTokens = secretBytes([]byte("invalid-secret-fixture"))
+	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
+		data, _ := json.Marshal(req)
+		if strings.Contains(string(data), "invalid-secret-fixture") {
+			t.Fatal("Codex credential in stdin")
+		}
+		if ready() {
+			t.Fatal("invalid pending token accepted")
+		}
+		return process.InteractiveProjectResult{}, &process.ProjectOperationError{Known: true, Code: "prerequisites_rejected"}
+	}
+	res := RunProjectCreate(draft, opts)
+	if res.Err == nil || strings.Contains(res.Err.Error(), "invalid-secret-fixture") || res.Committed {
+		t.Fatal("token failure leaked or published")
+	}
+	if _, err := os.Stat(legacyCodexAuthPath(opts.GlobalDir)); !os.IsNotExist(err) {
+		t.Fatal("invalid token persisted")
 	}
 }

@@ -125,6 +125,11 @@ irm https://lingtai.ai/install.ps1 | iex
 
 制作、连接、验证或维护灵台机器人，从一级 [`lingtai-bot-guide` 技能](tui/internal/preset/skills/lingtai-bot-guide/SKILL.md) 进入；它统一指向项目、配方、预设、各渠道与生命周期的当前权威文档。
 
+全新交互创建需要已安装内核支持 Project 检查与创建；旧版本不支持时会给出明确
+提示。创建结果未知时须先检查再决定下一步，不盲目重试或清扫。详见
+[TUI 所有者契约](tui/CONTRACT.md#project-inspection-and-fresh-interactive-creation)
+及既有 `/help`。本次并非完成整个 Project 迁移，Avatar 仍然保留。
+
 ## 与它协作的几种方式
 
 **Desktop——`lingtai-desktop`（macOS）** 是灵台的原生 App：在一处查看项目和科学家、对话与收发信件、调整设置和预设，也能随时管理它们的工作。

@@ -13,10 +13,16 @@ related_files:
   - tui/internal/preset/preset.go
   - tui/internal/preset/preset_test.go
   - tui/internal/preset/recipe_apply.go
+  - tui/internal/preset/project_recipe.go
+  - tui/internal/preset/project_recipe_test.go
   - tui/internal/preset/recipe_apply_test.go
   - tui/internal/preset/recipes.go
   - tui/internal/preset/recipes_test.go
   - tui/internal/preset/rehydrate.go
+  - tui/internal/preset/project_configuration.go
+  - tui/internal/preset/project_configuration_test.go
+  - tui/internal/preset/testdata/project_configuration.json
+  - tui/internal/process/ANATOMY.md
   - tui/internal/preset/state.go
   - tui/internal/preset/state_test.go
   - tui/internal/preset/preset_allowed_revoke_test.go
@@ -206,19 +212,30 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `skills/lingtai-bot-guide/` | `tui/internal/preset/skills/lingtai-bot-guide/SKILL.md:1`, `tui/internal/preset/bot_guide_populate_test.go:1` | First-level bot creation/operation router with six focused references. Owns the promoted headless-bot helper subtree (standard-library-only imports, no assets); routes other channels and kernel lifecycle/auth/version to their existing owners. Embedded by `skillsFS`, materialized by `PopulateBundledLibrary`, and exposed by `BundledSkillNames`; no runtime Project API. |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` / `CopyEmbeddedBundle` | `tui/internal/preset/recipe_apply.go:59,122` | copies disk or compiled `.recipe/` (replace) plus recipe siblings into a project |
-| `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
-| `ApplyRecipe` | `tui/internal/preset/recipe_apply.go:179` | writes `.prompt` + patches `skills.paths` per agent; snapshots `.recipe/` |
-| `AppendSkillsPath` | `tui/internal/preset/recipe_apply.go:268` | idempotent append to `manifest.capabilities.skills.paths` |
-| `AgentsMissingInit` | `tui/internal/preset/recipe_apply.go:331` | imported-network agents with `.agent.json` but no `init.json` |
+| `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:183` | kernel observation of `.recipe/` vs last-applied snapshot |
+| `ApplyRecipe` / `ApplyRecipeToLingTaiDir` | `tui/internal/preset/recipe_apply.go:219,230` | original APIs delegate prompt/skills/snapshot mutation to kernel with synchronous original callback |
+| `AppendSkillsPath` | `tui/internal/preset/recipe_apply.go:252` | retained public unit-tested helper; not a production Recipe fallback |
+| `AgentsMissingInit` | `tui/internal/preset/recipe_apply.go:326` | imported-network agents with `.agent.json` but no `init.json` |
 | `RecipeState` | `tui/internal/preset/state.go:19` | `{Recipe, CustomDir}` — TUI-only, in `recipe-state.json` |
 | `LoadRecipeState` / `SaveRecipeState` | `tui/internal/preset/state.go:35,52` | atomic read/write of `.lingtai/.tui-asset/recipe-state.json` |
-| `RehydrateNetwork` | `tui/internal/preset/rehydrate.go:35` | propagates orchestrator `init.json` to worker agents; strips addons, admin |
+| `RehydrateNetwork` | `tui/internal/preset/rehydrate.go:9` | retired split-operation adapter; fails actionably without mutation; actual imports send combined kernel configure request |
+
+- `GenerateInitJSONWithOpts` / `PropagatePresetPolicy` in `preset.go` now delegate
+  existing-project mutation to the concrete process driver. `project_configuration.go`
+  projects only public reference/path/options and curated MCP seeds, reads selected
+  saved policy without reconciliation, and maps explicit covenant/Pad edits.
+  No Go init/blueprint merge or imported-worker mutation remains here.
+  `project_configuration_test.go` uses the byte-identical kernel matrix in
+  `testdata/project_configuration.json`; actual installed CLI acceptance is parent-owned.
+  Existing Recipe observation/apply now delegates through `project_recipe.go`
+  to the specialized kernel process consumer; arbitrary TUI callback execution
+  remains in Go on the calling goroutine.
 
 ## Connections
 
 - **Called by `tui/internal/tui/`** — all Bubble Tea screens (network home, preset editor, first-run wizard, recipe selector).
 - **Calls `tui/internal/config/`** — for `GlobalDirName` constant.
-- **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Also reads/writes per-project `.lingtai/<agent>/init.json` and `.lingtai/.tui-asset/`.
+- **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Existing-project configure/propagate writes are delegated to the kernel. Recipe prompt/skills/snapshot application and tree observation are delegated to kernel ownership; bundle copy/import/resources and UI selection state remain here.
 - **Embeds prompt fragments** — covenant, principle, procedures, templates, recipe_assets, skills — via `//go:embed`. The former `soul/` fragment is retired and no longer embedded or extracted; an existing `~/.lingtai-tui/soul/` left by an older Bootstrap is simply ignored, never deleted. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. The bundled catalog has 11 top-level skills and 64 `SKILL.md` files including nested references. Nested utility skills (for example `skills/lingtai-bot-guide/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router. The bundled utility catalog keeps LingTai operations, provider guidance, reporting and academic evidence gates; general paper-fetch/API pipelines, local audio/VLM helpers, journal DJ, idle-curiosity exercises and textbook lesson generation are not shipped.
 
 ## Composition
@@ -233,7 +250,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **`~/.lingtai-tui/presets/saved/*.json`** — user-owned; `Save()` lands here; never touched by Bootstrap.
 - **`~/.lingtai-tui/presets/_kernel_meta.json`** — skipped by `listFromDir`.
 - **`~/.lingtai-tui/utilities/`** — TUI-owned utility skills; `PopulateBundledLibrary(globalDir)` rewrites this directory explicitly from embedded `skills/`.
-- **`<project>/.lingtai/<agent>/init.json`** — `manifest.preset.{default, active, allowed}` written/patched by recipe apply and rehydration.
+- **`<project>/.lingtai/<agent>/init.json`** — kernel configuration owns preset policy/rehydration; kernel Recipe apply owns only its specialized additive skills-path rewrite.
 - **`<project>/.lingtai/.tui-asset/recipe-state.json`** — TUI-only project-level recipe selection state.
 
 ## Notes
@@ -246,3 +263,27 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **No in-band marker.** There is no `"is_template": true` field. Two presets with identical JSON but different directories are treated differently — `Source` is set at load time, never serialized.
 - **Draft recipe fallback.** `ScanEmbeddedCategory` reads the four compiled recipe bundles in category order without writing `~/.lingtai-tui`; `CopyEmbeddedBundle` is used only by confirmed project creation when the draft carries explicit embedded-source provenance, never as a same-name substitute for a missing disk recipe.
 - **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.
+
+## Existing Recipe exchange consumer
+
+`RecipeNeedsApply`, `ApplyRecipe` and `ApplyRecipeToLingTaiDir` retain their
+original signatures. `project_recipe.go` selects the existing installed kernel
+with `config.GlobalDirPath`/`config.LingtaiCmd`, without creating global state.
+The process owner (`tui/internal/process/project_recipe.go`) uses the frozen
+PRJ004 synchronous-member ABI. Kernel owns metadata/layer selection, one native
+directory enumeration, direct prompt/additive skills writes and snapshot. Go
+executes the original arbitrary function immediately before each prompt phase;
+nil uses kernel identity. The explicit destination is independent of bundle root.
+The count is `legacy_applied`, not the diagnostic successful-member count.
+Reader-only/removal-only diagnostics never manufacture an old apply error.
+Unknown transport is nonnil error; the bool-only observation API conservatively
+returns true on unknown transport (not proof of change/absence/equality).
+
+`AppendSkillsPath` remains a public, directly unit-tested helper with no
+production Recipe apply caller; it is not a fallback writer. `copyTree`/`copyFile`
+remain for unmigrated bundle/import materialization. The obsolete local comparison
+walker was removed. `project_recipe_test.go` authors installed-CLI cases through
+the original public APIs; baseline `recipe_apply_test.go` assertions stay intact
+with test-only installed-runtime selection. Exact decoder/error formatting and
+native-platform acceptance are not proved by authored source. The nearest
+behavior owner is `tui/CONTRACT.md` (Existing Recipe consumer section).

@@ -14,6 +14,7 @@ import (
 )
 
 func TestGenerateInitJSONOmitsMoltPrompt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -26,7 +27,7 @@ func TestGenerateInitJSONOmitsMoltPrompt(t *testing.T) {
 	}
 
 	opts := DefaultAgentOpts()
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatal(err)
 	}
 

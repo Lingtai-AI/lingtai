@@ -10,12 +10,14 @@ import (
 // it is the only source of truth for theme/language, credential material,
 // preset edits, agent options, and the adaptive recipe choice, and those
 // choices cause no writes. After confirmation, project-local state is built
-// and validated only in the owned sibling staging directory. RunProjectCreate
-// then persists and verifies the exact launch-critical preset/API-key/Codex
-// dependencies before the atomic rename; theme/language, registry, utility
-// refresh, runtime checks, and launch remain post-commit best effort. No
-// final .lingtai path exists before rename. See Invariant 3/4 of the
-// launcher design (reports/design/lingtai-tui-no-project-launcher-2026-07-14).
+// and validated only by kernel-owned hidden staging. RunProjectCreate sends an
+// explicit public projection and waits for staged-reader readiness, then persists
+// and verifies the exact preset/API-key/Codex dependencies before acknowledging
+// that bound attempt. Publication belongs to the kernel; preferences, registry,
+// utility refresh, runtime readiness and launch remain Go post-commit work.
+// Unknown transport is neither success nor proof of no publication and is never
+// automatically retried or cleaned. Full existing/setup/import/lifecycle Project
+// migration remains pending; Avatar remains supported.
 //
 // Secret hygiene: DraftAPIKey and DraftCodexTokens hold credential material
 // that must never appear in a String()/Sprintf("%+v", ...)/error-wrapping
@@ -56,9 +58,9 @@ type ProjectDraft struct {
 	// DraftPresetDirty gates a REAL disk write in PhasePersistDependencies:
 	// only after the staged project passes all build/recipe/orchestrator
 	// validation, but before the atomic rename. The same normalized/stamped
-	// SourceSaved object generates init.json, is written by preset.Save, and
-	// has its exact RefFor verified. Failure leaves Committed=false and cleans
-	// staging. A later rename failure may leave that valid user-owned preset
+	// SourceSaved object supplies the reviewed snapshot, is written by
+	// preset.Save, and has its exact RefFor verified. Go sends rejected ack on
+	// failure; kernel alone owns staged cleanup. A later rename failure may leave that valid user-owned preset
 	// behind; it is intentionally not deleted or rolled back blindly.
 	DraftPreset      *preset.Preset
 	DraftPresetDirty bool // true once the user has actually edited/committed a preset in the wizard
@@ -74,9 +76,8 @@ type ProjectDraft struct {
 	AgentName    string
 	AgentDirName string
 
-	// AgentOpts carries the runtime configuration page's values (context
-	// limit, karma, addons, allowed presets, ...) exactly as
-	// preset.AgentOpts already models them for GenerateInitJSONWithOpts.
+	// AgentOpts retains the existing wizard shape. Fresh creation projects only
+	// current options; retired runtime knobs are never sent to the kernel.
 	AgentOpts preset.AgentOpts
 
 	// RecipeName records the recipe the new project stages and applies. The

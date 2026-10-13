@@ -247,8 +247,7 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 			// Non-fatal for plain recipe (has no greet/library)
 			fmt.Fprintf(os.Stderr, "warning: recipe copy: %v\n", err)
 		}
-		subst := func(tmpl string) string { return tmpl }
-		preset.ApplyRecipe(opts.Dir, lang, subst)
+		preset.ApplyRecipe(opts.Dir, lang, nil)
 	}
 
 	// Persist the selected TUI-only plain recipe state before registration. Unlike

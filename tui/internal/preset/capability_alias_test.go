@@ -14,7 +14,7 @@ func legacyShellPreset(name string) Preset {
 		Name:        name,
 		Description: PresetDescription{Summary: "legacy shell capability"},
 		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{"provider": "custom", "model": "test-model"},
+			"llm": map[string]interface{}{"provider": "openai", "model": "test-model"},
 			"capabilities": map[string]interface{}{
 				"bash": map[string]interface{}{
 					"yolo":     true,
@@ -113,7 +113,7 @@ func TestListFailsClosedOnConflictingCapabilities(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"name":"conflict","description":{"summary":"conflict"},"manifest":{"llm":{"provider":"custom","model":"test"},"capabilities":{"bash":{"yolo":true},"shell":{"yolo":false}}}}`
+	content := `{"name":"conflict","description":{"summary":"conflict"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"yolo":true},"shell":{"yolo":false}}}}`
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -123,10 +123,11 @@ func TestListFailsClosedOnConflictingCapabilities(t *testing.T) {
 }
 
 func TestGenerateInitJSONWritesCanonicalShellCapability(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, "global")
-	if err := GenerateInitJSONWithOpts(legacyShellPreset("legacy-init"), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, legacyShellPreset("legacy-init"), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
@@ -181,7 +182,7 @@ func TestLoadSaveAndGeneratePreserveLargeLegacyCapabilityNumber(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"name":"legacy-number","description":{"summary":"large number"},"manifest":{"llm":{"provider":"custom","model":"test"},"capabilities":{"bash":{"tenant_id":9007199254740993}}}}`
+	content := `{"name":"legacy-number","description":{"summary":"large number"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"tenant_id":9007199254740993}}}}`
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,7 @@ func TestLoadSaveAndGeneratePreserveLargeLegacyCapabilityNumber(t *testing.T) {
 	}
 
 	projectDir := t.TempDir()
-	if err := GenerateInitJSONWithOpts(loaded, "alice", "alice", filepath.Join(projectDir, ".lingtai"), filepath.Join(projectDir, "global"), DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, loaded, "alice", "alice", filepath.Join(projectDir, ".lingtai"), filepath.Join(projectDir, "global"), DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	initData, err := os.ReadFile(filepath.Join(projectDir, ".lingtai", "alice", "init.json"))

@@ -128,6 +128,12 @@ For creating, connecting, verifying or maintaining bots, start with the first-le
 [`lingtai-bot-guide` skill](tui/internal/preset/skills/lingtai-bot-guide/SKILL.md):
 one entry to the current project, recipe, preset, channel and lifecycle owners.
 
+Fresh interactive project creation requires the installed kernel's Project
+inspection/creation support. Unsupported versions fail actionably; uncertain
+creation must be inspected before another attempt, never blindly retried or
+cleaned. See the [TUI owner contract](tui/CONTRACT.md#project-inspection-and-fresh-interactive-creation)
+and existing `/help`. This is not a full Project migration; Avatar is retained.
+
 ## Ways to work with it
 
 **Desktop — `lingtai-desktop` (macOS)** is the native app for LingTai: see your projects and scientists, chat and exchange mail, adjust setup and presets, and manage their work in one place.

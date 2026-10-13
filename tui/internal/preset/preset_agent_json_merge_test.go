@@ -15,6 +15,7 @@ import (
 // overwrite past snapshots. Legacy soul_* keys written by older kernels
 // are ordinary preserved fields here: never rewritten, never dropped.
 func TestSetupPreservesAgentJSONIdentity(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -52,7 +53,7 @@ func TestSetupPreservesAgentJSONIdentity(t *testing.T) {
 	opts.Karma = false
 	opts.PreserveActivePreset = true
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -97,6 +98,7 @@ func TestSetupPreservesAgentJSONIdentity(t *testing.T) {
 // (no prior .agent.json) gets a clean baseline with state="" so the
 // kernel can populate the rest at boot.
 func TestSetupFreshAgentInitializesAgentJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -104,7 +106,7 @@ func TestSetupFreshAgentInitializesAgentJSON(t *testing.T) {
 	// Note: we do NOT pre-create agentDir — GenerateInitJSONWithOpts must.
 
 	opts := DefaultAgentOpts()
-	if err := GenerateInitJSONWithOpts(codexPreset(), "newbie", "newbie", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "newbie", "newbie", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
