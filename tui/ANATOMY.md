@@ -1,5 +1,7 @@
 ---
 related_files:
+  - tui/project_inventory_binding.go
+  - tui/project_inventory_kernel_test.go
   - ANATOMY.md
   - portal/ANATOMY.md
   - tui/internal/tui/ANATOMY.md
@@ -173,3 +175,11 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
   pass parent roots/actual runtime selection; first-run/setup/import route through
   it. Imported source+workers are one operation before source init. Credentials,
   process lifecycle, Avatar and Go Recipe reconcile remain outside this slice.
+
+## Project composition and shared native inventory
+
+project_inventory_binding.go wires the native running-inventory Query to the
+exact managed-runtime interpreter before any subcommand/launcher. Both platform
+list variants and ProjectsModel consume the same Core decisions and preserve
+scan/query failure. Native lifecycle callers retain original primitives through
+process adapters; kernel Core owns their distinct target/sequence policies.

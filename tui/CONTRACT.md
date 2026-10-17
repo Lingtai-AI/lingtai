@@ -3,6 +3,29 @@ name: tui-runtime-contract
 contract_version: 2
 root_contract: CONTRACT.md
 related_files:
+  - tui/project_inventory_binding.go
+  - tui/project_inventory_kernel_test.go
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/tui/project_lifecycle.go
+  - tui/internal/tui/project_lifecycle_test.go
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/project_bundle.go
+  - tui/internal/preset/project_bundle_test.go
+  - tui/internal/preset/project_recipe_native.go
+  - tui/internal/preset/project_recipe_native_test.go
+  - tui/internal/process/ANATOMY.md
+  - tui/internal/process/project_bundle.go
+  - tui/internal/process/project_bundle_test.go
+  - tui/internal/process/project_inventory.go
+  - tui/internal/process/project_inventory_test.go
+  - tui/internal/process/project_lifecycle.go
+  - tui/internal/process/project_lifecycle_test.go
+  - tui/internal/process/project_recipe_native.go
+  - tui/internal/process/project_recipe_native_test.go
+  - tui/internal/inventory/ANATOMY.md
+  - tui/internal/inventory/project_kernel_test.go
+  - tui/internal/inventory/project_query.go
+  - tui/internal/inventory/project_query_test.go
   - tui/ANATOMY.md
   - tui/internal/config/global.go
   - tui/internal/tui/firstrun.go
@@ -580,3 +603,28 @@ Conformance source: five installed-CLI concern groups under preset and two
 portable wire/lifecycle groups under process, plus unchanged baseline and actual
 UI assertions. Only parent-owned formatted/tested/native/installed acceptance
 evidence can establish conformance; authored source is not test PASS or full A.
+
+## Project native consumer ownership
+
+Kernel Project Core owns running-inventory/enterability/grouping, Recipe source
+selection/materialization/layers/opaque-document mutation policy and external
+lifecycle phase/target/preset decisions. Go retains exact native filesystem/JSON/
+process effects, original error identities, UI/registry/preset storage and existing
+confirmation/generation/writer barriers. One native adapter is not permission to
+reimplement whole domain actions in Go as a fallback.
+
+List and ProjectsModel use one managed-runtime Query and revalidate native row/PID
+identity; missing/failed query is an error, never empty success. Native Recipe
+mode keeps old Go decoder and owner document bytes without Python reparse of
+unknown deep values; native-only not_read_native is not readiness. The live save
+consumer aborts unknown layer transport before configure; native stat/read quirks
+remain unchanged. Bundle copy uses unchanged native tree/file helpers in Core's
+old phase order, including local-first wizard/import/headless behavior.
+
+Force refresh, normal revive, temporary clear, CLI clean and nirvana remain
+distinct. Go executes only request-bound phase/target operations, and validates
+full terminal/transcript/EOF/exit before restoring native errors or UI completion.
+Unknown means no replay/fallback/later effect; nirvana cannot emit Done/re-init.
+Existing native best-effort errors, Puffo race checks, confirmation/force semantics
+and human-manifest writer barrier retain their prior behavior. Kernel self-refresh
+and native ACP/process transport are not replaced by these external actions.

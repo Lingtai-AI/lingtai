@@ -895,74 +895,44 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		targetName = target.Address
 	}
 	switch command {
-	case "sleep":
-		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					os.WriteFile(filepath.Join(agent.WorkingDir, ".sleep"), []byte(""), 0o644)
-					count++
-				}
-			}
-			addMsg(i18n.TF("mail.sleep_all", count))
-		} else if targetDir != "" {
-			os.WriteFile(filepath.Join(targetDir, ".sleep"), []byte(""), 0o644)
-			addMsg(i18n.T("mail.sleep_sent"))
+	case "sleep", "suspend":
+		result, err := externalProjectLifecycle(a.lingtaiCmd, process.ProjectLifecycleOptions{Action: command, Root: a.projectDir, Selected: targetDir, All: args == "all"}, projectLifecycleNative())
+		if err != nil {
+			addMsg(firstLine(err))
+			return a, nil
 		}
-		return a, nil
-	case "suspend":
 		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					os.WriteFile(filepath.Join(agent.WorkingDir, ".suspend"), []byte(""), 0o644)
-					count++
-				}
+			if command == "sleep" {
+				addMsg(i18n.TF("mail.sleep_all", result.Count))
+			} else {
+				addMsg(i18n.TF("mail.suspended_all", result.Count))
 			}
-			addMsg(i18n.TF("mail.suspended_all", count))
 		} else if targetDir != "" {
-			os.WriteFile(filepath.Join(targetDir, ".suspend"), []byte(""), 0o644)
-			addMsg(i18n.TF("mail.suspended", targetName))
+			if command == "sleep" {
+				addMsg(i18n.T("mail.sleep_sent"))
+			} else {
+				addMsg(i18n.TF("mail.suspended", targetName))
+			}
 		}
 		return a, nil
 	case "cpr":
+		result, err := externalProjectLifecycle(a.lingtaiCmd, process.ProjectLifecycleOptions{Action: "cpr", Root: a.projectDir, Selected: targetDir, All: args == "all"}, projectLifecycleNative())
+		if err != nil {
+			addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
+			return a, nil
+		}
 		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			var failures []string
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					count++
-					if err := reviveAgentDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
-						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
-					}
-				}
-			}
+			failures := projectLifecycleFailures(result)
 			if len(failures) > 0 {
-				addMsg(i18n.TF("mail.cpr_all_with_failures", count-len(failures), len(failures), strings.Join(failures, ", ")))
+				addMsg(i18n.TF("mail.cpr_all_with_failures", result.Count-len(failures), len(failures), strings.Join(failures, ", ")))
 			} else {
-				addMsg(i18n.TF("mail.cpr_all", count))
+				addMsg(i18n.TF("mail.cpr_all", result.Count))
 			}
 		} else if targetDir != "" {
-			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-				if err := reviveAgentDir(a.lingtaiCmd, targetDir); err != nil {
-					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
-				} else {
-					addMsg(i18n.TF("mail.cpr", targetName))
-				}
-			} else {
+			if result.AlreadyAlive {
 				addMsg(i18n.T("mail.cpr_alive"))
+			} else {
+				addMsg(i18n.TF("mail.cpr", targetName))
 			}
 		}
 		return a, nil
@@ -989,19 +959,11 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			projectDir := a.projectDir
 			generation := a.mail.generation
 			return a, func() tea.Msg {
-				agents, _ := fs.DiscoverAgents(projectDir)
-				count := 0
-				var failures []string
-				for _, agent := range agents {
-					if agent.IsHuman {
-						continue
-					}
-					count++
-					if err := hardRefreshDir(lingtaiCmd, agent.WorkingDir); err != nil {
-						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
-					}
+				result, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Root: projectDir, All: true}, projectLifecycleNative())
+				if err != nil {
+					return refreshDoneMsg{generation: generation, err: err}
 				}
-				return refreshAllDoneMsg{generation: generation, count: count, failures: failures}
+				return refreshAllDoneMsg{generation: generation, count: result.Count, failures: projectLifecycleFailures(result)}
 			}
 		} else if args != "" && targetDir != "" && a.lingtaiCmd != "" {
 			// `/refresh <preset>` — switch to a named preset and
@@ -1251,38 +1213,8 @@ var hasPuffoManagedAgent = process.HasPuffoManagedAgent
 //  6. ForceLaunchAgent (bypassing the duplicate-protection gate; we've
 //     already verified the agent dir is clear above).
 func hardRefreshDir(lingtaiCmd, dir string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	suspendFile := filepath.Join(dir, ".suspend")
-	os.WriteFile(suspendFile, []byte(""), 0o644)
-	waitForLockClear(dir)
-	// Escalation: if the agent ignored .suspend (deadlocked, slow shutdown,
-	// detached child), kill the lingering interpreter so LaunchAgent's
-	// duplicate-protection gate doesn't refuse the relaunch.
-	if process.IsAgentRunning(dir) {
-		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
-			return err // ownership changed during the refresh; preserve its lock
-		}
-	}
-	// Clear lingering handshake files. waitForLockClear may have force-removed
-	// .agent.lock; the others (.refresh/.refresh.taken/.suspend) get removed
-	// here so the new interpreter doesn't immediately observe a stale signal.
-	os.Remove(filepath.Join(dir, ".agent.lock"))
-	os.Remove(filepath.Join(dir, ".refresh"))
-	os.Remove(filepath.Join(dir, ".refresh.taken"))
-	os.Remove(suspendFile)
-	resetActivePresetToDefault(dir)
-	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
-	// Defensive: ForceLaunchAgent → launchAgentUnsafe calls fs.CleanSignals
-	// internally, but a fresh .suspend written by another path between our
-	// remove() above and the relaunch would put the new process to sleep.
-	// Removing again here is cheap and idempotent.
-	os.Remove(suspendFile)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Selected: dir}, projectLifecycleNative())
+	return err
 }
 
 // waitForLockClear polls for .agent.lock to free (force-removing it after
@@ -1416,45 +1348,7 @@ func readActivePreset(dir string) string {
 // validate it again with `_preset_ref_in` so home-shortened and
 // absolute forms compare equal.
 func resolvePresetInAllowed(dir, query string) (string, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return "", fmt.Errorf("preset name is empty")
-	}
-	allowed := readAllowedPresets(dir)
-	if len(allowed) == 0 {
-		return "", fmt.Errorf("agent has no manifest.preset.allowed list — cannot switch")
-	}
-	// Exact-path match first.
-	for _, ref := range allowed {
-		if ref == query {
-			return ref, nil
-		}
-	}
-	// Basename-stem match (drop directory prefix and .json suffix).
-	var matches []string
-	for _, ref := range allowed {
-		stem := strings.TrimSuffix(filepath.Base(ref), ".json")
-		if stem == query {
-			matches = append(matches, ref)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		// Two presets in the allow-list with the same basename (e.g.
-		// a template "mimo.json" and a saved "mimo.json"). Disambiguate.
-		return "", fmt.Errorf("preset %q is ambiguous (matches %d entries) — pass the full path",
-			query, len(matches))
-	}
-	// No match. Build a helpful error listing what's actually allowed
-	// (basenames only — full paths are noisy in the status bar).
-	stems := make([]string, 0, len(allowed))
-	for _, ref := range allowed {
-		stems = append(stems, strings.TrimSuffix(filepath.Base(ref), ".json"))
-	}
-	return "", fmt.Errorf("preset %q is not in this agent's allowed list (available: %s)",
-		query, strings.Join(stems, ", "))
+	return process.ResolveExternalProjectPreset("", dir, query, readAllowedPresets)
 }
 
 // setActivePreset rewrites manifest.preset.active to the given path.
@@ -1704,58 +1598,16 @@ func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 // The caller is expected to have already validated presetPath via
 // resolvePresetInAllowed.
 func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	suspendFile := filepath.Join(dir, ".suspend")
-	os.WriteFile(suspendFile, []byte(""), 0o644)
-	waitForLockClear(dir)
-	if process.IsAgentRunning(dir) {
-		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
-			return err
-		}
-	}
-	os.Remove(filepath.Join(dir, ".agent.lock"))
-	os.Remove(filepath.Join(dir, ".refresh"))
-	os.Remove(filepath.Join(dir, ".refresh.taken"))
-	os.Remove(suspendFile)
-	if err := setActivePreset(dir, presetPath); err != nil {
-		// Don't refuse the relaunch — the user asked to refresh.
-		// Falling back to whatever active currently is.
-	}
-	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
-	os.Remove(suspendFile)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Selected: dir, PresetPath: presetPath}, projectLifecycleNative())
+	return err
 }
 
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
 // is gone), then relaunches the agent. Used by /cpr (dead agent, no prior
 // suspend) and as the tail of hardRefreshDir (after writing .suspend).
 func reviveDir(lingtaiCmd, dir string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	lockFile := filepath.Join(dir, ".agent.lock")
-	locked := true
-	for i := 0; i < 120; i++ { // 120 × 500ms = 60s max
-		if tryLock(lockFile) {
-			locked = false
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if locked {
-		// Process likely died without releasing lock — clean up
-		os.Remove(lockFile)
-	}
-	cmd, err := process.LaunchAgent(lingtaiCmd, dir)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "revive", Selected: dir}, projectLifecycleNative())
+	return err
 }
 
 var reviveAgentDir = reviveDir

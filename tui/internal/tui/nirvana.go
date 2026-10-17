@@ -1,15 +1,11 @@
 package tui
 
 import (
-	"os"
-	"path/filepath"
-	"time"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
-	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // bodhiLeaf is braille art of a Bodhi leaf (菩提叶), shown on preparing screens.
@@ -54,6 +50,7 @@ type NirvanaModel struct {
 	cursor     int    // 0 = Confirm, 1 = Cancel
 	cleaning   bool   // true while cleanup runs
 	done       bool   // true when cleanup complete, waiting for Enter
+	failure    error  // unknown exchange: remain retired, never re-init/replay
 	width      int
 	height     int
 }
@@ -74,12 +71,23 @@ func (m NirvanaModel) Update(msg tea.Msg) (NirvanaModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case nirvanaCleanFailedMsg:
+		m.cleaning = false
+		m.failure = msg.err
+		return m, nil
+
 	case nirvanaCleanDoneMsg:
 		m.cleaning = false
 		m.done = true
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.failure != nil {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.cleaning {
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -123,31 +131,20 @@ func (m NirvanaModel) Update(msg tea.Msg) (NirvanaModel, tea.Cmd) {
 
 func (m NirvanaModel) doClean() tea.Cmd {
 	return func() tea.Msg {
-		// 1. Suspend all agents
-		agents, _ := fs.DiscoverAgents(m.lingtaiDir)
-		for _, agent := range agents {
-			if agent.IsHuman {
-				continue
-			}
-			if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-				fs.SuspendAndWait(agent.WorkingDir, 5*time.Second)
-			}
+		// Root has already retired/drained Mail; Core chooses the distinct
+		// sequential suspend -> exact native manifest mutex -> remove order.
+		_, err := externalProjectLifecycle("", process.ProjectLifecycleOptions{Action: "nirvana", Root: m.lingtaiDir}, process.ProjectLifecycleNative{})
+		if err != nil {
+			return nirvanaCleanFailedMsg{err: err}
 		}
-
-		// 2. Cross the location writer's exact manifest mutex immediately before
-		// removing the tree. Accepted Mail refreshes launch location updates in an
-		// untracked goroutine; this barrier proves any such writer is finished and
-		// removes its last commit target before recursive deletion.
-		_ = fs.RemoveHumanManifestForReset(filepath.Join(m.lingtaiDir, "human"))
-
-		// 3. Remove .lingtai/ entirely.
-		os.RemoveAll(m.lingtaiDir)
-
 		return nirvanaCleanDoneMsg{}
 	}
 }
 
 func (m NirvanaModel) View() string {
+	if m.failure != nil {
+		return m.viewLeafProgress(m.failure.Error(), false)
+	}
 	if m.cleaning || m.done {
 		return m.viewProgress()
 	}

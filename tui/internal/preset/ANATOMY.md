@@ -1,5 +1,10 @@
 ---
 related_files:
+  - tui/internal/preset/project_bundle.go
+  - tui/internal/preset/project_bundle_test.go
+  - tui/internal/preset/project_recipe_native.go
+  - tui/internal/preset/project_recipe_native_test.go
+  - tui/CONTRACT.md
   - tui/ANATOMY.md
   - tui/internal/config/ANATOMY.md
   - tui/internal/fs/ANATOMY.md
@@ -276,3 +281,14 @@ Installed cases: `project_recipe_test.go`; baseline assertions: `recipe_apply_te
 `AppendSkillsPath` remains public/unit-tested, not a fallback writer;
 `copyTree`/`copyFile` retain unmigrated bundle/import materialization.
 Promises/acceptance limits: [Existing Recipe contract](../../CONTRACT.md#existing-recipe-consumer-prj004-source-candidate).
+
+## Kernel-owned Recipe delivery and native documents
+
+project_bundle.go supplies exact native metadata/Abs/copy/error operations to
+Core-owned selection/order; original CopyBundle/CopyEmbedded signatures delegate
+and native copy helpers remain unchanged. project_recipe_native.go keeps complete
+Go-decoded init documents opaque, and supplies exact layer stat/read observations;
+the Core owns append/no-op and selection. The actual FirstRunModel uses the
+error-returning ResolveRecipeSetupLayers so unknown transport is not absence.
+Compiled source resources are retained as compatibility/oracle material; runtime
+copy obtains operational bytes from kernel package data, not Go bootstrap.

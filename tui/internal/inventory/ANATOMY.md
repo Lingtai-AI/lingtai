@@ -1,5 +1,9 @@
 ---
 related_files:
+  - tui/internal/inventory/project_kernel_test.go
+  - tui/internal/inventory/project_query.go
+  - tui/internal/inventory/project_query_test.go
+  - tui/CONTRACT.md
   - ANATOMY.md
   - tui/ANATOMY.md
   - tui/internal/tui/ANATOMY.md
@@ -35,9 +39,9 @@ maintenance: |
 | `Options`, `Snapshot`, `Group`, `Record`, `EnterabilityReason`, `AgentIdentity` | `tui/internal/inventory/inventory.go:31-100` | Public typed API for process-visible running agents, grouped by project and carrying role/admin/heartbeat/lock/typed enterability plus lifecycle, molt, and authoritative live-context fields for consumers. |
 | `Scan` / `FromProcesses` | `tui/internal/inventory/inventory.go:105-167` | Scan the process table or convert supplied process rows into enriched, duplicate-collapsed, sorted inventory. `FromProcesses` is the deterministic test seam. |
 | `NormalizePath`, `IdentityFor`, `AgentDirInFilter`, `ProjectFromAgentDir` | `tui/internal/inventory/inventory.go:169-212` | Shared lexical path normalization, stable identity, filtering, and process-to-project derivation. Agent directories with spaces are treated as normal paths. |
-| `enrichRecord`, `RoleFor`, `enterability` | `tui/internal/inventory/inventory.go:220-295` | Read `.agent.json` and `.status.json`, derive role/admin/IM/heartbeat/lock plus lifecycle/molt/live-context state, and mark unreadable, human, phantom, pathless, or non-admin records as non-enterable with a typed reason and optional detail; only valid orchestrator/admin records are enterable. |
-| `collapseByAgentDir` | `tui/internal/inventory/inventory.go:297-320` | Collapses duplicate visible processes for the same agent dir, preferring the PID currently advertised in `.status.json` when available. |
-| `sortRecords` / `groupRecords` | `tui/internal/inventory/inventory.go:346-397` | Deterministic project, role, display-name, path, PID sorting and project grouping. |
+| Native observations and query rebinding | `tui/internal/inventory/project_query.go:74` | Retain original native readers/collation/error bytes, ask kernel Core once, validate row/directory/PID identities and rebind local fields. |
+| Duplicate selection / role / enterability | `tui/internal/inventory/project_query.go:64` | Policy is kernel Project inventory Core; Go supplies exact duplicate-time status/admin/read evidence, never an alternate local decision. |
+| Ordering and grouping | `tui/internal/inventory/project_query.go:132` | Core returns stable row/group references; native labels and byte collation keys stay local. |
 | `SummarizeIMIdentities`, `SummarizeAdmin`, `HumanUptimeFromEtime`, `HeartbeatLabel` | `tui/internal/inventory/inventory.go:455-602` | Small rendering helpers shared by CLI and TUI callers without importing either package. |
 
 ## Connections
@@ -64,4 +68,4 @@ maintenance: |
 2. Phantom projects and unreadable manifests are rendered honestly by callers: they remain visible records/groups with explicit non-enterable errors.
 3. Duplicate process rows for one agent directory collapse to one record, preferring `.status.json` runtime PID when it identifies the current process.
 4. Sorting and grouping are deterministic so CLI output, JSON, and `/projects` tests can compare behavior without frame snapshots.
-5. Role detection is owned by lower-level filesystem metadata (`fs.IsOrchestratorManifest`), not duplicated in CLI or TUI packages.
+5. Native metadata is observed once; kernel Project Core owns classification/role/enterability. Query failure is not empty inventory, and Snapshot-only callers must check Err.

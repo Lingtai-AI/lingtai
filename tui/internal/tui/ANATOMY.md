@@ -1,5 +1,8 @@
 ---
 related_files:
+  - tui/internal/tui/project_lifecycle.go
+  - tui/internal/tui/project_lifecycle_test.go
+  - tui/CONTRACT.md
   - tui/ANATOMY.md
   - tui/internal/config/ANATOMY.md
   - tui/internal/fs/ANATOMY.md
@@ -323,3 +326,13 @@ original timestamp/location/palette/local-side-effect functions per eligible
 member, now requested synchronously by `preset`'s kernel consumer. Existing
 first-run launch blocking and choice-save only after old success are unchanged;
 reader-only diagnostics do not strengthen either gate.
+
+## Kernel Project lifecycle and selection consumers
+
+project_lifecycle.go composes original native helpers for Core-owned action
+selection/order. app/clear/nirvana delegate the real live actions; UI generation,
+progress/preset presentation and writer-drain state remain here. Unknown nirvana
+has a narrow failure state, never Done/re-init. recipe_save delegates staging to
+StageRecipeBundle; performRecipeSave uses error-returning Core layer selection
+before configure. ProjectsModel still revalidates original directory/PID after
+a fresh shared inventory query. These are native/UI consumers, not duplicate policy.

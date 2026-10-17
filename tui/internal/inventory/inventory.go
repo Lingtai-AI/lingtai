@@ -35,6 +35,9 @@ type Options struct {
 }
 
 type Snapshot struct {
+	// Err preserves the historical Snapshot-only FromProcesses signature.
+	// Production callers MUST check it; Scan returns this exact error.
+	Err         error `json:"-"`
 	FilterDir   string
 	Records     []Record
 	Groups      []Group
@@ -102,12 +105,15 @@ type Record struct {
 // Scan reads the process table via processscan and converts visible processes
 // into a typed inventory snapshot. Scan command failures are returned as
 // errors so callers can distinguish "no running agents" from "scan failed".
+var scanProcesses = processscan.FindAllAgentProcesses
+
 func Scan(opts Options) (Snapshot, error) {
-	found, err := processscan.FindAllAgentProcesses()
+	found, err := scanProcesses()
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return FromProcesses(found, opts), nil
+	snapshot := FromProcesses(found, opts)
+	return snapshot, snapshot.Err
 }
 
 // FromProcesses converts already-discovered process rows into an enriched,
@@ -141,29 +147,16 @@ func FromProcesses(found []processscan.AgentProcess, opts Options) Snapshot {
 		})
 	}
 
-	records = collapseByAgentDir(records)
-	enrichRecords(records)
-	phantoms := detectPhantomDirs(records, filterDir)
-	for i := range records {
-		records[i].Phantom = containsString(phantoms, records[i].Project)
-		records[i].Enterable, records[i].EnterReason, records[i].EnterDetail = enterability(records[i])
+	observation, records := observeRecords(records, filterDir, opts.IncludeHuman)
+	decision, err := query(observation)
+	if err != nil {
+		return Snapshot{Err: err}
 	}
-	if !opts.IncludeHuman {
-		out := records[:0]
-		for _, r := range records {
-			if !r.IsHuman {
-				out = append(out, r)
-			}
-		}
-		records = out
+	snapshot, err := projectSnapshot(filterDir, records, observation, decision)
+	if err != nil {
+		return Snapshot{Err: err}
 	}
-	sortRecords(records)
-	return Snapshot{
-		FilterDir:   filterDir,
-		Records:     records,
-		Groups:      groupRecords(records),
-		PhantomDirs: phantoms,
-	}
+	return snapshot
 }
 
 func NormalizePath(path string) string {
@@ -211,13 +204,8 @@ func ProjectFromAgentDir(agentDir string) string {
 	return filepath.Clean(filepath.FromSlash(slashDir[:idx]))
 }
 
-func enrichRecords(records []Record) {
-	for i := range records {
-		enrichRecord(&records[i])
-	}
-}
-
-func enrichRecord(r *Record) {
+func enrichRecord(r *Record) []bool {
+	adminFlags := []bool{}
 	fallback := r.Agent
 	r.Address = fallback
 	r.AgentName = fallback
@@ -240,11 +228,15 @@ func enrichRecord(r *Record) {
 			r.ReadError = err.Error()
 		}
 	} else {
-		r.IsOrchestrator = fs.IsOrchestratorManifest(raw)
-		r.AdminSummary = SummarizeAdmin(raw["admin"])
-		if r.IsOrchestrator {
-			r.IsHuman = false
+		// Keep the native map/boolean decoding; Core evaluates privilege policy.
+		if admin, ok := raw["admin"].(map[string]interface{}); ok {
+			for _, value := range admin {
+				if flag, ok := value.(bool); ok {
+					adminFlags = append(adminFlags, flag)
+				}
+			}
 		}
+		r.AdminSummary = SummarizeAdmin(raw["admin"])
 		r.IMHandles = SummarizeIMIdentities(r.AgentDir)
 		r.CreatedAt = rawString(raw, "created_at")
 		r.MoltCount, r.MoltCountAvailable = rawInt(raw, "molt_count")
@@ -257,161 +249,32 @@ func enrichRecord(r *Record) {
 		r.ContextUsagePct = ctx.UsagePct
 		r.ContextAvailable = true
 	}
-	r.Role = RoleFor(*r)
 	r.Heartbeat = fs.ReadHeartbeat(r.AgentDir, fs.AgentAliveThresholdSec())
 	r.LockExists = fileExists(filepath.Join(r.AgentDir, ".agent.lock"))
+	return adminFlags
 }
 
+// RoleFor is retained for callers projecting an already observed record.
+// New production inventory gets its role with the complete bound query.
 func RoleFor(r Record) Role {
-	switch {
-	case r.IsOrchestrator:
-		return RoleMain
-	case r.IsHuman:
-		return RoleHuman
-	case r.ReadError != "":
+	if r.Role != "" {
+		return r.Role
+	}
+	observation := Observation{Members: []MemberObservation{{Row: 0,
+		Directory: []byte(r.AgentDir), Project: []byte(r.Project),
+		ProjectOrder: []byte{}, NameOrder: []byte{}, DirectoryOrder: []byte{},
+		AdminNull: r.IsHuman, AdminFlags: []bool{r.IsOrchestrator}, ManifestFailed: r.ReadError != "",
+	}}, Projects: []ProjectObservation{}, IncludeHuman: true}
+	decision, err := query(observation)
+	if err != nil || len(decision.Members) != 1 {
 		return RoleUnknown
-	default:
-		return RoleAgent
 	}
+	return decision.Members[0].Role
 }
 
-func enterability(r Record) (bool, EnterabilityReason, string) {
-	switch {
-	case r.AgentDir == "":
-		return false, EnterReasonAgentDirMissing, ""
-	case r.Project == "":
-		return false, EnterReasonPathOutsideProject, ""
-	case r.Phantom:
-		return false, EnterReasonPhantomProject, ""
-	case r.ReadError != "":
-		return false, EnterReasonManifestUnreadable, r.ReadError
-	case r.IsHuman:
-		return false, EnterReasonHuman, ""
-	case !r.IsOrchestrator:
-		return false, EnterReasonNonAdmin, ""
-	default:
-		return true, EnterReasonNone, ""
-	}
-}
-
-func collapseByAgentDir(records []Record) []Record {
-	if len(records) < 2 {
-		return records
-	}
-	out := make([]Record, 0, len(records))
-	indexByDir := map[string]int{}
-	for _, r := range records {
-		if r.AgentDir == "" {
-			out = append(out, r)
-			continue
-		}
-		idx, ok := indexByDir[r.AgentDir]
-		if !ok {
-			indexByDir[r.AgentDir] = len(out)
-			out = append(out, r)
-			continue
-		}
-		status := fs.ReadStatus(r.AgentDir)
-		if status.Runtime.PID != 0 && r.PID == status.Runtime.PID {
-			out[idx] = r
-		}
-	}
-	return out
-}
-
-func detectPhantomDirs(records []Record, filterDir string) []string {
-	phantoms := map[string]bool{}
-	if filterDir != "" {
-		lingtaiDir := filepath.Join(filterDir, ".lingtai")
-		if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
-			phantoms[filterDir] = true
-		}
-		return sortedKeys(phantoms)
-	}
-
-	seen := map[string]bool{}
-	for _, r := range records {
-		if r.Project == "" || seen[r.Project] {
-			continue
-		}
-		seen[r.Project] = true
-		lingtaiDir := filepath.Join(r.Project, ".lingtai")
-		if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
-			phantoms[r.Project] = true
-		}
-	}
-	return sortedKeys(phantoms)
-}
-
-func sortRecords(records []Record) {
-	sort.SliceStable(records, func(i, j int) bool {
-		a, b := records[i], records[j]
-		for _, cmp := range []int{
-			strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project)),
-			strings.Compare(roleSortKey(a.Role), roleSortKey(b.Role)),
-			strings.Compare(strings.ToLower(firstNonEmpty(a.AgentName, a.Agent)), strings.ToLower(firstNonEmpty(b.AgentName, b.Agent))),
-			strings.Compare(strings.ToLower(a.AgentDir), strings.ToLower(b.AgentDir)),
-		} {
-			if cmp < 0 {
-				return true
-			}
-			if cmp > 0 {
-				return false
-			}
-		}
-		return a.PID < b.PID
-	})
-}
-
-func roleSortKey(role Role) string {
-	switch role {
-	case RoleMain:
-		return "0"
-	case RoleAgent:
-		return "1"
-	case RoleUnknown:
-		return "2"
-	case RoleHuman:
-		return "3"
-	default:
-		return "4"
-	}
-}
-
-func groupRecords(records []Record) []Group {
-	var groups []Group
-	groupByProject := map[string]int{}
-	for _, r := range records {
-		idx, ok := groupByProject[r.Project]
-		if !ok {
-			idx = len(groups)
-			groupByProject[r.Project] = idx
-			groups = append(groups, Group{Project: r.Project, Phantom: r.Phantom})
-		}
-		groups[idx].Records = append(groups[idx].Records, r)
-		if r.Phantom {
-			groups[idx].Phantom = true
-		}
-	}
-	return groups
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func containsString(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
+func containerMissing(path string) bool {
+	_, err := os.Stat(path)
+	return os.IsNotExist(err)
 }
 
 func rawString(raw map[string]interface{}, key string) string {

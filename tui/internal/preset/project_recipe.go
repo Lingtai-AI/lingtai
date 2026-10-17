@@ -24,7 +24,7 @@ func applyKernelRecipe(bundleDir, lingtaiDir, lang string, render func(string) s
 	if err != nil {
 		return 0, err
 	}
-	result, err := process.ApplyProjectRecipe(python, bundleDir, lingtaiDir, lang, render)
+	result, err := process.ApplyProjectRecipeNative(python, bundleDir, lingtaiDir, lang, render, newNativeRecipeOwner(bundleDir, lingtaiDir))
 	if err == nil {
 		return result.LegacyApplied, nil
 	}

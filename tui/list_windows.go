@@ -22,6 +22,10 @@ func listMain() {
 		os.Exit(1)
 	}
 	snap := inventory.FromProcesses(found, inventory.Options{FilterDir: opts.FilterDir, SelfPID: os.Getpid(), IncludeHuman: true})
+	if snap.Err != nil {
+		fmt.Fprintf(os.Stderr, "error querying Project inventory: %v\n", snap.Err)
+		os.Exit(1)
+	}
 
 	if len(snap.Records) == 0 {
 		snap.PhantomDirs = nil

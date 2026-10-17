@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	iofs "io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/process"
 )
@@ -61,60 +59,7 @@ const (
 // Fails if srcBundleRoot does not contain .recipe/recipe.json. The caller
 // should validate first via LoadRecipeInfo(srcBundleRoot, lang).
 func CopyBundle(srcBundleRoot, projectRoot string) error {
-	if srcBundleRoot == "" || projectRoot == "" {
-		return fmt.Errorf("CopyBundle: empty paths")
-	}
-	info, err := LoadRecipeInfo(srcBundleRoot, "")
-	if err != nil {
-		return fmt.Errorf("CopyBundle: source bundle invalid: %w", err)
-	}
-
-	// When the source bundle IS the project root (user ran `lingtai-tui` inside
-	// a cloned recipe repo — common with agora recipes), the bundle is already
-	// in place and there is nothing to copy. Doing a RemoveAll+copyTree here
-	// would wipe the bundle before reading it, nuking the recipe. Detect and
-	// no-op instead. We still want LoadRecipeInfo above to succeed as a sanity
-	// check, so the bundle is validated even when we don't copy.
-	srcAbs, srcErr := filepath.Abs(srcBundleRoot)
-	dstAbs, dstErr := filepath.Abs(projectRoot)
-	if srcErr == nil && dstErr == nil && srcAbs == dstAbs {
-		return nil
-	}
-
-	// 1. .recipe/ — replace wholesale.
-	srcRecipe := filepath.Join(srcBundleRoot, RecipeDotDir)
-	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)
-	if err := os.RemoveAll(dstRecipe); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("CopyBundle: remove old .recipe/: %w", err)
-	}
-	if err := copyTree(srcRecipe, dstRecipe); err != nil {
-		return fmt.Errorf("CopyBundle: copy .recipe/: %w", err)
-	}
-
-	// 2. Library folder (if recipe declares one) — merge.
-	if info.LibraryName != nil && *info.LibraryName != "" {
-		srcLib := filepath.Join(srcBundleRoot, *info.LibraryName)
-		if st, err := os.Stat(srcLib); err == nil && st.IsDir() {
-			dstLib := filepath.Join(projectRoot, *info.LibraryName)
-			if err := copyTree(srcLib, dstLib); err != nil {
-				return fmt.Errorf("CopyBundle: copy library %q: %w", *info.LibraryName, err)
-			}
-		}
-		// Silently tolerate missing library dir; LoadRecipeInfo already
-		// validated the manifest, and the library absence is visible to
-		// downstream callers via ResolveLibraryDir.
-	}
-
-	// 3. .lingtai/ sibling (if present — imported-network case) — merge.
-	srcLingtai := filepath.Join(srcBundleRoot, ".lingtai")
-	if st, err := os.Stat(srcLingtai); err == nil && st.IsDir() {
-		dstLingtai := filepath.Join(projectRoot, ".lingtai")
-		if err := copyTree(srcLingtai, dstLingtai); err != nil {
-			return fmt.Errorf("CopyBundle: copy .lingtai/: %w", err)
-		}
-	}
-
-	return nil
+	return materializeRecipeBundle(process.ProjectBundleRequest{Kind: "disk", Source: srcBundleRoot, Destination: projectRoot})
 }
 
 // CopyEmbeddedBundle materializes a compiled recipe into a project root after
@@ -122,44 +67,7 @@ func CopyBundle(srcBundleRoot, projectRoot string) error {
 // then applies this project-root copy into its owned .lingtai staging tree
 // before the atomic rename.
 func CopyEmbeddedBundle(recipeName, projectRoot string) error {
-	if recipeName == "" || projectRoot == "" {
-		return fmt.Errorf("CopyEmbeddedBundle: empty paths")
-	}
-	root := embeddedRecipeRoot(recipeName)
-	if root == "" {
-		return fmt.Errorf("CopyEmbeddedBundle: recipe %q not found", recipeName)
-	}
-	if _, err := loadEmbeddedRecipeInfo(root); err != nil {
-		return fmt.Errorf("CopyEmbeddedBundle: source bundle invalid: %w", err)
-	}
-
-	// Match CopyBundle's replace semantics for the selected behavioral layer;
-	// sibling libraries and imported .lingtai data remain additive.
-	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)
-	if err := os.RemoveAll(dstRecipe); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("CopyEmbeddedBundle: remove old .recipe/: %w", err)
-	}
-	return iofs.WalkDir(recipeAssetsFS, root, func(filePath string, entry iofs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(filePath, root+"/")
-		target := filepath.Join(projectRoot, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", filepath.Dir(target), err)
-		}
-		data, err := recipeAssetsFS.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read embedded %s: %w", rel, err)
-		}
-		if err := os.WriteFile(target, data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", target, err)
-		}
-		return nil
-	})
+	return materializeRecipeBundle(process.ProjectBundleRequest{Kind: "packaged", RecipeName: recipeName, Destination: projectRoot})
 }
 
 // RecipeNeedsApply reports whether the recipe currently selected in the

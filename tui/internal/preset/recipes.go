@@ -293,7 +293,7 @@ func ResolveGreetPath(bundleDir, lang string) string {
 // bundle directory and language, using the same fallback rule as ResolveGreetPath.
 // Returns empty string if the recipe does not provide a comment.
 func ResolveCommentPath(bundleDir, lang string) string {
-	return resolveRecipeBehavioralFile(bundleDir, lang, "comment")
+	return resolveKernelRecipeLayer(bundleDir, lang, "comment")
 }
 
 // ResolveCovenantPath returns the absolute path to the covenant file for a
@@ -301,7 +301,7 @@ func ResolveCommentPath(bundleDir, lang string) string {
 // ResolveGreetPath. Returns empty string if the recipe does not provide a
 // covenant override.
 func ResolveCovenantPath(bundleDir, lang string) string {
-	return resolveRecipeBehavioralFile(bundleDir, lang, "covenant")
+	return resolveKernelRecipeLayer(bundleDir, lang, "covenant")
 }
 
 // ResolveProceduresPath returns the absolute path to the procedures file for a

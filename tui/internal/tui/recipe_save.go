@@ -21,42 +21,7 @@ import (
 // preset.DefaultRecipe ("adaptive"), resolved by name from the global
 // recipes tree.
 func copyRecipeBundle(lingtaiDir, globalDir, recipeName string) (projectRoot string, err error) {
-	projectRoot = filepath.Dir(lingtaiDir)
-
-	// A project that ships its own valid .recipe/ (a cloned recipe repo, an
-	// imported network, or any pre-existing project) owns that bundle.
-	// Re-staging would RemoveAll the user-authored tree and replace it
-	// with adaptive; leave the local bundle in place instead, exactly as
-	// base did via ProjectLocalRecipeDir detection.
-	//
-	// Gate on the bundle actually parsing: a stray/empty/malformed .recipe/
-	// (interrupted copy, unrelated leftover) must not block creation or be
-	// preserved as if it were a real recipe. Base only imported the local
-	// recipe when LoadRecipeInfo succeeded, and otherwise staged the chosen
-	// recipe over the stray directory; we mirror that by falling through
-	// to the normal adaptive staging below.
-	if local := preset.ProjectLocalRecipeDir(projectRoot); local != "" {
-		if _, err := preset.LoadRecipeInfo(local, ""); err == nil {
-			return projectRoot, nil
-		}
-	}
-
-	src := preset.RecipeDir(globalDir, recipeName)
-	if src == "" {
-		// Fresh home: preset.Bootstrap has never run, so there is no
-		// <globalDir>/recipes tree. Fall back to the compiled-in bundle.
-		// Adaptive is now the only recipe, so the deleted RecipeEmbedded
-		// provenance bit ("disappeared disk recipe must fail rather than
-		// silently become a compiled bundle") guards no ambiguity anymore.
-		if err := preset.CopyEmbeddedBundle(recipeName, projectRoot); err != nil {
-			return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
-		}
-		return projectRoot, nil
-	}
-	if err := preset.CopyBundle(src, projectRoot); err != nil {
-		return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
-	}
-	return projectRoot, nil
+	return preset.StageRecipeBundle(lingtaiDir, globalDir, recipeName)
 }
 
 // applyRecipe runs the greet/library/snapshot side of recipe application

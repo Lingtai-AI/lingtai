@@ -90,8 +90,9 @@ type ProjectRecipeResult struct {
 }
 
 type ProjectRecipeError struct {
-	Result ProjectRecipeResult
-	Known  bool
+	Result      ProjectRecipeResult
+	Known       bool
+	NativeCause error // restored only after terminal/exit/transcript validation
 }
 
 func (e *ProjectRecipeError) Error() string {
@@ -101,6 +102,9 @@ func (e *ProjectRecipeError) Error() string {
 	return fmt.Sprintf("kernel Recipe %s (%s); legacy count=%d; prior writes remain", e.Result.Outcome, e.Result.Code, e.Result.LegacyApplied)
 }
 func (e *ProjectRecipeError) Unwrap() error {
+	if e.Known && e.NativeCause != nil {
+		return e.NativeCause
+	}
 	if e.Known && e.Result.LegacyFailure != nil {
 		return e.Result.LegacyFailure.NativeError()
 	}
@@ -207,6 +211,10 @@ func recipeCode(code string) bool {
 const recipeTerminalFields = "status outcome members snapshot greet_status applied legacy_applied failed code error legacy_failure"
 
 func decodeRecipeResult(data []byte) (ProjectRecipeResult, error) {
+	return decodeRecipeOwnerResult(data, false)
+}
+
+func decodeRecipeOwnerResult(data []byte, native bool) (ProjectRecipeResult, error) {
 	var result ProjectRecipeResult
 	var tag struct {
 		Status string `json:"status"`
@@ -287,6 +295,10 @@ func decodeRecipeResult(data []byte) (ProjectRecipeResult, error) {
 		identities[string(identity)] = true
 		switch m.ReaderStatus {
 		case "not_read", "READ_FAILED", "FULLY_EFFECTIVE", "READ_OK_WITH_IGNORED_FIELDS":
+		case "not_read_native":
+			if !native {
+				return result, errors.New("native Recipe reader status on raw ABI")
+			}
 		default:
 			return result, errors.New("Recipe reader status")
 		}
@@ -416,6 +428,17 @@ func decodeRecipeResult(data []byte) (ProjectRecipeResult, error) {
 // goroutine, once immediately before each kernel prompt phase. No deadlines,
 // Scanner/output caps, batching, replay, Go writes or recovery are added here.
 func ApplyProjectRecipe(python, bundleDir, lingtaiDir, language string, render func(string) string) (ProjectRecipeResult, error) {
+	return applyProjectRecipe(python, bundleDir, lingtaiDir, language, render, nil)
+}
+
+func ApplyProjectRecipeNative(python, bundleDir, lingtaiDir, language string, render func(string) string, owner ProjectRecipeNativeOwner) (ProjectRecipeResult, error) {
+	if owner == nil {
+		return unknownRecipe()
+	}
+	return applyProjectRecipe(python, bundleDir, lingtaiDir, language, render, owner)
+}
+
+func applyProjectRecipe(python, bundleDir, lingtaiDir, language string, render func(string) string, owner ProjectRecipeNativeOwner) (ProjectRecipeResult, error) {
 	mode := "identity"
 	if render != nil {
 		mode = "callback"
@@ -425,7 +448,12 @@ func ApplyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 		LingtaiDir    string `json:"lingtai_dir"`
 		Language      string `json:"language"`
 		RenderingMode string `json:"rendering_mode"`
-	}{bundleDir, lingtaiDir, language, mode}
+		OwnerMode     string `json:"owner_mode,omitempty"`
+	}{bundleDir, lingtaiDir, language, mode, ""}
+	if owner != nil {
+		request.OwnerMode = "native"
+	}
+	nativeSession := recipeNativeSession{owner: owner, layer: "greet", language: language}
 	cmd := exec.Command(kernelCLI(python), "project", "recipe-apply")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -483,10 +511,20 @@ func ApplyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 		if json.Unmarshal(line, &tag) != nil {
 			return unknownRecipe()
 		}
+		if tag.Status == "recipe_native" {
+			if owner == nil {
+				return unknownRecipe()
+			}
+			ack, err := nativeSession.respond(line)
+			if err != nil || send(ack) != nil {
+				return unknownRecipe()
+			}
+			continue
+		}
 		if tag.Status != "render_recipe_member" {
 			// Validate BEFORE reading again: an unknown frame might itself be
 			// waiting for input. Do not turn malformed framing into a hang.
-			if _, err := decodeRecipeResult(line); err != nil || tag.Status != "recipe_applied" {
+			if _, err := decodeRecipeOwnerResult(line, owner != nil); err != nil || tag.Status != "recipe_applied" {
 				return unknownRecipe()
 			}
 			terminal = line
@@ -549,7 +587,7 @@ func ApplyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 			return unknownRecipe()
 		}
 	}
-	result, err := decodeRecipeResult(terminal)
+	result, err := decodeRecipeOwnerResult(terminal, owner != nil)
 	if err != nil || (waitErr == nil && result.Code != "") || (waitErr != nil && result.Code == "") {
 		return unknownRecipe()
 	}
@@ -569,11 +607,20 @@ func ApplyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 	} else if sequence != 0 {
 		return unknownRecipe()
 	}
+	for _, member := range result.Members {
+		if member.ReaderStatus == "not_read_native" && owner == nil {
+			return unknownRecipe()
+		}
+	}
 	if result.Code == "" {
 		return result, nil
 	}
 	known := result.Outcome != "unknown" && result.Code != "recipe_request_failed" && result.Code != "invalid_project_request"
-	return result, &ProjectRecipeError{Result: result, Known: known}
+	var cause error
+	if known && owner != nil && result.LegacyFailure != nil {
+		cause = owner.NativeError(result.LegacyFailure)
+	}
+	return result, &ProjectRecipeError{Result: result, Known: known, NativeCause: cause}
 }
 
 type ProjectRecipeObservation struct {

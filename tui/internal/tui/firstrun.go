@@ -3737,10 +3737,15 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 			opts.CovenantFile = ""
 		}
 	} else {
-		if commentPath := resolveRecipeComment(projectRoot, lang); commentPath != "" {
+		commentPath, covenantPath, err := preset.ResolveRecipeSetupLayers(projectRoot, lang)
+		if err != nil {
+			m.message = i18n.TF("firstrun.error", err)
+			return m, nil
+		}
+		if commentPath != "" {
 			opts.CommentFile = commentPath
 		}
-		if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
+		if covenantPath != "" {
 			opts.CovenantFile = covenantPath
 		}
 	}
