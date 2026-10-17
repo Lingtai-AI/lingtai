@@ -58,18 +58,16 @@ DESKTOP_BOOTSTRAP_SHA256="6c246f7af6602eeee0d697bcd5c830029939bd786ba3ecbf3cf8c4
 
 # The single package index used ONLY for third-party dependencies of the
 # verified local LingTai artifact — see python_dependency_index_url. Tsinghua
-# TUNA is a cloud-neutral domestic PyPI mirror; it is the mirror-path default
-# because pypi.org is not reliably reachable from mainland-China hosts, which
-# makes dependency resolution the remaining failure point of an otherwise
-# checksum-verified mirror install.
+# TUNA is selected only for a detected mainland-China public IP. Other or
+# unknown locations use official PyPI, independently of the archive provider.
+# An explicit LINGTAI_PYPI_INDEX_URL bypasses country detection.
 PYPI_INDEX_URL_DEFAULT="https://pypi.org/simple"
 PYPI_INDEX_URL_MIRROR_DEFAULT="https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 
 KERNEL_GH_API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai-kernel"
 
-# Country-detection endpoints for auto source selection. Two independent,
-# unauthenticated, no-signup providers so one outage doesn't force a GitHub
-# fallback for every mainland user; each probe is short-timeout and its
+# Country-detection endpoints for Python dependency-index selection. Two
+# unauthenticated, no-signup providers; each probe is short-timeout and its
 # result is discarded (fail-open) on any error. Only the two-letter country
 # code of the requester's public IP is requested — no identity, no
 # credentials, no persistent client. Overridable for tests/offline use.
@@ -769,10 +767,24 @@ resolve_source_provider() {
   esac
 }
 
+# Only a valid public-IP country code selects a regional dependency index.
+# Probe at most two existing endpoints; errors/unknowns fall back to PyPI.
+detect_python_dependency_country() {
+  local url country
+  for url in "$COUNTRY_DETECT_URL_1" "$COUNTRY_DETECT_URL_2"; do
+    country="$(curl -fsSL --connect-timeout 2 --max-time 3 "$url" 2>/dev/null)" || continue
+    country="$(printf '%s' "$country" | tr -d '\r' | tr '[:lower:]' '[:upper:]')"
+    case "$country" in
+      [A-Z][A-Z]) printf '%s' "$country"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 python_dependency_index_url() {
   if [[ -n "${LINGTAI_PYPI_INDEX_URL:-}" ]]; then
     printf '%s' "$LINGTAI_PYPI_INDEX_URL"
-  elif [[ "${KERNEL_PROVIDER:-github}" == "mirror" ]]; then
+  elif [[ "$(detect_python_dependency_country)" == "CN" ]]; then
     printf '%s' "$PYPI_INDEX_URL_MIRROR_DEFAULT"
   else
     printf '%s' "$PYPI_INDEX_URL_DEFAULT"

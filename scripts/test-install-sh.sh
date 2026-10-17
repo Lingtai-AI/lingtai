@@ -41,6 +41,35 @@ esac
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-inst-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
+# Region, not the independent archive provider, selects Python dependencies.
+check() (
+  local label="$1" primary="$2" secondary="$3" expected="$4" override="${5:-}"
+  local provider actual
+  curl() {
+    local response
+    case "${@: -1}" in
+      "$COUNTRY_DETECT_URL_1") response="$primary" ;;
+      "$COUNTRY_DETECT_URL_2") response="$secondary" ;;
+      *) return 99 ;;
+    esac
+    [[ "$response" != FAIL ]] || return 22
+    printf '%s\n' "$response"
+  }
+  for provider in mirror github; do
+    KERNEL_PROVIDER="$provider" LINGTAI_PYPI_INDEX_URL="$override" actual="$(KERNEL_PROVIDER="$provider" LINGTAI_PYPI_INDEX_URL="$override" python_dependency_index_url)"
+    [[ "$actual" == "$expected" ]] || { printf 'FAIL %s/%s got=%s expected=%s\n' "$label" "$provider" "$actual" "$expected"; exit 1; }
+  done
+  printf 'PASS %s/both-archive-providers\n' "$label"
+)
+check cn CN FAIL "$PYPI_INDEX_URL_MIRROR_DEFAULT" || fail "regional dependency index"
+check overseas US CN "$PYPI_INDEX_URL_DEFAULT" || fail "regional dependency index"
+check fallback-cn FAIL CN "$PYPI_INDEX_URL_MIRROR_DEFAULT" || fail "regional dependency index"
+check bad-primary '<html>error</html>' US "$PYPI_INDEX_URL_DEFAULT" || fail "regional dependency index"
+check unknown ZZ FAIL "$PYPI_INDEX_URL_DEFAULT" || fail "regional dependency index"
+check no-network FAIL FAIL "$PYPI_INDEX_URL_DEFAULT" || fail "regional dependency index"
+check lowercase cn FAIL "$PYPI_INDEX_URL_MIRROR_DEFAULT" || fail "regional dependency index"
+check override CN CN https://example.invalid/simple https://example.invalid/simple || fail "regional dependency index"
+
 repo="$tmp/repo"
 git init -q "$repo"
 git -C "$repo" config user.email "test@example.invalid"
