@@ -457,6 +457,8 @@ symlink. A foreign file, any symlink, a non-executable target, or an incomplete
 official launcher MUST remain unchanged and fail loud after the valid TUI
 receipt is written.
 
+Python dependency-index selection is independent of TUI/kernel archive routing: an explicit `LINGTAI_PYPI_INDEX_URL` wins without probing; otherwise at most two unauthenticated public-IP country requests (3 s each) select Tsinghua only for `CN`, and official PyPI for other/unknown countries or failed detection. The country is not stored. This fixes the POSIX archive-provider coupling; native Windows has no corresponding `KERNEL_PROVIDER`-based selector and its separate build-mirror policy is unchanged.
+
 ### Installer closed-state and activation contract
 
 After a real installer branch has successfully installed the canonical
