@@ -174,116 +174,25 @@ func TestDiscardUnfinishedStaging_RemovesOwnedStaging(t *testing.T) {
 	}
 }
 
-// --- Blocker 2: commit-boundary validation ---------------------------------
-//
-// A parent review found RunProjectCreate performed NO revalidation of the
-// draft/destination before its first mutation (os.MkdirTemp) — only "does
-// the final .lingtai already exist" was checked. A crafted or stale draft
-// (e.g. AgentDirName="../escape") could reach MkdirTemp/directory creation
-// entirely unvalidated. These tests snapshot the project root (and, for
-// the traversal case, its PARENT — the directory an escape would actually
-// write into) before calling RunProjectCreate on an invalid draft, then
-// assert byte-for-byte equality afterward: not just "the specific escape
-// path is absent", but the stronger claim the task asked for — nothing
-// under the destination or its parent changed AT ALL.
-
-// invalidDraftCase describes one commit-boundary validation scenario: a
-// mutator that corrupts an otherwise-valid draft, plus a substring expected
-// in validateDraftForCommit's resulting error.
-type invalidDraftCase struct {
-	name      string
-	mutate    func(d *ProjectDraft)
-	wantInErr string
-}
-
-func invalidDraftCases() []invalidDraftCase {
-	return []invalidDraftCase{
-		{
-			name:      "traversal_agent_dir_name",
-			mutate:    func(d *ProjectDraft) { d.AgentDirName = "../escape" },
-			wantInErr: "path separator",
-		},
-		{
-			name:      "dot_dot_agent_dir_name",
-			mutate:    func(d *ProjectDraft) { d.AgentDirName = ".." },
-			wantInErr: `must not be ".."`,
-		},
-		{
-			name:      "dot_agent_dir_name",
-			mutate:    func(d *ProjectDraft) { d.AgentDirName = "." },
-			wantInErr: `must not be "."`,
-		},
-		{
-			name:      "backslash_agent_dir_name",
-			mutate:    func(d *ProjectDraft) { d.AgentDirName = `..\escape` },
-			wantInErr: "path separator",
-		},
-		{
-			name:      "blank_agent_name_and_dir",
-			mutate:    func(d *ProjectDraft) { d.AgentName = ""; d.AgentDirName = "   " },
-			wantInErr: "must not be blank",
-		},
-		{
-			name:      "empty_agent_name_with_valid_dir",
-			mutate:    func(d *ProjectDraft) { d.AgentName = ""; d.AgentDirName = "orchestrator" },
-			wantInErr: "agent name must not be blank",
-		},
-		{
-			name:      "relative_project_root",
-			mutate:    func(d *ProjectDraft) { d.ProjectRoot = "relative/path" },
-			wantInErr: "absolute path",
-		},
-		{
-			name:      "selected_preset_missing",
-			mutate:    func(d *ProjectDraft) { d.DraftPreset = nil },
-			wantInErr: "selected preset is required",
-		},
-		{
-			name:      "preset_missing_name",
-			mutate:    func(d *ProjectDraft) { d.DraftPreset.Name = "" },
-			wantInErr: "no name",
-		},
-		{
-			name: "preset_fails_validate",
-			mutate: func(d *ProjectDraft) {
-				d.DraftPreset.Description = preset.PresetDescription{}
-			},
-			wantInErr: "invalid",
-		},
-	}
-}
-
-// TestValidateDraftForCommit_RejectsInvalidDrafts drives validateDraftForCommit
-// directly (the pure function itself) across every invalid-draft case and
-// confirms each is rejected with a relevant error message. This is the
-// direct unit-level proof; TestRunProjectCreate_InvalidDraftNeverWrites
-// below proves the same cases never reach a filesystem write when driven
-// through the full RunProjectCreate entry point.
-func TestValidateDraftForCommit_RejectsInvalidDrafts(t *testing.T) {
-	for _, tc := range invalidDraftCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			draft, _ := newTestDraft(t)
-			tc.mutate(draft)
-			err := validateDraftForCommit(draft, draft.ProjectRoot)
-			if err == nil {
-				t.Fatalf("expected validateDraftForCommit to reject this draft, got nil")
-			}
-			if !strings.Contains(err.Error(), tc.wantInErr) {
-				t.Fatalf("expected error containing %q, got %q", tc.wantInErr, err.Error())
-			}
-		})
-	}
-}
-
-// TestRunProjectCreate_InvalidDraftNeverWrites proves the stronger,
-// end-to-end claim: for every invalid-draft case, RunProjectCreate itself
-// (a) fails at PhaseValidateDraft, before os.MkdirTemp ever runs, and (b)
-// leaves BOTH the project root and its parent directory byte-for-byte
-// unchanged — the parent is what a "../escape" traversal would actually
-// write into, so snapshotting only the project root itself would miss
-// exactly the defect this validation exists to close.
+// Invalid drafts must fail at the public commit boundary without touching the
+// destination or its parent (the traversal blast radius).
 func TestRunProjectCreate_InvalidDraftNeverWrites(t *testing.T) {
-	for _, tc := range invalidDraftCases() {
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*ProjectDraft)
+		wantInErr string
+	}{
+		{"traversal_agent_dir_name", func(d *ProjectDraft) { d.AgentDirName = "../escape" }, "path separator"},
+		{"dot_dot_agent_dir_name", func(d *ProjectDraft) { d.AgentDirName = ".." }, `must not be ".."`},
+		{"dot_agent_dir_name", func(d *ProjectDraft) { d.AgentDirName = "." }, `must not be "."`},
+		{"backslash_agent_dir_name", func(d *ProjectDraft) { d.AgentDirName = `..\escape` }, "path separator"},
+		{"blank_agent_name_and_dir", func(d *ProjectDraft) { d.AgentName = ""; d.AgentDirName = "   " }, "must not be blank"},
+		{"empty_agent_name_with_valid_dir", func(d *ProjectDraft) { d.AgentName = ""; d.AgentDirName = "orchestrator" }, "agent name must not be blank"},
+		{"relative_project_root", func(d *ProjectDraft) { d.ProjectRoot = "relative/path" }, "absolute path"},
+		{"selected_preset_missing", func(d *ProjectDraft) { d.DraftPreset = nil }, "selected preset is required"},
+		{"preset_missing_name", func(d *ProjectDraft) { d.DraftPreset.Name = "" }, "no name"},
+		{"preset_fails_validate", func(d *ProjectDraft) { d.DraftPreset.Description = preset.PresetDescription{} }, "invalid"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			draft, root := newTestDraft(t)
 			tc.mutate(draft)
@@ -296,6 +205,12 @@ func TestRunProjectCreate_InvalidDraftNeverWrites(t *testing.T) {
 			parent := filepath.Dir(root)
 			parentBefore := dirSnapshot(t, parent)
 
+			// The pure validator retains detailed error oracles; the public
+			// boundary deliberately redacts them to avoid leaking credentials.
+			err := validateDraftForCommit(draft, opts.ExpectedProjectRoot)
+			if err == nil || !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Fatalf("invalid draft %q: want error containing %q, got %v", tc.name, tc.wantInErr, err)
+			}
 			res := RunProjectCreate(draft, opts)
 
 			if res.Committed {

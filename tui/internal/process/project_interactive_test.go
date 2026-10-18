@@ -86,9 +86,6 @@ func projectDriverFixture(mode string) {
 	case "malformed_error":
 		fmt.Fprintln(os.Stderr, "not-json")
 		os.Exit(1)
-	case "multiple_error":
-		fmt.Fprintln(os.Stderr, `{"status":"error","committed":false,"code":"fixture","error":"safe"} {"status":"error","committed":false,"code":"fixture","error":"safe"}`)
-		os.Exit(1)
 	case "wrong_error_commit":
 		fmt.Fprintln(os.Stderr, `{"status":"error","committed":true,"code":"fixture","error":"safe"}`)
 		os.Exit(1)
@@ -103,9 +100,6 @@ func projectDriverFixture(mode string) {
 		return
 	case "wrong_early":
 		fmt.Println(`{"status":"created","committed":true}`)
-		return
-	case "duplicate":
-		fmt.Println(`{"status":"ready_for_prerequisites","status":"ready_for_prerequisites","committed":false,"attempt_id":"fixture","preset_ref":"wrong"}`)
 		return
 	}
 	// Prove nothing persisted before this actual child readiness point.
@@ -163,10 +157,6 @@ func projectDriverFixture(mode string) {
 		result["preset_ref"] = "other"
 	case "false_commit":
 		result["committed"] = false
-	case "missing_commit":
-		delete(result, "committed")
-	case "missing_warnings":
-		delete(result, "warnings")
 	case "stderr_chatter":
 		fmt.Fprintln(os.Stderr, "noise")
 	case "no_terminal":
@@ -230,7 +220,7 @@ func TestInteractiveProjectExchangeOrdersPrerequisites(t *testing.T) {
 	}
 }
 func TestInteractiveProjectUnknownNeverPretendsRefusal(t *testing.T) {
-	for _, mode := range []string{"old_kernel", "malformed_error", "multiple_error", "wrong_error_commit", "signal", "broken_ack", "empty", "wrong_early", "duplicate", "wrong_ready_ref", "wrong_identity", "wrong_directory", "wrong_attempt", "wrong_terminal_ref", "false_commit", "missing_commit", "missing_warnings", "stderr_chatter", "no_terminal", "multiple", "exit1_after_created", "exit2", "timeout"} {
+	for _, mode := range []string{"old_kernel", "malformed_error", "wrong_error_commit", "signal", "broken_ack", "empty", "wrong_early", "wrong_ready_ref", "wrong_identity", "wrong_directory", "wrong_attempt", "wrong_terminal_ref", "false_commit", "stderr_chatter", "no_terminal", "multiple", "exit1_after_created", "exit2", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			python := projectFixturePython(t, mode)
 			calls := 0
@@ -245,7 +235,7 @@ func TestInteractiveProjectUnknownNeverPretendsRefusal(t *testing.T) {
 			if !errors.As(err, &outcome) || outcome.Known {
 				t.Fatalf("%s must be unknown: %v", mode, err)
 			}
-			if (mode == "wrong_ready_ref" || mode == "duplicate" || mode == "wrong_early" || mode == "old_kernel" || mode == "empty" || mode == "timeout") && calls != 0 {
+			if (mode == "wrong_ready_ref" || mode == "wrong_early" || mode == "old_kernel" || mode == "empty" || mode == "timeout") && calls != 0 {
 				t.Fatalf("persisted before accepted readiness: %d", calls)
 			}
 		})

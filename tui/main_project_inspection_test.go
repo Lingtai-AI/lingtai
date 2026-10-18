@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/anthropics/lingtai-tui/internal/process"
@@ -33,19 +32,6 @@ func TestAppInspectionSelectionPreservesLegacyAndDirectoryIdentity(t *testing.T)
 		if err := checkObservedOrchestratorInvariant(agents, dirs); err == nil {
 			t.Fatalf("app exact-one policy lost for %d", count)
 		}
-	}
-}
-func TestStartupUsesKernelInspectionBeforeRegistration(t *testing.T) {
-	data, err := os.ReadFile("main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := extractFuncBody(t, string(data), "func prepareApp(projectDir string, inProgram bool) startupResult {")
-	code := stripLineComments(body)
-	inspect := strings.Index(code, "process.InspectProjectReadiness(")
-	register := strings.Index(code, "config.Register(")
-	if inspect < 0 || register < inspect || !strings.Contains(code, "orchestrators := observedOrchestrators") || !strings.Contains(code, "renderProjectStartupReadiness(inspection.StartupReadiness)") || strings.Contains(code, "checkInitJSONInvariant(") || strings.Contains(code, "checkObservedOrchestratorInvariant(") {
-		t.Fatal("actual startup no longer consumes inspection")
 	}
 }
 

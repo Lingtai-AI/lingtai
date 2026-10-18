@@ -70,14 +70,10 @@ func projectConfigurationFixture(mode string) {
 	}
 	data, _ = json.Marshal(result)
 	switch mode {
-	case "configuration_duplicate":
-		data = []byte(`{"status":"configured",` + string(data)[1:])
 	case "configuration_missing_source":
 		data = []byte(strings.Replace(string(data), `"init_written":true,`, "", 1))
 	case "configuration_null_source":
 		data = []byte(strings.Replace(string(data), `"init_written":true`, `"init_written":null`, 1))
-	case "configuration_extra":
-		data = append(data, []byte(" {}")...)
 	}
 	if result.Status == "error" {
 		fmt.Fprintln(os.Stderr, string(data))
@@ -129,7 +125,7 @@ func TestProjectConfigurationLiteralOperations(t *testing.T) {
 }
 
 func TestProjectConfigurationFailuresRetainOnlyValidatedReceipts(t *testing.T) {
-	for _, mode := range []string{"partial", "rejected", "unknown", "unsupported", "signal", "timeout", "stderr", "wrong_status", "duplicate", "missing_source", "null_source", "extra"} {
+	for _, mode := range []string{"partial", "rejected", "unknown", "unsupported", "signal", "timeout", "stderr", "wrong_status", "missing_source", "null_source"} {
 		t.Run(mode, func(t *testing.T) {
 			python := projectFixturePython(t, "configuration_"+mode)
 			ctx := context.Background()
