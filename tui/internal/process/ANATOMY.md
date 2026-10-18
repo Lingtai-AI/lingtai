@@ -6,6 +6,7 @@ related_files:
   - tui/internal/process/project_inventory_test.go
   - tui/internal/process/project_lifecycle.go
   - tui/internal/process/project_lifecycle_test.go
+  - tui/internal/process/project_lifecycle_host_test.go
   - tui/internal/process/project_recipe_native.go
   - tui/internal/process/project_recipe_native_test.go
   - tui/CONTRACT.md
@@ -115,3 +116,7 @@ Go policy owners. project_recipe_native.go retains native JSON documents/errors
 while Core chooses mutation/layers. Existing native OS/launcher/lock primitives
 stay unchanged; owned exchange child cancellation/reap is not arbitrary descendant
 control. Full terminal/identity/transcript/exit validation precedes error exposure.
+
+Management Core children use the explicit or exact managed SDK, never the controlled
+agent venv/PATH; the original native launch keeps its own selected-agent resolver.
+`project_lifecycle_host_test.go` checks both boundaries without launching agents.

@@ -450,8 +450,17 @@ func applyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 		RenderingMode string `json:"rendering_mode"`
 		OwnerMode     string `json:"owner_mode,omitempty"`
 	}{bundleDir, lingtaiDir, language, mode, ""}
+	var wireRequest interface{} = request
 	if owner != nil {
-		request.OwnerMode = "native"
+		// JSON strings replace invalid UTF-8; native filesystem identities must
+		// reach the Python I/O adapter as bytes, just like member identities.
+		wireRequest = struct {
+			ProjectDirB64 string `json:"project_dir_b64"`
+			LingtaiDirB64 string `json:"lingtai_dir_b64"`
+			Language      string `json:"language"`
+			RenderingMode string `json:"rendering_mode"`
+			OwnerMode     string `json:"owner_mode"`
+		}{base64.StdEncoding.EncodeToString([]byte(bundleDir)), base64.StdEncoding.EncodeToString([]byte(lingtaiDir)), language, mode, "native"}
 	}
 	nativeSession := recipeNativeSession{owner: owner, layer: "greet", language: language}
 	cmd := exec.Command(kernelCLI(python), "project", "recipe-apply")
@@ -489,7 +498,7 @@ func applyProjectRecipe(python, bundleDir, lingtaiDir, language string, render f
 		}
 		return writer.Flush()
 	}
-	if send(request) != nil {
+	if send(wireRequest) != nil {
 		return unknownRecipe()
 	}
 	reader := bufio.NewReader(stdout)
@@ -634,13 +643,13 @@ type ProjectRecipeObservation struct {
 func ObserveProjectRecipe(python, root string) (ProjectRecipeObservation, error) {
 	var result ProjectRecipeObservation
 	request, err := json.Marshal(struct {
-		ProjectDir string `json:"project_dir"`
-	}{root})
+		ProjectDirB64 string `json:"project_dir_b64"`
+	}{base64.StdEncoding.EncodeToString([]byte(root))})
 	if err != nil {
 		return result, &ProjectRecipeError{}
 	}
 	cmd := exec.Command(kernelCLI(python), "project", "recipe-observe")
-	cmd.Stdin = bytes.NewReader(request) // old EOF request unchanged
+	cmd.Stdin = bytes.NewReader(request) // same EOF framing, lossless native root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if cmd.Run() != nil || stderr.Len() != 0 {

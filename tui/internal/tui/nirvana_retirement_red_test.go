@@ -19,7 +19,8 @@ import (
 func newNirvanaRetirementTestApp(t *testing.T) App {
 	t.Helper()
 	a := visitTestApp(t)
-	fixtureUIKernel(t, a.globalDir)
+	fixtureUILifecycle(t)
+	a.globalDir = filepath.Join(os.Getenv("HOME"), ".lingtai-tui")
 	if err := os.MkdirAll(filepath.Dir(a.projectDir), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -191,6 +192,7 @@ func waitNirvanaCleanup(t *testing.T, result <-chan tea.Msg) tea.Msg {
 }
 
 func TestNirvanaCleanupHandoffWaitsForLocationWriter(t *testing.T) {
+	fixtureUILifecycle(t)
 	root := filepath.Join(t.TempDir(), ".lingtai")
 	if err := process.InitProject(filepath.Dir(root), fixtureUIProjectPython(t)); err != nil {
 		t.Fatalf("initialize project: %v", err)

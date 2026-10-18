@@ -3,6 +3,7 @@ package preset
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,6 +35,13 @@ func recipeFailureKey(f *process.ProjectRecipeFailure) string {
 func (n *nativeRecipeOwner) failure(phase, operation, path string, err error) *process.ProjectRecipeFailure {
 	f := &process.ProjectRecipeFailure{Phase: phase, Operation: operation,
 		PathB64: base64.StdEncoding.EncodeToString([]byte(path))}
+	// Keep the original Go decoder's factual consumed-byte count; do not
+	// synthesize a Python character/index offset or rebuild the native error.
+	var syntax *json.SyntaxError
+	if errors.As(err, &syntax) && syntax.Offset >= 0 {
+		value := syntax.Offset
+		f.ParseOffset = &value
+	}
 	key := recipeFailureKey(f)
 	if _, exists := n.causes[key]; !exists {
 		n.causes[key] = err

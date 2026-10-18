@@ -267,6 +267,7 @@ func TestResolveGreetPath_EmptyBundleDir(t *testing.T) {
 }
 
 func TestResolveCovenantPath_LangSpecific(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dir := t.TempDir()
 	writeBehavioralFile(t, dir, "covenant", "en", "en covenant")
 	got := ResolveCovenantPath(dir, "en")
@@ -277,6 +278,7 @@ func TestResolveCovenantPath_LangSpecific(t *testing.T) {
 }
 
 func TestResolveCovenantPath_FallbackToRoot(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dir := t.TempDir()
 	writeBehavioralFile(t, dir, "covenant", "", "root covenant")
 	got := ResolveCovenantPath(dir, "en")
@@ -287,6 +289,7 @@ func TestResolveCovenantPath_FallbackToRoot(t *testing.T) {
 }
 
 func TestResolveCovenantPath_Empty(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dir := t.TempDir()
 	got := ResolveCovenantPath(dir, "en")
 	if got != "" {
@@ -315,6 +318,7 @@ func TestResolveProceduresPath_FallbackToRoot(t *testing.T) {
 }
 
 func TestResolveCommentPath_LangSpecific(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dir := t.TempDir()
 	writeBehavioralFile(t, dir, "comment", "zh", "zh comment")
 	got := ResolveCommentPath(dir, "zh")
@@ -325,6 +329,7 @@ func TestResolveCommentPath_LangSpecific(t *testing.T) {
 }
 
 func TestResolveCommentPath_FallbackToRoot(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dir := t.TempDir()
 	writeBehavioralFile(t, dir, "comment", "", "root comment")
 	got := ResolveCommentPath(dir, "en")

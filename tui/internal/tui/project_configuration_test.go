@@ -110,6 +110,40 @@ func TestImportedFlowMakesOneRehydrateBeforeSourceInitAndStopsOnPartial(t *testi
 		t.Fatal(err)
 	}
 	log, input := configurationUIChild(t, global, true)
+	// New preceding Recipe operations use the real installed Core; only the
+	// original rehydrate result remains the existing partial-failure fixture.
+	installed := fixtureUIProjectPython(t)
+	python := config.VenvPython(filepath.Join(global, "runtime", "venv"))
+	candidateCLI := filepath.Join(filepath.Dir(installed), "lingtai-agent")
+	cli := filepath.Join(filepath.Dir(python), "lingtai-agent")
+	original, err := os.ReadFile(cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECT_FIXTURE_REAL_PYTHON", installed)
+	t.Setenv("PROJECT_FIXTURE_REAL_CLI", candidateCLI)
+	prefix := "#!/bin/sh\ncase \"$1:$2\" in project:recipe-layer) exec \"$PROJECT_FIXTURE_REAL_CLI\" \"$@\";; esac\n"
+	if err := os.WriteFile(cli, append([]byte(prefix), original[len("#!/bin/sh\n"):]...), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := "#!/bin/sh\nif [ \"$1:$2:$3:$4\" = \"-m:lingtai:project:recipe-materialize\" ]; then exec \"$PROJECT_FIXTURE_REAL_PYTHON\" \"$@\"; fi\nexit 91\n"
+	if err := os.WriteFile(python, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// WriteFile preserves the existing nonexecutable fixture handle's mode.
+	if err := os.Chmod(python, 0755); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	managed := filepath.Join(home, config.GlobalDirName, "runtime", "venv")
+	if err := os.MkdirAll(filepath.Dir(managed), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(global, "runtime", "venv"), managed); err != nil {
+		t.Fatal(err)
+	}
 	p := preset.Preset{Name: "real", Source: preset.SourceSaved}
 	m := FirstRunModel{baseDir: lingtaiDir, globalDir: global, rehydrateMode: true, rehydrateOrchDir: "orch-dir", agentName: "Display", pendingDirName: "orch-dir", pendingAgentOpts: preset.DefaultAgentOpts(), presets: []preset.Preset{p}, cursor: 0}
 	updated, cmd := m.performRecipeSave(preset.DefaultRecipe)

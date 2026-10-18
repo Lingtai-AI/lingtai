@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // Depth counts include the top-level object, matching the supplied 9999/10000
@@ -179,4 +183,96 @@ func TestNativeRecipeDeepNonStringPathRemainsOpaque(t *testing.T) {
 		t.Fatal(err)
 	}
 	recipeFixtureBytes(t, newPath, want)
+}
+
+// The installed CLI must never enumerate/write the U+FFFD-spelled sibling
+// while the native owner reads the original byte-bearing root/destination.
+func TestNativeRecipeInstalledInvalidByteRoots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("arbitrary filename bytes are a POSIX filesystem case")
+	}
+	fixtureRecipeRuntime(t)
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
+			parent := t.TempDir()
+			root := filepath.Join(parent, "bundle-\xff")
+			if err := os.Mkdir(root, 0755); err != nil {
+				if runtime.GOOS == "darwin" && errors.Is(err, syscall.EILSEQ) {
+					t.Skip("filesystem refuses invalid-byte filename with EILSEQ")
+				}
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, ".lingtai")
+			if explicit {
+				destination = filepath.Join(parent, "destination-\xff")
+			}
+			replacementRoot := strings.ReplaceAll(root, "\xff", "\ufffd")
+			replacementDest := strings.ReplaceAll(destination, "\xff", "\ufffd")
+			template := []byte{'G', 0, 0xff}
+			init := []byte(`{"big":9007199254740993,"manifest":{"capabilities":{"skills":{"paths":[]}}}}`)
+			for _, bundle := range []string{root, replacementRoot} {
+				recipeFixtureWrite(t, filepath.Join(bundle, ".recipe", "recipe.json"), []byte(`{"name":"fixture","library_name":"lib"}`))
+				recipeFixtureWrite(t, filepath.Join(bundle, ".recipe", "greet", "greet.md"), template)
+			}
+			for _, dest := range []string{destination, replacementDest} {
+				for _, name := range []string{"a", "b"} {
+					recipeFixtureWrite(t, filepath.Join(dest, name, ".prompt"), []byte("untouched"))
+					recipeFixtureWrite(t, filepath.Join(dest, name, "init.json"), init)
+				}
+			}
+			python, err := recipePython()
+			if err != nil {
+				t.Fatal(err)
+			}
+			observed, err := process.ObserveProjectRecipe(python, root)
+			if err != nil || observed.State != "changed" || !observed.NeedsApply {
+				t.Fatalf("byte root observation: %#v %v", observed, err)
+			}
+			calls := 0
+			callback := func(raw string) string {
+				if raw != string(template) || calls >= 2 {
+					t.Fatal("template identity or callback count changed")
+				}
+				if calls == 1 {
+					recipeFixtureBytes(t, filepath.Join(destination, "a", ".prompt"), []byte{})
+				}
+				calls++
+				return ""
+			}
+			var count int
+			if explicit {
+				count, err = ApplyRecipeToLingTaiDir(root, destination, "", callback)
+			} else {
+				count, err = ApplyRecipe(root, "", callback)
+			}
+			if err != nil || count != 2 || calls != 2 {
+				t.Fatalf("byte root apply: count=%d calls=%d err=%v", count, calls, err)
+			}
+			for _, name := range []string{"a", "b"} {
+				recipeFixtureBytes(t, filepath.Join(destination, name, ".prompt"), []byte{})
+				// Original Go writer is the byte oracle. Existing apply uses
+				// the literal ../../library entry even with an explicit dest.
+				oracle := filepath.Join(parent, "oracle-"+name+".json")
+				recipeFixtureWrite(t, oracle, init)
+				if err := AppendSkillsPath(oracle, filepath.Join("..", "..", "lib")); err != nil {
+					t.Fatal(err)
+				}
+				want, err := os.ReadFile(oracle)
+				if err != nil {
+					t.Fatal(err)
+				}
+				recipeFixtureBytes(t, filepath.Join(destination, name, "init.json"), want)
+				recipeFixtureBytes(t, filepath.Join(replacementDest, name, ".prompt"), []byte("untouched"))
+				recipeFixtureBytes(t, filepath.Join(replacementDest, name, "init.json"), init)
+			}
+			recipeFixtureBytes(t, filepath.Join(destination, AppliedRecipeSubpath, "greet", "greet.md"), template)
+			recipeFixtureNoSnapshot(t, replacementDest)
+			if !explicit {
+				observed, err = process.ObserveProjectRecipe(python, root)
+				if err != nil || observed.State != "equal" || observed.NeedsApply {
+					t.Fatalf("byte root snapshot observation: %#v %v", observed, err)
+				}
+			}
+		})
+	}
 }

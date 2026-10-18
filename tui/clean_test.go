@@ -10,7 +10,34 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthropics/lingtai-tui/internal/config"
 )
+
+// bindCleanLifecycle supplies the real installed Project CLI without consulting
+// or modifying the user's managed runtime. Agent launch is deliberately blocked.
+func bindCleanLifecycle(t *testing.T) {
+	t.Helper()
+	installed := os.Getenv("LINGTAI_PROJECT_LIFECYCLE_TEST_PYTHON")
+	if installed == "" || !filepath.IsAbs(installed) {
+		t.Fatal("explicit parent-verified lifecycle test interpreter required; no global runtime fallback")
+	}
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	python := config.VenvPython(filepath.Join(home, ".lingtai-tui", "runtime", "venv"))
+	if err := os.MkdirAll(filepath.Dir(python), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("test-only provider launch guard"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(filepath.Dir(installed), "lingtai-agent"), filepath.Join(filepath.Dir(python), "lingtai-agent")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // writeCleanAgent creates a minimal agent dir under lingtaiDir. When alive
 // is true, a fresh .agent.heartbeat makes fs.IsAlive report it as running.
@@ -34,6 +61,7 @@ func writeCleanAgent(t *testing.T, lingtaiDir, name string, alive bool) string {
 }
 
 func TestCleanRefusesWhileAgentAlive(t *testing.T) {
+	bindCleanLifecycle(t)
 	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
 	agentDir := writeCleanAgent(t, lingtaiDir, "alice", true)
 
@@ -53,6 +81,7 @@ func TestCleanRefusesWhileAgentAlive(t *testing.T) {
 }
 
 func TestCleanForceRemovesDespiteLiveAgent(t *testing.T) {
+	bindCleanLifecycle(t)
 	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
 	writeCleanAgent(t, lingtaiDir, "alice", true)
 
@@ -65,6 +94,7 @@ func TestCleanForceRemovesDespiteLiveAgent(t *testing.T) {
 }
 
 func TestCleanRefusesWhenDiscoverFails(t *testing.T) {
+	bindCleanLifecycle(t)
 	if os.Geteuid() == 0 {
 		t.Skip("running as root — unlistable dirs are still listable")
 	}
@@ -85,6 +115,7 @@ func TestCleanRefusesWhenDiscoverFails(t *testing.T) {
 }
 
 func TestCleanGuardsAgentAppearingDuringWait(t *testing.T) {
+	bindCleanLifecycle(t)
 	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
 	aliceDir := writeCleanAgent(t, lingtaiDir, "alice", true)
 
@@ -129,6 +160,7 @@ func TestCleanGuardsAgentAppearingDuringWait(t *testing.T) {
 }
 
 func TestCleanRemovesWhenAgentsDead(t *testing.T) {
+	bindCleanLifecycle(t)
 	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
 	writeCleanAgent(t, lingtaiDir, "alice", false)
 

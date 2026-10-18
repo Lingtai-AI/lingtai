@@ -104,6 +104,7 @@ func skillsPaths(t *testing.T, initJSONPath string) []string {
 // --- CopyBundle ---
 
 func TestCopyBundle_NoLibrary(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	src := makeBundleRoot(t, "test", nil)
 	dst := t.TempDir()
 	if err := CopyBundle(src, dst); err != nil {
@@ -125,6 +126,7 @@ func TestCopyBundle_NoLibrary(t *testing.T) {
 }
 
 func TestCopyBundle_WithLibrary(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	libName := "my-lib"
 	src := makeBundleRoot(t, "test", &libName)
 	dst := t.TempDir()
@@ -141,6 +143,7 @@ func TestCopyBundle_WithLibrary(t *testing.T) {
 }
 
 func TestCopyBundle_ReplacesOldRecipe(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	src := makeBundleRoot(t, "newrecipe", nil)
 	dst := t.TempDir()
 	// pre-existing .recipe/ with stale file
@@ -158,6 +161,7 @@ func TestCopyBundle_ReplacesOldRecipe(t *testing.T) {
 }
 
 func TestCopyBundle_InvalidSource(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dst := t.TempDir()
 	empty := t.TempDir()
 	if err := CopyBundle(empty, dst); err == nil {

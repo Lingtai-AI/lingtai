@@ -625,6 +625,15 @@ Force refresh, normal revive, temporary clear, CLI clean and nirvana remain
 distinct. Go executes only request-bound phase/target operations, and validates
 full terminal/transcript/EOF/exit before restoring native errors or UI completion.
 Unknown means no replay/fallback/later effect; nirvana cannot emit Done/re-init.
+Cleanup receipt phases are validated before native effects. The management Core
+uses the explicit or exact managed SDK; native launch retains its original
+selected-agent interpreter resolution. Specialized native Recipe requests carry
+both filesystem roots losslessly, without changing the retained raw CLI ABI.
 Existing native best-effort errors, Puffo race checks, confirmation/force semantics
 and human-manifest writer barrier retain their prior behavior. Kernel self-refresh
 and native ACP/process transport are not replaced by these external actions.
+
+Native Recipe metadata failures retain the original `json.SyntaxError` chain.
+When available, the native receipt parse offset is that decoder's consumed-byte
+count, not a synthesized Python character/index position; raw-mode diagnostics
+remain their existing adapter facts.

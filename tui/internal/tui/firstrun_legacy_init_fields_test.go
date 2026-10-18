@@ -16,7 +16,11 @@ import (
 // provider or runtime starts. This is fixture wiring, not a fake Project merger.
 func fixtureUIKernel(t *testing.T, globalDir string) string {
 	t.Helper()
-	installed := fixtureUIProjectPython(t)
+	return fixtureUIKernelAt(t, globalDir, fixtureUIProjectPython(t))
+}
+
+func fixtureUIKernelAt(t *testing.T, globalDir, installed string) string {
+	t.Helper()
 	python := config.VenvPython(filepath.Join(globalDir, "runtime", "venv"))
 	if err := os.MkdirAll(filepath.Dir(python), 0755); err != nil {
 		t.Fatal(err)
@@ -28,6 +32,22 @@ func fixtureUIKernel(t *testing.T, globalDir string) string {
 		t.Fatal(err)
 	}
 	return python
+}
+
+// Nil-command lifecycle consumers resolve the managed runtime through HOME.
+// Keep that lookup task-local and use only the parent's cold-installed candidate.
+func fixtureUILifecycle(t *testing.T) string {
+	t.Helper()
+	installed := os.Getenv("LINGTAI_PROJECT_LIFECYCLE_TEST_PYTHON")
+	if installed == "" || !filepath.IsAbs(installed) {
+		t.Fatal("explicit parent-verified lifecycle test interpreter required; no global runtime fallback")
+	}
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return fixtureUIKernelAt(t, filepath.Join(home, ".lingtai-tui"), installed)
 }
 
 func fixtureUIProjectPython(t *testing.T) string {

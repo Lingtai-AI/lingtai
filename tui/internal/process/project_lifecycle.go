@@ -178,6 +178,213 @@ func (s *lifecycleSession) allowed(f lifecycleFrame) bool {
 	return false
 }
 
+// cleanupReceipt checks the specialized clean/nirvana wire grammar against
+// retained native receipts. It neither discovers eligibility independently nor
+// dispatches a phase: Core still chooses every request. A nil next validates a
+// complete receipt; a nonnil next must be exactly the next legal native frame.
+func (s *lifecycleSession) cleanupReceipt(next *lifecycleFrame) (string, int, []int, bool) {
+	phase, index, cursor := "discover", 0, 0
+	members, alive, guarded, survivors := []int{}, []int{}, []int{}, []int{}
+	code, errorSequence := "ok", 0
+	for {
+		// Empty lists advance without inventing observations. Polling uses the
+		// Core's short-circuit any(), unlike the final full survivor pass.
+		switch phase {
+		case "signal", "nirvana_alive":
+			if index == len(members) {
+				index = 0
+				if s.options.Action == "nirvana" {
+					phase = "barrier"
+				} else if len(alive) != 0 {
+					phase = "wait"
+				} else {
+					phase = "rediscover"
+				}
+				continue
+			}
+		case "poll":
+			if index == len(alive) {
+				phase = "rediscover"
+				continue
+			}
+		case "survivor":
+			if index == len(guarded) {
+				if len(survivors) == 0 {
+					phase = "remove"
+				} else if s.options.Force {
+					phase = "notice"
+				} else {
+					phase, code = "done", "survivors"
+				}
+				continue
+			}
+		case "done":
+			return code, errorSequence, survivors, next == nil && cursor == len(s.transcript)
+		}
+		op, target, argument := "", -1, ""
+		switch phase {
+		case "discover", "rediscover":
+			op = "discover"
+		case "signal":
+			op, target, argument = "write_signal", members[index], "suspend"
+		case "initial_alive", "nirvana_alive":
+			op, target, argument = "alive", members[index], "standard"
+		case "suspend":
+			op, target = "suspend_wait", members[index]
+		case "wait":
+			op, argument = "clean_wait_start", strconv.Itoa(len(alive))
+		case "deadline":
+			op = "clean_before_deadline"
+		case "poll":
+			op, target, argument = "alive", alive[index], "standard"
+		case "sleep":
+			op, argument = "sleep", "250"
+		case "survivor":
+			op, target, argument = "alive", guarded[index], "standard"
+		case "notice":
+			op, argument = "clean_survivor_notice", strconv.Itoa(len(survivors))
+		case "barrier":
+			op = "reset_barrier"
+		case "remove":
+			op = "remove_tree"
+		default:
+			return "", 0, nil, false
+		}
+		if cursor == len(s.transcript) {
+			return "", 0, nil, next != nil && next.Operation == op && next.Target == target && next.Argument == argument
+		}
+		ack := s.transcript[cursor]
+		if ack.Operation != op || ack.Target != target || ack.Argument != argument {
+			return "", 0, nil, false
+		}
+		cursor++
+		switch phase {
+		case "discover":
+			if ack.Failed && s.options.Action == "clean" && !s.options.Force {
+				phase, code, errorSequence = "done", "discovery", ack.Sequence
+				continue
+			}
+			for _, member := range ack.Members {
+				if !member.Human {
+					members = append(members, member.Target)
+				}
+			}
+			phase = "signal"
+			if s.options.Action == "nirvana" {
+				phase = "nirvana_alive"
+			}
+		case "signal":
+			phase = "initial_alive" // suspend failures remain best effort
+		case "initial_alive":
+			if ack.Flag {
+				alive = append(alive, ack.Target)
+			}
+			index++
+			phase = "signal"
+		case "nirvana_alive":
+			if ack.Flag {
+				phase = "suspend"
+			} else {
+				index++
+			}
+		case "suspend":
+			index++
+			phase = "nirvana_alive"
+		case "wait", "sleep":
+			phase = "deadline"
+		case "deadline":
+			phase, index = "poll", 0
+			if !ack.Flag {
+				phase = "rediscover"
+			}
+		case "poll":
+			if ack.Flag {
+				phase = "sleep"
+			} else {
+				index++
+			}
+		case "rediscover":
+			if ack.Failed && !s.options.Force {
+				phase, code, errorSequence = "done", "rediscovery", ack.Sequence
+				continue
+			}
+			guarded = append(guarded, alive...)
+			seen := map[int]bool{}
+			for _, target := range alive {
+				seen[target] = true
+			}
+			if !ack.Failed {
+				for _, member := range ack.Members {
+					if !member.Human && !seen[member.Target] {
+						guarded = append(guarded, member.Target)
+					}
+				}
+			}
+			phase, index = "survivor", 0
+		case "survivor":
+			if ack.Flag {
+				survivors = append(survivors, ack.Target)
+			}
+			index++
+		case "notice", "barrier":
+			phase = "remove"
+		case "remove":
+			phase = "done"
+			if ack.Failed && s.options.Action == "clean" {
+				code, errorSequence = "native", ack.Sequence
+			}
+		}
+	}
+}
+
+// A terminal native refusal closes that target, not the whole all-target
+// exchange. Only the original defensive refresh/temporary-clear tail remains
+// legal; best-effort preset/signal/termination errors are not refusals.
+func (s *lifecycleSession) afterNativeRefusal(f lifecycleFrame) bool {
+	target := f.Target
+	if target == -1 {
+		for _, ack := range s.transcript {
+			if ack.Target >= 0 {
+				target = ack.Target
+			}
+		}
+	}
+	for _, r := range s.retained {
+		if r.frame.Target != target || r.err == nil {
+			continue
+		}
+		op := r.frame.Operation
+		refused, cleanup := false, false
+		switch s.options.Action {
+		case "refresh", "revive", "cpr":
+			refused = op == "external_owner" || op == "launch" || op == "heartbeat" || op == "terminate" && r.ack.OwnershipChanged
+			cleanup = s.options.Action == "refresh" && op == "launch" && f.Operation == "remove_handshake" && f.Argument == "suspend"
+		case "clear":
+			refused = op == "revive_for_clear" || op == "clear_alive_wait" || op == "write_signal" || op == "clear_completion_wait" || op == "clear_suspend"
+			cleanup = (op == "clear_alive_wait" || op == "write_signal" || op == "clear_completion_wait") && f.Operation == "clear_suspend"
+			if op == "write_signal" && cleanup {
+				cleanup = false
+				for _, ack := range s.transcript {
+					if ack.Operation == "clear_capture" && ack.Sequence < r.frame.Sequence {
+						cleanup = true
+					}
+				}
+			}
+		}
+		if refused {
+			if !cleanup {
+				return false
+			}
+			for _, ack := range s.transcript {
+				if ack.Sequence > r.frame.Sequence && ack.Target == f.Target {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // observe validates capability binding BEFORE effects. Each requested operation
 // is synchronous on the caller goroutine; once-only means no duplicate effect
 // dispatch even if a child repeats a frame with a fresh sequence.
@@ -185,6 +392,14 @@ func (s *lifecycleSession) observe(f lifecycleFrame) (lifecycleAck, error) {
 	bad := func() (lifecycleAck, error) { s.stopped = true; return lifecycleAck{}, &ProjectLifecycleUnknown{} }
 	if s.stopped || f.Status != "project_lifecycle_native" || f.RequestID != s.requestID || f.Sequence != len(s.transcript)+1 || !s.allowed(f) {
 		return bad()
+	}
+	if !s.afterNativeRefusal(f) {
+		return bad()
+	}
+	if s.options.Action == "clean" || s.options.Action == "nirvana" {
+		if _, _, _, valid := s.cleanupReceipt(&f); !valid {
+			return bad()
+		}
 	}
 	global := f.Operation == "discover" || f.Operation == "sleep" || f.Operation == "clean_wait_start" || f.Operation == "clean_before_deadline" || f.Operation == "clean_survivor_notice" || f.Operation == "reset_barrier" || f.Operation == "remove_tree"
 	dir, exists := s.paths[f.Target]
@@ -435,7 +650,7 @@ func (s *lifecycleSession) finish(data []byte) (ProjectLifecycleResult, error) {
 		Transcript []lifecycleAck         `json:"transcript"`
 	}
 	raw, err := recipeObject(data, &terminal, "status request_id action result transcript", "")
-	if err != nil || terminal.Status != "project_lifecycle_complete" || terminal.RequestID != s.requestID || terminal.Action != s.options.Action || !reflect.DeepEqual(terminal.Transcript, s.transcript) {
+	if s.stopped || err != nil || terminal.Status != "project_lifecycle_complete" || terminal.RequestID != s.requestID || terminal.Action != s.options.Action || !reflect.DeepEqual(terminal.Transcript, s.transcript) {
 		return unknown()
 	}
 	var transcript []json.RawMessage
@@ -468,20 +683,9 @@ func (s *lifecycleSession) finish(data []byte) (ProjectLifecycleResult, error) {
 	if !s.options.All && s.options.Action != "sleep" && s.options.Action != "suspend" && result.Count != 0 {
 		return unknown()
 	}
-	if s.options.Action == "clean" {
-		lastDiscovery := 0
-		for _, ack := range s.transcript {
-			if ack.Operation == "discover" {
-				lastDiscovery = ack.Sequence
-			}
-		}
-		observedSurvivors := []int{}
-		for _, ack := range s.transcript {
-			if ack.Sequence > lastDiscovery && ack.Operation == "alive" && ack.Flag {
-				observedSurvivors = append(observedSurvivors, ack.Target)
-			}
-		}
-		if !reflect.DeepEqual(result.Survivors, observedSurvivors) {
+	if s.options.Action == "clean" || s.options.Action == "nirvana" {
+		code, sequence, survivors, valid := s.cleanupReceipt(nil)
+		if !valid || result.Code != code || result.ErrorSequence != sequence || !reflect.DeepEqual(result.Survivors, survivors) {
 			return unknown()
 		}
 	}
@@ -636,10 +840,7 @@ func RunProjectLifecycle(command string, options ProjectLifecycleOptions, native
 		if err != nil {
 			return unknown()
 		}
-		python = config.LingtaiCmd(global)
-	}
-	if options.Selected != "" {
-		python = resolvePython(options.Selected, python)
+		python = config.VenvPython(config.RuntimeVenvDir(global))
 	}
 	cmd := exec.Command(kernelCLI(python), "project", "lifecycle")
 	stdin, err := cmd.StdinPipe()
@@ -775,9 +976,8 @@ func ResolveExternalProjectPreset(command, dir, query string, allowed func(strin
 		if err != nil {
 			return unknown()
 		}
-		python = config.LingtaiCmd(global)
+		python = config.VenvPython(config.RuntimeVenvDir(global))
 	}
-	python = resolvePython(dir, python)
 	cmd := exec.Command(kernelCLI(python), "project", "lifecycle")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

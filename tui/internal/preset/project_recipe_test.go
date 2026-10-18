@@ -2,6 +2,7 @@ package preset
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -128,7 +129,8 @@ func TestRecipeExchangeInstalledSequentialBytesAndDestination(t *testing.T) {
 			}
 			recipeFixtureBytes(t, filepath.Join(destination, "d", ".prompt"), []byte("not enumerated"))
 			data, err := os.ReadFile(filepath.Join(destination, "b", "init.json"))
-			if err != nil || !bytes.Contains(data, []byte(`"callback_side_effect":true`)) {
+			var observed map[string]interface{}
+			if err != nil || json.Unmarshal(data, &observed) != nil || observed["callback_side_effect"] != true {
 				t.Fatal("late init observation lost function side effect")
 			}
 			recipeFixtureBytes(t, filepath.Join(destination, AppliedRecipeSubpath, "greet", "greet.md"), []byte("changed after capture"))
