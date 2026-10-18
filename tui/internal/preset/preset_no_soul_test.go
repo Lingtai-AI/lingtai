@@ -32,7 +32,7 @@ func genInit(t *testing.T, opts AgentOpts) (manifest map[string]interface{}, glo
 	if err := json.Unmarshal(data, &init); err != nil {
 		t.Fatalf("parse init.json: %v", err)
 	}
-	manifest, _ = init["manifest"].(map[string]interface{})
+	manifest, _ = init["agent"].(map[string]interface{})
 	if manifest == nil {
 		t.Fatalf("manifest missing in init.json")
 	}
@@ -112,6 +112,7 @@ func TestGenerateInitJSON_OldAgentKeepsLegacySoulFieldsInert(t *testing.T) {
 		"soul_file":     legacySoulFile,
 		"covenant_file": "/old/global/covenant/en/covenant.md",
 	}
+	old["pad"] = "legacy fixture memory"
 	oldData, err := json.MarshalIndent(old, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal legacy init.json: %v", err)

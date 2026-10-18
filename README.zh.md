@@ -136,6 +136,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 **TUI——`lingtai-tui`** 把灵台带进终端：设置项目和模型、对话与读信、查看科学家状态；需要更深入时，可打开 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。
 
+模型预设仅含 LLM。工具、权限与显式 MCP 选择属于智能体 init，与模型选择独立；`/setup` 分别处理。所有者位置与只读内核身份检查见[标准 init 示例](examples/init.jsonc)和内置帮助。
+
 **Portal——`lingtai-portal`** 是仓库中保留的、已弃用的可视化代码库。它仍可为仓库开发单独构建并读取项目状态，呈现实时智能体网络、信件边、历史拓扑；但不由安装脚本、发布工作流或 Homebrew 构建或安装。
 
 **外接渠道** 把**同一个**科学家接到你已经在用的平台上——记忆、工具、历史在所有渠道之间共享，它们是同一个助理的多个入口，不是各自独立的机器人。设置请遵循当前 MCP/精选插件文档，并先取得明确授权；TUI 的 `/mcp` 面板是只读的，只用于查看已配置的桥接及其状态。凭证存在本地 `.secrets/` 目录（绝不进 Git）；外部副作用（发消息、提 issue）默认按真实操作对待；渠道插件支持发件人白名单，随附的示例配置默认启用白名单——开放访问必须显式选择。

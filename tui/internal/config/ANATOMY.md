@@ -105,3 +105,13 @@ This package manages the TUI's bootstrap sequence — the steps that run before 
 - **`uv` preferred over `pip`:** all pip operations prefer `uv` if available (faster, can auto-download Python).
 - **`.env` is no longer clobber-rewritten.** `WriteEnvFile` (managed API keys) preserves everything it doesn't own: comments, blanks, unrelated vars, and file permissions (`env_test.go`). A line left in a user's `.env` by a retired feature (for example `LINGTAI_SOUL_FLOW_ENABLED` from the former Soul opt-in) therefore survives every later API-key save byte-for-byte; nothing in the TUI writes, reads, or removes it any more. The former single-key `SetEnvVar` upsert and the `SoulFlowEnabled*` readers existed only for that opt-in and were deleted with it; `preset.GenerateInitJSONWithOpts` no longer touches `.env` at all.
 - **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.
+
+### Desired versus selected LLM identity
+
+`ReadAgentProvider` / `ReadAgentAPIKeyEnv` in `global.go` are desired-inline
+structural readers only: canonical `llm` and legacy `manifest.llm` are readable,
+but reference policies return unknown rather than a stale inline identity.
+Actual startup/doctor/login decisions use the process-owned installed
+`inspect-init` adapter from the TUI composition edge; config does not import
+process or implement preset selection. Legacy `EnsureAddons` remains a bounded
+importability check, not canonical MCP activation or installation.

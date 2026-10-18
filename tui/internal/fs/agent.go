@@ -127,7 +127,7 @@ func CapabilitiesForDisplay(manifest []string) []string {
 // secret-redacted; kernel issue #259) and falls back to raw init.json when
 // the artifact is absent or malformed (stopped / never-booted agents).
 func ReadInitManifest(dir string) (map[string]interface{}, error) {
-	manifest, err := readResolvedInitManifest(dir)
+	manifest, err := ReadResolvedInitManifest(dir)
 	if err != nil {
 		manifest, err = readRawInitManifest(dir)
 		if err != nil {
@@ -138,7 +138,9 @@ func ReadInitManifest(dir string) (map[string]interface{}, error) {
 	return manifest, nil
 }
 
-func readResolvedInitManifest(dir string) (map[string]interface{}, error) {
+// ReadResolvedInitManifest applies the shared v1 schema/source/freshness gate.
+// Absence within a valid resolved manifest is authoritative for its consumers.
+func ReadResolvedInitManifest(dir string) (map[string]interface{}, error) {
 	artifactPath := filepath.Join(dir, "system", "manifest.resolved.json")
 	if isResolvedManifestStale(filepath.Join(dir, "init.json"), artifactPath) {
 		return nil, fmt.Errorf("manifest.resolved.json is older than init.json")
@@ -189,11 +191,74 @@ func readRawInitManifest(dir string) (map[string]interface{}, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse init.json: %w", err)
 	}
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("no manifest in init.json")
+	return ProjectInitManifest(raw)
+}
+
+// ProjectInitManifest is a structural desired-config view, not effective policy.
+// Reference-only LLMs remain unknown until Core inspection or a resolved artifact.
+// Never write this view back to disk.
+func ProjectInitManifest(raw map[string]interface{}) (map[string]interface{}, error) {
+	if manifest, ok := raw["manifest"].(map[string]interface{}); ok {
+		view := make(map[string]interface{}, len(manifest))
+		for key, value := range manifest {
+			view[key] = value
+		}
+		if _, references := manifest["preset"].(map[string]interface{}); references {
+			delete(view, "llm")
+		}
+		return view, nil
 	}
-	return manifest, nil
+	llm, ok := raw["llm"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("no llm or legacy manifest in init.json")
+	}
+	view := map[string]interface{}{"llm": llm}
+	if policy, ok := llm["preset"].(map[string]interface{}); ok {
+		view["preset"] = policy
+	}
+	if agent, ok := raw["agent"].(map[string]interface{}); ok {
+		for key, value := range agent {
+			switch key {
+			case "name":
+				view["agent_name"] = value
+			case "permissions":
+				view["admin"] = value
+			default:
+				view[key] = value
+			}
+		}
+	}
+	if tools, ok := raw["tools"].(map[string]interface{}); ok {
+		caps := map[string]interface{}{}
+		for key, value := range tools {
+			switch key {
+			case "email":
+				if owner, ok := value.(map[string]interface{}); ok {
+					if v, present := owner["pseudo_agent_subscriptions"]; present {
+						view["pseudo_agent_subscriptions"] = v
+					}
+				}
+			case "context":
+				if owner, ok := value.(map[string]interface{}); ok {
+					if v, present := owner["summarize_notification_threshold"]; present {
+						view["summarize_notification_threshold"] = v
+					}
+				}
+			case "system", "psyche": // Core owners, not selectable tools
+			default:
+				if value == false {
+					caps[key] = nil
+				} else {
+					caps[key] = value
+				}
+			}
+		}
+		view["capabilities"] = caps
+	}
+	if plugins, ok := raw["plugins"]; ok {
+		view["plugins"] = plugins
+	}
+	return view, nil
 }
 
 func flattenInitManifest(manifest map[string]interface{}) {

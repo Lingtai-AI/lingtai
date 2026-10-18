@@ -1,10 +1,11 @@
 package preset
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/anthropics/lingtai-tui/internal/process"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -682,21 +683,21 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 			t.Fatalf("parse init.json: %v", err)
 		}
 
-		// Check required fields
-		manifest, ok := initJSON["manifest"].(map[string]interface{})
-		if !ok {
-			t.Fatal("manifest not a map")
-		}
-		for _, key := range []string{"agent_name", "language", "llm", "capabilities", "admin", "streaming", "max_turns"} {
-			if _, exists := manifest[key]; !exists {
-				t.Errorf("manifest missing key %q", key)
+		for _, key := range []string{"agent", "llm", "tools", "mcp", "plugins", "host"} {
+			if _, exists := initJSON[key]; !exists {
+				t.Errorf("canonical init missing %s", key)
 			}
 		}
-		if manifest["agent_name"] != "test-agent" {
-			t.Errorf("agent_name = %v, want %q", manifest["agent_name"], "test-agent")
+		if initJSON["manifest"] != nil || initJSON["addons"] != nil {
+			t.Fatal("fresh init exported legacy owners")
 		}
-		if got, want := manifest["max_turns"], float64(500); got != want {
-			t.Errorf("max_turns = %v, want %v", got, want)
+		agent := initJSON["agent"].(map[string]interface{})
+		if agent["name"] != "test-agent" || agent["language"] != "en" || agent["permissions"] == nil {
+			t.Fatalf("wrong agent owner: %#v", agent)
+		}
+		// max_turns/streaming are System policy, not authored init/model settings.
+		if _, exists := initJSON["max_turns"]; exists {
+			t.Fatal("runtime policy leaked into init")
 		}
 
 		// Check .agent.json exists
@@ -846,14 +847,20 @@ func TestCodexPresetDefaultOmitsServiceTierAndSetsThinking(t *testing.T) {
 	if err := json.Unmarshal(data, &initJSON); err != nil {
 		t.Fatalf("parse init.json: %v", err)
 	}
-	manifest := initJSON["manifest"].(map[string]interface{})
-	generatedLLM := manifest["llm"].(map[string]interface{})
-	if _, ok := generatedLLM["service_tier"]; ok {
-		t.Fatalf("generated codex init.json should omit llm.service_tier; got %#v", generatedLLM["service_tier"])
+	if initJSON["manifest"] != nil {
+		t.Fatal("fresh codex init must be reference-only")
 	}
-	if got, ok := generatedLLM["thinking"].(string); !ok || got != "xhigh" {
-		t.Fatalf("generated codex init.json should set llm.thinking=xhigh; got %#v", generatedLLM["thinking"])
+	inspected, err := process.InspectInit(context.Background(), fixtureProjectPython(t), filepath.Join(lingtaiDir, "codex-agent"))
+	if err != nil || inspected.LLM == nil {
+		t.Fatalf("installed inspect: %v", err)
 	}
+	if inspected.LLM.ServiceTier != "" {
+		t.Fatalf("generated codex must omit service_tier: %#v", inspected.LLM.ServiceTier)
+	}
+	if inspected.LLM.Thinking != "xhigh" {
+		t.Fatalf("selected codex thinking = %#v", inspected.LLM.Thinking)
+	}
+
 }
 
 func TestClaudePresetShape(t *testing.T) {
@@ -879,20 +886,8 @@ func TestClaudePresetShape(t *testing.T) {
 	if got := llm["api_key_env"]; got != "" {
 		t.Errorf("llm.api_key_env = %v, want empty string", got)
 	}
-	// Conservative capabilities: keep LingTai skills, do NOT wire
-	// web_search/vision through this provider.
-	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("manifest.capabilities missing or wrong type: %T", p.Manifest["capabilities"])
-	}
-	if _, ok := caps["skills"]; !ok {
-		t.Errorf("capabilities.skills should be present (LingTai skills default)")
-	}
-	if _, ok := caps["web_search"]; ok {
-		t.Errorf("capabilities.web_search should be absent for claude")
-	}
-	if _, ok := caps["vision"]; ok {
-		t.Errorf("capabilities.vision should be absent for claude")
+	if _, ok := p.Manifest["capabilities"]; ok {
+		t.Fatal("Claude template must not configure init-owned tools")
 	}
 }
 
@@ -961,8 +956,8 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 		t.Fatalf("parse init.json: %v", err)
 	}
 
-	manifest := init["manifest"].(map[string]interface{})
-	preset, ok := manifest["preset"].(map[string]interface{})
+	llm := init["llm"].(map[string]interface{})
+	preset, ok := llm["preset"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("manifest.preset block missing")
 	}
@@ -1061,30 +1056,22 @@ func TestAutoEnvVarName(t *testing.T) {
 	}
 }
 
-// TestFamilyTemplateCapabilities pins the template capability defaults: no
-// per-vendor capability providers — web_search uses DuckDuckGo and vision
-// inherits the agent's own provider — for every template that can serve
-// them. The claude template stays skills-only.
+// TestFamilyTemplateCapabilities proves every family is LLM-only, not a tool policy.
 func TestFamilyTemplateCapabilities(t *testing.T) {
 	for _, p := range BuiltinPresets() {
-		caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("%s manifest.capabilities missing or wrong type: %T", p.Name, p.Manifest["capabilities"])
+		if len(p.Manifest) != 1 || p.Manifest["llm"] == nil {
+			t.Fatalf("%s template must contain only the LLM view: %#v", p.Name, p.Manifest)
 		}
-		if _, ok := caps["skills"]; !ok {
-			t.Errorf("%s must keep the skills default", p.Name)
+		data, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if p.Name == "claude" {
-			if len(caps) != 1 {
-				t.Errorf("claude capabilities = %#v, want skills only", caps)
-			}
-			continue
+		var doc map[string]interface{}
+		if err := DecodeJSONUseNumber(data, &doc); err != nil {
+			t.Fatal(err)
 		}
-		if got := caps["web_search"]; !reflect.DeepEqual(got, map[string]interface{}{"provider": "duckduckgo"}) {
-			t.Errorf("%s web_search = %#v, want duckduckgo", p.Name, got)
-		}
-		if got := caps["vision"]; !reflect.DeepEqual(got, map[string]interface{}{"provider": "inherit"}) {
-			t.Errorf("%s vision = %#v, want inherit", p.Name, got)
+		if len(doc) != 3 || doc["llm"] == nil || doc["manifest"] != nil {
+			t.Fatalf("%s envelope = %s", p.Name, data)
 		}
 	}
 }
@@ -1111,8 +1098,18 @@ func TestGenerateInitJSONStripsRetiredAPICompat(t *testing.T) {
 	if strings.Contains(string(data), "api_compat") {
 		t.Fatalf("generated init.json carries api_compat:\n%s", data)
 	}
-	if !strings.Contains(string(data), `"wire_api": "chat_completions"`) {
-		t.Fatalf("generated init.json lost wire_api:\n%s", data)
+	var authored map[string]interface{}
+	if DecodeJSONUseNumber(data, &authored) != nil {
+		t.Fatal("invalid authored init")
+	}
+	route, _ := authored["llm"].(map[string]interface{})
+	policy, _ := route["preset"].(map[string]interface{})
+	if len(route) != 1 || policy["active"] != RefFor(p) || authored["manifest"] != nil {
+		t.Fatal("fresh init must retain only the selected reference, not expanded model data")
+	}
+	effective := fixtureCoreConfiguration(t, filepath.Join(lingtaiDir, "alice"))["llm"].(map[string]interface{})
+	if effective["wire_api"] != "chat_completions" || effective["model"] != "test-model" || effective["provider"] != "openai" {
+		t.Fatal("selected reference lost effective wire/identity")
 	}
 }
 
@@ -1202,5 +1199,61 @@ func TestValidateAcceptsEmptyBaseURLForEveryFamily(t *testing.T) {
 				t.Errorf("%s with base_url %#v = %v, want no violations", provider, baseURL, errs)
 			}
 		}
+	}
+}
+
+func TestPresetLLMOnlyReadSaveClone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(SavedDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(SavedDir(), "old.json")
+	input := []byte(`{"name":"old","description":{"summary":"old","note":"keep"},"manifest":{"llm":{"provider":"openai","model":"test","api_key_env":"CUSTOM_ROUTE_KEY","base_url":"https://example.invalid/v1","wire_api":"responses","route_id":9007199254740993},"capabilities":{"vision":{"api_key_env":"TOOL_KEY"}},"admin":{"karma":true}}}`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load("old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(input) {
+		t.Fatal("ordinary read changed legacy bytes")
+	}
+	clone := Clone(loaded, "new")
+	llm := clone.Manifest["llm"].(map[string]interface{})
+	llm["model"] = "other"
+	if loaded.Manifest["llm"].(map[string]interface{})["model"] != "test" {
+		t.Fatal("clone shares source LLM map")
+	}
+	if err := Save(clone); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(SavedDir(), "new.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := DecodeJSONUseNumber(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc) != 3 || doc["manifest"] != nil || doc["llm"] == nil {
+		t.Fatalf("noncanonical envelope: %s", data)
+	}
+	got := doc["llm"].(map[string]interface{})
+	if got["api_key_env"] != "CUSTOM_ROUTE_KEY" || got["wire_api"] != "responses" || got["route_id"] != json.Number("9007199254740993") {
+		t.Fatalf("LLM route/auth references lost: %#v", got)
+	}
+	roundtrip, err := Load("new")
+	if err != nil || len(roundtrip.Manifest) != 1 {
+		t.Fatalf("canonical read: %#v err=%v", roundtrip, err)
+	}
+}
+
+func TestPresetRejectsMixedLLMEnvelopes(t *testing.T) {
+	var p Preset
+	err := DecodeJSONUseNumber([]byte(`{"name":"mixed","llm":{"provider":"openai","model":"a"},"manifest":{"llm":{"provider":"codex","model":"b"}}}`), &p)
+	if err == nil {
+		t.Fatal("ambiguous canonical/legacy envelope accepted")
 	}
 }

@@ -185,17 +185,17 @@ maintenance: |
 
 ## What this is
 
-The preset package owns the atomic `{llm, capabilities}` bundle layer — loading, saving, listing, validating, and applying presets to agent `init.json` files. Presets live under `~/.lingtai-tui/presets/`; the directory (`templates/` vs `saved/`) IS the marker distinguishing built-in from user-owned — no in-band field.
+The preset package owns reusable LLM-only `{name, description, llm}` presets — loading, saving, listing, validating, and applying presets to agent `init.json` files. Presets live under `~/.lingtai-tui/presets/`; the directory (`templates/` vs `saved/`) IS the marker distinguishing built-in from user-owned — no in-band field.
 
 ## Components
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `Preset` struct | `tui/internal/preset/preset.go:60` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
+| `Preset` struct | `tui/internal/preset/preset.go:60` | `Name` + structured `Description` + bounded internal `Manifest{llm}` + runtime-only `Source`; custom JSON codec emits only canonical `llm` and reads legacy wrappers without writes |
 | `PresetSource` | `tui/internal/preset/preset.go:74` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
 | `PresetDescription` | `tui/internal/preset/preset.go:98` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
 | `CanonicalizeCapabilities` | `tui/internal/preset/capability_alias.go:24` | bounded in-memory `bash` -> `shell` helper for explicit preset/editor/write flows; conflicting configurations fail closed |
-| `NormalizeLegacyCapabilities` | `tui/internal/preset/capability_alias.go:47` | applies the bounded helper to a preset before explicit TUI output |
+| `NormalizeLegacyCapabilities` | `tui/internal/preset/capability_alias.go:47` | retained legacy helper for held init adapters; canonical preset load/save/editor no longer use tool aliases |
 | `DecodeJSONUseNumber` | `tui/internal/preset/json_number.go:10-27` | exact-number, single-document decoder for explicit TUI read-modify-write paths; not a startup reader or migration |
 | `Load(name)` | `tui/internal/preset/preset.go:278` | saved/ first, then templates/; sets `Source` |
 | `List()` | `tui/internal/preset/preset.go:216` | saved (alphabetical) + templates in `BuiltinPresets()` order; each carries `Source` |
@@ -227,6 +227,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 
 - `GenerateInitJSONWithOpts` / `PropagatePresetPolicy` in `preset.go` now delegate
   existing-project mutation to the concrete process driver. `project_configuration.go`
+  keeps the caller-selected management SDK (never the target Agent host),
   projects only public reference/path/options and curated MCP seeds, reads selected
   saved policy without reconciliation, and maps explicit covenant/Pad edits.
   Its legacy covenant metadata carries explicit and outer language-default paths;
@@ -237,6 +238,14 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
   Existing Recipe observation/apply now delegates through `project_recipe.go`
   to the specialized kernel process consumer; arbitrary TUI callback execution
   remains in Go on the calling goroutine.
+
+New template/save/export/clone output is LLM-only. Old preset wrappers remain
+readable with exact LLM numeric/options/reference data; ordinary reads do not
+rewrite disk. `skillsDefault`/`familyCapabilities` are removed, and the deprecated
+`SyncCapabilityAPIKeyEnv` is a no-op, so even a retained Project caller cannot
+rewrite init-owned tool credentials. Tools and external MCP are not preset policy.
+The explicit Project configure/creation/native contracts remain separate adapters;
+the paired canonical init conversion belongs to the subsequent Project slice.
 
 ## Connections
 
@@ -292,3 +301,14 @@ the Core owns append/no-op and selection. The actual FirstRunModel uses the
 error-returning ResolveRecipeSetupLayers so unknown transport is not absence.
 Compiled source resources are retained as compatibility/oracle material; runtime
 copy obtains operational bytes from kernel package data, not Go bootstrap.
+
+### Concrete init consumers
+
+`InitPresetPolicy` and `recipeSkills` in `json_number.go` are structural owner
+accessors, not resolution policy. `SavedPresetPolicy` reads canonical
+`llm.preset` or legacy `manifest.preset` after Core configure. Configuration
+requests send only explicitly selected curated MCP specs, never catalog seeds
+or duplicate addons. Native Recipe observation/writes and `AppendSkillsPath`
+use `tools.skills`; canonical absence is enabled, false is off, and legacy input
+retains its present-object gate. Exact numbers, opaque path handles, atomic
+rename and native callback ordering remain at the existing I/O boundary.

@@ -85,7 +85,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 - `/viz` — open the network visualization in the browser.
 
 ### Configuration & diagnostics
-- `/setup` — agent setup wizard (provider, model, capabilities).
+- `/setup` — agent setup wizard (LLM, independent MCP, credentials).
 - `/settings` — TUI preferences (theme, page size, language).
 - `/mcp` — read-only MCP inspection panel for external-service bridges.
 - `/doctor` — diagnose connection issues.
@@ -142,7 +142,7 @@ Reloads `init.json`, capabilities, and all configuration from disk, then
 relaunches the agent. Passing a preset name switches the active preset before
 relaunching; the preset must be in the agent's `manifest.preset.allowed` list
 (see `/presets`). It is the go-to command after editing configuration, or to
-switch the agent onto a different LLM/capability preset — reach for `/cpr` only
+switch the agent onto a different LLM preset — reach for `/cpr` only
 when an agent is actually down.
 
 ### `/clear` — clear the context window and restart
@@ -229,13 +229,15 @@ automatic Task Card/progress projection is a separate reader. Re-run `/taskcard`
 to refresh. When no active card is available, it shows a short status message
 instead.
 
+Presets configure only the LLM. New saves/clones contain `{name, description, llm}`; legacy wrapper files stay unchanged on read and do not select tools. Tools belong to agent init/kernel. External MCP is an independent explicit selection, initially none.
+
 ### `/presets` — open the preset library
 **Usage:** `/presets`
 
 Opens the preset library scoped to the current agent. It shows only the presets
 in this agent's `manifest.preset.allowed` list — exactly the ones you can switch
 to with `/refresh <name>`. The active preset is marked with ●. You can view each
-preset's LLM and capabilities, and tag it with a 1–5 star cost/quality tier
+preset's LLM settings, and tag it with a 1–5 star cost/quality tier
 (higher is better); tags propagate to agents and guide daemon/avatar selection.
 This view is read-only inspection plus tag editing — full preset creation happens
 in `/setup`.
@@ -291,17 +293,25 @@ use `/kanban`.
 **Usage:** `/setup`
 
 Opens the agent setup wizard, where you change the LLM provider, model,
-capabilities, and runtime settings. Changes propagate to all agents. Use it for
+independent MCP selection, and agent permissions. Changes propagate to all agents. Use it for
 first-time configuration or any substantive change to the agent's provider,
-model, or capabilities. For TUI-only preferences (theme, language) use
+model, or MCP selection. For TUI-only preferences (theme, language) use
 `/settings`; full preset creation also happens in this wizard.
+
+New init keeps identity/permissions in `agent`, model policy in `llm.preset`,
+and tools in `tools` (empty means shipped builtins on; `false` means off).
+Presets contain LLM only: model switches do not choose tools or MCP. New MCP
+selection starts empty. Runtime policy belongs to System (`settings/system.json`),
+prompts to Psyche (`settings/psyche.json`), and durable memory to `system/pad.md`.
+Doctor/login use read-only installed Core inspection for the actual selected
+model/source; an old or unavailable CLI reports unknown, not guessed credentials.
 
 ### `/settings` — edit TUI preferences
 **Usage:** `/settings`
 
 Opens TUI preferences: theme, mail page size, and language. Use it for
 look-and-feel and client-side behavior of the TUI itself. To change the agent's
-provider, model, or capabilities, use `/setup`.
+provider, model, or MCP selection, use `/setup`.
 
 ### `/mcp` — open the MCP control panel
 **Usage:** `/mcp`

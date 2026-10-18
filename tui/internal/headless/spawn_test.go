@@ -59,7 +59,7 @@ func stubSuccessfulSpawnCreate(t *testing.T) {
 		for path, body := range map[string][]byte{
 			filepath.Join(lingtaiDir, "human", ".agent.json"):           []byte(`{"agent_name":"human"}`),
 			filepath.Join(lingtaiDir, request.AgentName, ".agent.json"): []byte(`{"agent_name":"` + request.AgentName + `"}`),
-			filepath.Join(lingtaiDir, request.AgentName, "init.json"):   []byte(`{"manifest":{"agent_name":"` + request.AgentName + `"}}`),
+			filepath.Join(lingtaiDir, request.AgentName, "init.json"):   []byte(`{"agent":{"name":"` + request.AgentName + `"},"llm":{"preset":{"active":"fixture","default":"fixture","allowed":["fixture"]}},"tools":{},"mcp":{},"plugins":[]}`),
 		} {
 			if err := os.WriteFile(path, body, 0o644); err != nil {
 				return process.ProjectCreateResult{}, err
@@ -170,9 +170,9 @@ func TestRunSpawn_CreatesInitJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &initJSON); err != nil {
 		t.Fatalf("init.json is invalid JSON: %v", err)
 	}
-	manifest := initJSON["manifest"].(map[string]interface{})
-	if manifest["agent_name"] != "test-agent" {
-		t.Errorf("agent_name = %q, want %q", manifest["agent_name"], "test-agent")
+	manifest := initJSON["agent"].(map[string]interface{})
+	if manifest["name"] != "test-agent" {
+		t.Errorf("agent_name = %q, want %q", manifest["name"], "test-agent")
 	}
 	if manifest["language"] != "en" {
 		t.Errorf("language = %q, want %q", manifest["language"], "en")
@@ -348,7 +348,7 @@ func TestRunSpawn_LanguageDefault(t *testing.T) {
 	data, _ := os.ReadFile(initPath)
 	var initJSON map[string]interface{}
 	json.Unmarshal(data, &initJSON)
-	manifest := initJSON["manifest"].(map[string]interface{})
+	manifest := initJSON["agent"].(map[string]interface{})
 	if manifest["language"] != "zh" {
 		t.Errorf("language = %q, want %q", manifest["language"], "zh")
 	}

@@ -136,6 +136,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 **TUI——`lingtai-tui`** 者，灵台之终端面也：设项目与模型、对谈读信、察器灵之状；欲深观，则入 `/knowledge`、`/skills`、`/system`、`/daemons` 或 `/goal`。入 `/help` 可观斜杠命令之全录（其权威之目，乃内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.wen.md)，此 README 不复述之）。升级之后若有不谐，行 `lingtai-tui doctor`。
 
+模型预设惟 LLM。工具、权柄与明择之 MCP 归器灵 init，不随模型而移；`/setup` 各守其主。所有者之位与内核只读身份检查，见[init 正例](examples/init.jsonc)及内置帮助。
+
 **Portal——`lingtai-portal`** 者，仓中所留而已废之可视代码库也。仍可为仓库开发而单独构建，读项目之状，显器灵之网、书信之边、历史之拓扑；然不由安装脚本、发布工作流或 Homebrew 构建或安装。
 
 **外接诸渠**，接**同一**格物者于君素用之台——记忆、诸器、往史，通乎诸渠之间；其为一助理之众门，非各立之机器人也。其设置当循当前 MCP/精选插件文档，且须得明示授权；TUI 之 `/mcp` 台为只读，仅察既设之桥接及其状态。凭证藏于本地 `.secrets/`（绝不入 Git）；凡外部之副作用（发讯、提 issue）皆按真行待之；渠道插件支持发件者白名单，随附示例配置默认启之——开放访问，须显而择焉。

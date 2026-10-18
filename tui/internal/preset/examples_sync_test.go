@@ -2,6 +2,7 @@ package preset
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"regexp"
 	"strings"
@@ -39,7 +40,6 @@ func TestInitTemplateHasNoRetiredOrSeedEntries(t *testing.T) {
 		"molt_pressure",
 		"molt_prompt",
 		"psyche",
-		"email",
 		"codex",
 		"web_read",
 		"talk",
@@ -81,4 +81,37 @@ func readRepoInitExample(t *testing.T) []byte {
 		t.Fatalf("read examples/init.jsonc: %v", err)
 	}
 	return data
+}
+
+// Email is now a Core owner inside tools, not a retired top-level seed. Retain
+// the root-owner exclusion while allowing the canonical commented tool example.
+func TestInitTemplateCanonicalOwners(t *testing.T) {
+	for _, data := range [][]byte{readInitTemplate(t), readRepoInitExample(t)} {
+		var doc map[string]interface{}
+		if DecodeKernelJSONCUseNumber(data, &doc) != nil {
+			t.Fatal("canonical template is not parseable")
+		}
+		for _, key := range []string{"agent", "llm", "tools", "mcp", "plugins"} {
+			if _, exists := doc[key]; !exists {
+				t.Fatalf("missing canonical owner %s", key)
+			}
+		}
+		for _, key := range []string{"manifest", "addons", "email", "covenant_file", "pad"} {
+			if _, exists := doc[key]; exists {
+				t.Fatalf("retired root owner %s", key)
+			}
+		}
+	}
+}
+
+func TestSelectedSourceJSONCCodecPreservesLiteralsAndNumbers(t *testing.T) {
+	raw := []byte("{\n // example says \"quoted\" and {brackets}\n \"llm\":{\"provider\":\"openai\",\"model\":\"literal, } // text\",\"route\":9007199254740993,},\n}")
+	var doc map[string]interface{}
+	if err := DecodeKernelJSONCUseNumber(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	llm := doc["llm"].(map[string]interface{})
+	if llm["model"] != "literal, } // text" || llm["route"] != json.Number("9007199254740993") {
+		t.Fatal("JSONC codec altered source literals")
+	}
 }

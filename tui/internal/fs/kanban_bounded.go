@@ -564,7 +564,7 @@ func ReadKanbanInitManifest(dir string) (map[string]any, []BoundedReadStats, err
 	resolvedPath := filepath.Join(dir, "system", "manifest.resolved.json")
 	resolved, resolvedStat, resolvedErr := parseBoundedJSONMap(resolvedPath, KanbanFixedFileByteLimit)
 	reads := []BoundedReadStats{resolvedStat}
-	if resolvedErr == nil && resolved["schema"] == "lingtai.manifest.resolved/v1" && resolved["source"] == "kernel" {
+	if resolvedErr == nil && !isResolvedManifestStale(filepath.Join(dir, "init.json"), resolvedPath) && resolved["schema"] == "lingtai.manifest.resolved/v1" && resolved["source"] == "kernel" {
 		if version, ok := resolved["schema_version"].(float64); ok && version == 1 {
 			if manifest, ok := resolved["manifest"].(map[string]any); ok {
 				flattenInitManifest(manifest)
@@ -578,9 +578,9 @@ func ReadKanbanInitManifest(dir string) (map[string]any, []BoundedReadStats, err
 	if err != nil {
 		return nil, reads, err
 	}
-	manifest, ok := raw["manifest"].(map[string]any)
-	if !ok {
-		return nil, reads, errors.New("no manifest in init.json")
+	manifest, err := ProjectInitManifest(raw)
+	if err != nil {
+		return nil, reads, err
 	}
 	flattenInitManifest(manifest)
 	return manifest, reads, nil

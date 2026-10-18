@@ -1662,7 +1662,15 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	// cannot silently recur. Zero orchestrators force first-run (the
 	// `lingtai-tui clean` recreated-empty-.lingtai case).
 	orchestrators := observedOrchestrators
-	declaredKeyEnvs, loginOrchestrator := tui.OrchestratorCredentials(lingtaiDir, orchestrators)
+	var declaredKeyEnvs []string
+	var loginOrchestrator bool
+	if !needsRehydration {
+		var credentialErr error
+		declaredKeyEnvs, loginOrchestrator, credentialErr = tui.OrchestratorCredentials(lingtaiDir, orchestrators, globalDir)
+		if credentialErr != nil {
+			return startupResult{kind: startupFatal, err: credentialErr}
+		}
+	}
 	keys, configOK := config.ResolveKeys(globalDir)
 	mirror, _ := config.LoadConfigReadOnly(globalDir)
 	needsFirstRun, needsRecovery, degradedConfig := startupDecision(len(orchestrators), keys, configOK, mirror.Keys, loginOrchestrator, declaredKeyEnvs...)

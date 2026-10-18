@@ -3,6 +3,7 @@ package tui
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/doctorreport"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
@@ -464,7 +466,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 2: read init.json to get LLM config
-	cfg, err := readLLMConfig(orchDir)
+	cfg, err := readLLMConfig(orchDir, globalDir)
 	if err != nil {
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.config_error", err),
@@ -571,7 +573,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		Provider:      provider,
 		Model:         model,
 		BaseHost:      baseHostForReport(baseURL),
-		APIKeyEnv:     config.ReadAgentAPIKeyEnv(orchDir),
+		APIKeyEnv:     cfg.APIKeyEnv,
 		APIKeyPresent: apiKey != "",
 	}
 	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
@@ -724,15 +726,19 @@ func checkStartupDecision(orchDir, globalDir string) []doctorLine {
 // (preset.UsesLoginCredential, e.g. claude-code or codex) instead of an API
 // key. The startup gate (main.go startupDecision) and the doctor D2/D3 checks
 // share this so they never disagree about R2.
-func OrchestratorCredentials(lingtaiDir string, orchestrators []string) (declaredKeyEnvs []string, loginOrchestrator bool) {
+func OrchestratorCredentials(lingtaiDir string, orchestrators []string, globalDir string) (declaredKeyEnvs []string, loginOrchestrator bool, err error) {
 	for _, name := range orchestrators {
-		agentDir := filepath.Join(lingtaiDir, name)
-		declaredKeyEnvs = append(declaredKeyEnvs, config.ReadAgentAPIKeyEnv(agentDir))
-		if preset.UsesLoginCredential(config.ReadAgentProvider(agentDir)) {
+		result, llm, inspectErr := selectedAgentLLM(filepath.Join(lingtaiDir, name), globalDir)
+		if inspectErr != nil {
+			return nil, false, inspectErr
+		}
+		keyEnv, _ := llm["api_key_env"].(string)
+		declaredKeyEnvs = append(declaredKeyEnvs, keyEnv)
+		if preset.UsesLoginCredential(result.LLM.Provider) {
 			loginOrchestrator = true
 		}
 	}
-	return declaredKeyEnvs, loginOrchestrator
+	return declaredKeyEnvs, loginOrchestrator, nil
 }
 
 // checkStartupDecisionAt emits the D1-D5 set given the network root
@@ -755,7 +761,10 @@ func checkStartupDecisionAt(lingtaiDir, orchDir, globalDir string) []doctorLine 
 
 	// D1: agents running / orchestrators detected (R1).
 	orchestrators := DetectOrchestrators(lingtaiDir)
-	declaredKeyEnvs, loginOrchestrator := OrchestratorCredentials(lingtaiDir, orchestrators)
+	declaredKeyEnvs, loginOrchestrator, credentialErr := OrchestratorCredentials(lingtaiDir, orchestrators, globalDir)
+	if credentialErr != nil {
+		return []doctorLine{{Text: credentialErr.Error(), Warn: true}}
+	}
 	// Mirrors startupDecision: a login-credential orchestrator (claude-code,
 	// codex OAuth) satisfies R2 with no API key, and then R3.1 has nothing to
 	// mirror.
@@ -890,6 +899,15 @@ func checkAddonSecrets(orchDir string) []doctorLine {
 				continue
 			}
 			addons = append(addons, name)
+		}
+	}
+	if _, legacy := raw["addons"]; !legacy {
+		if declared, ok := raw["mcp"].(map[string]interface{}); ok {
+			for name, spec := range declared {
+				if _, _, _, curated := preset.DefaultMCPSpec(name); curated && spec != nil && spec != false {
+					addons = append(addons, name)
+				}
+			}
 		}
 	}
 	if len(addons) == 0 {
@@ -1096,52 +1114,74 @@ func findLastAPIError(orchDir string) string {
 // credentials page need to probe its endpoint. APIKey is the resolved key
 // value — never logged or rendered.
 type llmConfig struct {
-	Provider string
-	Model    string
-	APIKey   string
-	BaseURL  string
-	WireAPI  string
+	APIKeyEnv string
+	Provider  string
+	Model     string
+	APIKey    string
+	BaseURL   string
+	WireAPI   string
 }
 
-// readLLMConfig pulls the agent's LLM configuration from init.json, resolving
-// api_key_env through the process environment and the agent's env_file.
-func readLLMConfig(orchDir string) (llmConfig, error) {
-	var cfg llmConfig
-	initPath := filepath.Join(orchDir, "init.json")
-	data, err := os.ReadFile(initPath)
+// selectedAgentLLM reads only the source selected by Core after its real
+// active/default fallback. Local access is for authorized auth refs/keys only;
+// neither source contents nor credentials cross the CLI or diagnostic output.
+func selectedAgentLLM(orchDir, globalDir string) (process.InitInspection, map[string]interface{}, error) {
+	python := process.ProjectPython(orchDir, config.VenvPython(config.RuntimeVenvDir(globalDir)))
+	result, err := process.InspectInit(context.Background(), python, orchDir)
 	if err != nil {
-		return cfg, fmt.Errorf("cannot read init.json")
+		return result, nil, err
 	}
-
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return cfg, fmt.Errorf("invalid init.json")
+	source := result.LLMSource
+	path := source.Path
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[2:])
 	}
-
-	manifest, _ := raw["manifest"].(map[string]interface{})
-	if manifest == nil {
-		return cfg, fmt.Errorf("no manifest in init.json")
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(orchDir, path)
 	}
-
-	llm, _ := manifest["llm"].(map[string]interface{})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return result, nil, fmt.Errorf("kernel-selected LLM source unavailable")
+	}
+	var document map[string]interface{}
+	if preset.DecodeKernelJSONCUseNumber(data, &document) != nil {
+		return result, nil, fmt.Errorf("kernel-selected LLM source invalid")
+	}
+	owner := document
+	if source.Pointer == "/manifest/llm" {
+		owner, _ = document["manifest"].(map[string]interface{})
+	}
+	llm, _ := owner["llm"].(map[string]interface{})
 	if llm == nil {
-		return cfg, fmt.Errorf("no manifest.llm in init.json")
+		return result, nil, fmt.Errorf("kernel-selected LLM source missing")
 	}
+	// A concurrent source edit must not probe a different identity.
+	if asString(llm["provider"]) != result.LLM.Provider || asString(llm["model"]) != result.LLM.Model {
+		return result, nil, fmt.Errorf("kernel-selected LLM source changed; inspect again before probing")
+	}
+	return result, llm, nil
+}
 
-	cfg.Provider, _ = llm["provider"].(string)
-	cfg.Model, _ = llm["model"].(string)
+func readLLMConfig(orchDir, globalDir string) (llmConfig, error) {
+	var cfg llmConfig
+	result, llm, err := selectedAgentLLM(orchDir, globalDir)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Provider, cfg.Model, cfg.WireAPI = result.LLM.Provider, result.LLM.Model, result.LLM.WireAPI
 	cfg.APIKey, _ = llm["api_key"].(string)
+	cfg.APIKeyEnv, _ = llm["api_key_env"].(string)
 	cfg.BaseURL, _ = llm["base_url"].(string)
-	cfg.WireAPI, _ = llm["wire_api"].(string)
-
 	if cfg.APIKey == "" {
-		apiKeyEnv, _ := llm["api_key_env"].(string)
-		if apiKeyEnv != "" {
-			envFile, _ := raw["env_file"].(string)
-			cfg.APIKey = lookupEnvKey(envFile, orchDir, apiKeyEnv)
+		if keyEnv, _ := llm["api_key_env"].(string); keyEnv != "" {
+			envFile := ""
+			if result.Host != nil {
+				envFile = result.Host.EnvFile
+			}
+			cfg.APIKey = lookupEnvKey(envFile, orchDir, keyEnv)
 		}
 	}
-
 	return cfg, nil
 }
 

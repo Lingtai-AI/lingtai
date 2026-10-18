@@ -1,6 +1,6 @@
 ---
 name: tui-runtime-contract
-contract_version: 2
+contract_version: 3
 root_contract: CONTRACT.md
 related_files:
   - tui/project_inventory_binding.go
@@ -235,15 +235,34 @@ account pool (for example sub2api / subs-pool) is reached through `openai` or
 - The TUI never writes the retired `manifest.llm.api_compat` field: the
   editor drops it on commit and `init.json` generation drops it from the
   copied llm block. Existing files are not rewritten just to remove it.
-- Template capabilities never name a vendor: `web_search` uses DuckDuckGo and
-  `vision` inherits the agent's own provider (`codex`, `openai`,
-  `anthropic`); the `claude` template declares neither.
+- Presets configure only the LLM. Tools/defaults belong to agent init/kernel,
+  never a provider-family template. External MCP is explicit opt-in, independent
+  of preset selection; fresh selection is none and existing empty stays empty.
 - `/doctor` probes by family (openai: Bearer `GET {base_url}/models`;
   anthropic: `x-api-key` + `anthropic-version` `GET {base_url}/v1/models`;
   codex/claude-code: login-owned, no network call) and reports any other
   provider as unsupported. Setup → Credentials derives an API key's endpoint
   from the openai/anthropic preset that declares its env var and never
   reports a stored key as failed merely because no endpoint is known.
+
+## LLM-only preset authoring
+
+Canonical preset JSON is exactly `{name, description, llm}`. Save, templates,
+clone, export and editor commits MUST NOT carry tool/capability or agent policy
+inventories. A bounded internal `Manifest{llm}` view is permitted for existing
+callers. Legacy `{manifest:{llm,capabilities}}` files remain readable; ordinary
+reads leave bytes unchanged and project only LLM data. Mixed top-level `llm`
+and legacy `manifest` envelopes fail as ambiguous. Unknown LLM options, exact
+numbers and non-secret auth references are preserved; secrets remain external.
+
+Preset editing/library/model-selection presentation MUST be LLM-only: no tool
+settings/prompts/counts, vision chips or tool Review rows. Provider changes and
+key-slot/account selection MUST NOT synchronize tool credentials. The existing
+`SyncCapabilityAPIKeyEnv` symbol is a deprecated no-op until held Project callers
+can be updated in the paired Project slice. No Go tool-default table replaces it.
+Project configure/create/native protocols and init source/policy readers are not
+changed by this authoring/presentation slice; their canonical section conversion
+requires the separately frozen paired ABI. No fallback or migration is authorized.
 
 ## Preset editor service tier
 
@@ -289,8 +308,8 @@ only the **latest two generations**. This binds:
   entry of the offline static fallback (`config.DefaultCodexModelOptions()`,
   see below), not a live-fetched id.
 
-The TUI makes no per-model vision claim: templates declare `vision: inherit`
-and whether the configured model accepts images is a runtime fact.
+The TUI makes no per-model tool/vision claim. Whether the configured model
+accepts images is a runtime fact, not a preset inventory or picker badge.
 
 Reading of the rule:
 
@@ -526,7 +545,10 @@ projection in `internal/preset/project_configuration.go` and real composition in
 - Literal `lingtai-agent project OP`, no flags, one EOF JSON object (1 MiB bound):
   initialize gets parent `project_dir`; configure/rehydrate get parent root,
   directory/display identities, persisted real ref or explicit Keep-current,
-  public options and optional partial Psyche edits. Preset/credential persistence
+  public options and optional partial Psyche edits. Configure/policy propagation retain the caller's
+  selected management SDK even when the target has an explicit absent host;
+  Agent launch/identity inspection retain source-exclusive target host binding.
+  Preset/credential persistence
   precedes these existing-project operations; whole drafts/config/auth do not cross.
 - Existing init custom env/venv/pad/MCP/settings and blueprint identity/history,
   unknown fields and exact integers are preserved by the kernel, not a second Go
@@ -637,3 +659,45 @@ Native Recipe metadata failures retain the original `json.SyntaxError` chain.
 When available, the native receipt parse offset is that decoder's consumed-byte
 count, not a synthesized Python character/index position; raw-mode diagnostics
 remain their existing adapter facts.
+
+### Canonical init consumers and read-only identity inspection
+
+Fresh authored init uses `agent`, reference-only or inline `llm`, `tools`,
+explicit-only `mcp`, `plugins`, and optional `host`. `tools:{}` enables shipped
+selectable builtins; `false` disables an ordinary builtin. Preset changes never
+choose tools, MCP, authority or memory. Go requests remain Core use-case
+adapters; no second Go LLM materialization, default/allowed reconciliation or
+capability policy is introduced. Existing legacy inputs stay byte-identical on
+ordinary reads; explicit legacy writes retain their owner shape.
+
+Doctor/login/startup and per-agent auth-binding checks use one bounded installed
+`lingtai-agent inspect-init --agent-dir DIR` at the process boundary. The current
+agent host's sibling CLI returns `lingtai.init.inspection/v1`: existing reader
+status/shape/failure stage, safe identity, normalized host refs and the actual
+selected LLM source file/pointer after Core fallback. It never boots an Agent,
+loads credentials, calls providers/MCPs, migrates input or publishes a resolved
+artifact. Unsupported/old CLI is typed unknown/unavailable; no PATH SDK fallback,
+automatic install, retry or Go selection. Canonical host path spelling expands
+the user's home and anchors relative paths against the agent directory before
+interpreter derivation; an absent explicit host still never falls back.
+Authorized local auth reads use only
+that exact source; no raw keys/headers/tool kwargs/credential URLs cross the
+inspection CLI or diagnostic output. Ordinary raw UI views make no effective
+LLM claim for references; valid fresh resolved-v1 absence remains authoritative.
+
+Native preset writers mutate `llm.preset` or legacy `manifest.preset` only,
+preserving exact numbers and unrelated owners. Settings name/language target
+canonical `agent`; canonical covenant edits target `settings/psyche.json` v1,
+preserving base-prompt fields and refusing malformed/unknown owner documents.
+The owner read refuses symlinks/nonregular files before opening, checks size
+before allocation, limits bytes read to 64 KiB plus one, verifies descriptor/path
+identity and stability, and rejects invalid UTF-8 before JSON decoding.
+A preceding Psyche write can remain if the later init write fails: the typed
+settings error records that preceding write, the view displays the failure, and
+the displayed language is restored/reloaded from persisted init. No rollback,
+retry or atomicity across owners is claimed. Runtime policy is edited at System,
+not the setup wizard. Recipe native skills I/O targets canonical `tools.skills` (default-on
+unless false), retains the legacy present-object gate, native errors/opaque
+entries/handles/order and atomic writes. Fresh MCP selection starts empty and
+explicit empty never becomes all-on. Public Project argv/native frames and
+resolved manifest-v1 schema are unchanged.

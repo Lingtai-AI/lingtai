@@ -20,8 +20,8 @@ Use this child for the built-in `openai` template (display "OpenAI-compatible")
 and for any saved preset whose provider is `openai`. openaiPreset in
 tui/internal/preset/preset.go ships provider `openai`, an empty model,
 `api_key_env` `OPENAI_API_KEY`, `base_url` null, and `wire_api`
-`chat_completions`, with web_search on DuckDuckGo, vision inheriting the
-agent's own provider, and the skills default.
+`chat_completions`. The preset configures only the LLM; tools and MCP are
+agent-owned.
 
 ## Template-specific settings
 
@@ -114,5 +114,5 @@ Maintenance: If the relevant TUI preset/page is revised, check whether this sub-
 For save, endpoint/capability, availability, activation/refresh, or
 troubleshooting, use the five shared operation children under
 `reference/operations/`; this child owns the OpenAI-compatible family facts,
-so inspect the actual saved manifest for user-owned endpoint, model,
-credential, and capability facts.
+so inspect the actual saved preset for user-owned endpoint, model,
+and credential-reference facts.

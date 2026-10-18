@@ -207,9 +207,6 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			if globalDir, err := config.GlobalDir(); err == nil {
 				if cfg, err := config.LoadConfig(globalDir); err == nil {
 					toSave = stampAutoEnvVar(toSave, cfg.Keys)
-					// Sync capability api_key_env to match the LLM's
-					// stamped env var (e.g. ZHIPU_INTL_2_API_KEY).
-					preset.SyncCapabilityAPIKeyEnv(toSave.Manifest)
 					// Persist a new key value if the user typed one in
 					// the editor. Look up the env-var name *after*
 					// stampAutoEnvVar so newly-assigned slots get the
@@ -582,20 +579,6 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 			b.WriteString(kv("context_limit", fmt.Sprintf("%d", int(ctx))))
 		}
 		b.WriteString("\n")
-	}
-
-	// Capabilities
-	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
-	if caps != nil {
-		b.WriteString(sectionHead(fmt.Sprintf("Capabilities (%d)", len(caps))))
-		var names []string
-		for k := range caps {
-			names = append(names, k)
-		}
-		// Sort for stable rendering
-		sortStrings(names)
-		b.WriteString(strings.Join(names, ", "))
-		b.WriteString("\n\n")
 	}
 
 	return box.Render(b.String())

@@ -2,8 +2,10 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -323,6 +325,60 @@ func TestCreateProject_RejectsMalformedSuccessAndExitTwoAsTransport(t *testing.T
 			}
 			if failure.Kind != ProjectCreateTransportFailure || failure.Reason != tc.reason {
 				t.Fatalf("unexpected transport failure: %+v", failure)
+			}
+		})
+	}
+}
+
+func TestProjectPythonCanonicalHostIsSourceExclusive(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(t.TempDir(), "host space 中文")
+	raw, err := json.Marshal(map[string]interface{}{"llm": map[string]interface{}{"provider": "openai", "model": "fixture"}, "host": map[string]interface{}{"venv_path": host}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "init.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// No interpreter exists there: don't quietly inspect/launch a different SDK.
+	if got := ProjectPython(dir, "/other/runtime/python"); got != config.VenvPython(host) {
+		t.Fatalf("host relocated: %q", got)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(raw) {
+		t.Fatal("host read rewrote config")
+	}
+}
+
+// Exercise the real public selector used by InspectInit callers, including
+// missing explicit hosts: path normalization must not become runtime fallback.
+func TestProjectPythonCanonicalHostNormalizesSpelling(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := t.TempDir()
+	for _, tc := range []struct{ ref, want string }{
+		{"~/host space", filepath.Join(home, "host space")},
+		{"relative host", filepath.Join(dir, "relative host")},
+		{"~", home},
+	} {
+		t.Run(tc.ref, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]interface{}{"llm": map[string]interface{}{}, "host": map[string]interface{}{"venv_path": tc.ref}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "init.json")
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			got := ProjectPython(dir, "/unrelated/fallback/python")
+			if !filepath.IsAbs(got) || got != config.VenvPython(tc.want) {
+				t.Fatalf("ProjectPython = %q; want %q", got, config.VenvPython(tc.want))
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(raw) {
+				t.Fatal("selector mutated init")
 			}
 		})
 	}

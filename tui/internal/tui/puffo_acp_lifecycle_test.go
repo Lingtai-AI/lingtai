@@ -11,14 +11,15 @@ import (
 
 func TestPuffoManagedAgentRejectsTUIRelaunchBeforeSignals(t *testing.T) {
 	dir := t.TempDir()
+	python := fixtureUILifecycle(t)
 	previous := hasPuffoManagedAgent
 	hasPuffoManagedAgent = func(string) bool { return true }
 	t.Cleanup(func() { hasPuffoManagedAgent = previous })
 
 	for name, run := range map[string]func() error{
-		"refresh":        func() error { return hardRefreshDir("python", dir) },
-		"refresh_preset": func() error { return hardRefreshDirWithPreset("python", dir, "preset") },
-		"revive":         func() error { return reviveDir("python", dir) },
+		"refresh":        func() error { return hardRefreshDir(python, dir) },
+		"refresh_preset": func() error { return hardRefreshDirWithPreset(python, dir, "preset") },
+		"revive":         func() error { return reviveDir(python, dir) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := run(); !errors.Is(err, process.ErrPuffoManagedAgent) {

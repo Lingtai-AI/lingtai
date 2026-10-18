@@ -1594,11 +1594,8 @@ func TestPresetModelName_ReadsManifestLLMModel(t *testing.T) {
 	}
 }
 
-// TestPresetCapabilitiesSummary_ListsConfiguredCapabilities proves the
-// helper lists exactly the capability names present in
-// manifest.capabilities, sorted, comma-joined — never a fixed capability
-// list, never a placeholder.
-func TestPresetCapabilitiesSummary_ListsConfiguredCapabilities(t *testing.T) {
+// Legacy capability inputs are not part of a newly exported LLM preset.
+func TestPresetExportOmitsLegacyCapabilitySummary(t *testing.T) {
 	p := preset.Preset{
 		Manifest: map[string]interface{}{
 			"capabilities": map[string]interface{}{
@@ -1607,23 +1604,18 @@ func TestPresetCapabilitiesSummary_ListsConfiguredCapabilities(t *testing.T) {
 			},
 		},
 	}
-	if got := presetCapabilitiesSummary(p); got != "vision, web_search" {
-		t.Fatalf("expected %q, got %q", "vision, web_search", got)
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	empty := preset.Preset{Manifest: map[string]interface{}{}}
-	if got := presetCapabilitiesSummary(empty); got != "" {
-		t.Fatalf("expected empty summary for a manifest with no capabilities block, got %q", got)
+	if strings.Contains(string(data), "capabilities") || strings.Contains(string(data), "web_search") {
+		t.Fatalf("preset export retained tool inventory: %s", data)
 	}
 }
 
-// TestViewReview_ShowsModelAndCapabilities drives the launcher's real Create
-// flow far enough to reach stepReview with a concrete preset carrying both
-// a model and capabilities, then renders viewReview and proves both appear
-// with their REAL values — not placeholders. A parent review found the
-// approved design's Review page (folder, agent, preset, model, recipe,
-// capabilities) omitted model and capabilities entirely.
-func TestViewReview_ShowsModelAndCapabilities(t *testing.T) {
+// Drive the real draft transition with old tool-bearing input: retain the
+// actual LLM model, but never render a per-model tool row.
+func TestViewReview_ShowsModelWithoutCapabilityRow(t *testing.T) {
 	m, _, _ := buildDraftModel(t)
 	m.presets = []preset.Preset{{
 		Name:        "minimax-vision",
@@ -1649,21 +1641,18 @@ func TestViewReview_ShowsModelAndCapabilities(t *testing.T) {
 	if !strings.Contains(out, "abab6.5s-chat") {
 		t.Fatalf("expected viewReview output to contain the preset's real model \"abab6.5s-chat\", got:\n%s", out)
 	}
-	if !strings.Contains(out, "vision") {
-		t.Fatalf("expected viewReview output to contain the preset's real capability \"vision\", got:\n%s", out)
+	if strings.Contains(out, "Capabilities:") {
+		t.Fatalf("Review must not display a per-model capability row, got:\n%s", out)
 	}
 	if !strings.Contains(out, i18n.T("firstrun.review.model")) {
 		t.Fatalf("expected viewReview output to contain the localized Model row label, got:\n%s", out)
 	}
-	if !strings.Contains(out, i18n.T("firstrun.review.capabilities")) {
-		t.Fatalf("expected viewReview output to contain the localized Capabilities row label, got:\n%s", out)
+	if strings.Contains(out, i18n.T("firstrun.review.capabilities")) {
+		t.Fatalf("Review must not display the localized Capabilities row label, got:\n%s", out)
 	}
 }
 
-// TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities proves
-// the rows are truthful in the OTHER direction too: a preset that genuinely
-// declares neither must render the row's own empty-value placeholder ("—"),
-// never a fabricated model name or capability list.
+// Missing model data remains a truthful placeholder; no tool row is invented.
 func TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities(t *testing.T) {
 	m, _, _ := buildDraftModel(t)
 	m.presets = []preset.Preset{{
@@ -1679,11 +1668,11 @@ func TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities(t *testin
 
 	out := m.viewReview()
 
-	if !strings.Contains(out, i18n.T("firstrun.review.model")) || !strings.Contains(out, i18n.T("firstrun.review.capabilities")) {
-		t.Fatalf("expected both row labels to still render even when empty, got:\n%s", out)
+	if !strings.Contains(out, i18n.T("firstrun.review.model")) || strings.Contains(out, i18n.T("firstrun.review.capabilities")) {
+		t.Fatalf("expected only the LLM model row, not a capability row, got:\n%s", out)
 	}
-	if strings.Count(out, "—") < 2 {
-		t.Fatalf("expected truthful placeholders for both empty Review values, got:\n%s", out)
+	if strings.Count(out, "—") < 1 {
+		t.Fatalf("expected a truthful placeholder for the empty model, got:\n%s", out)
 	}
 }
 

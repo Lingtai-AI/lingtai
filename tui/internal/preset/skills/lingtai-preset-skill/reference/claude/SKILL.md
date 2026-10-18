@@ -18,8 +18,8 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 Use this child for the named built-in claude preset. claudePreset in
 tui/internal/preset/preset.go uses canonical provider claude-code (shown as
 "claude-p" in the TUI) and the local Claude Code CLI's OAuth login, with model
-alias opus and no API-key env, base_url, web_search override, or LingTai
-vision capability. The editor also offers fable, sonnet, and haiku aliases.
+alias opus and no API-key env or base_url. Like all presets, it configures
+only the LLM, not tools or MCP. The editor also offers fable, sonnet, and haiku aliases.
 An Anthropic API key or an Anthropic-compatible endpoint is the separate
 `anthropic` family (`reference/anthropic/SKILL.md`).
 
@@ -40,10 +40,9 @@ does not establish forwarding through LingTai's CLI adapter.
 
 Start at claudePreset in tui/internal/preset/preset.go. Revise the
 claude-code entries in providerModels in tui/internal/tui/preset_editor.go
-when CLI aliases change. There is intentionally no constructor vision
-capability, and the editor exposes no reasoning or service-tier row for this
-provider; inspect only the model alias picker and fixed capability rendering
-if that contract changes. Follow the CLI-alias exemption in tui/CONTRACT.md.
+when CLI aliases change. The editor exposes no reasoning or service-tier row
+for this provider, and no preset has a tool inventory; inspect the LLM model
+alias picker if that contract changes. Follow the CLI-alias exemption in tui/CONTRACT.md.
 
 ## Reviewed deterministic revision
 

@@ -101,20 +101,11 @@ func (n *nativeRecipeOwner) ObserveSkills(member string) (process.ProjectRecipeS
 		return absent, n.failure("skills", "decode", path, fmt.Errorf("parse %s: %w", path, err))
 	}
 	stripObsoleteInitFields(root)
-	manifest, ok := root["manifest"].(map[string]interface{})
-	if !ok {
-		return absent, nil
-	}
-	caps, ok := manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		return absent, nil
-	}
-	changed, err := CanonicalizeCapabilities(caps)
+	skills, changed, err := recipeSkills(root)
 	if err != nil {
 		return absent, n.failure("skills", "normalize", path, fmt.Errorf("canonicalize %s: %w", path, err))
 	}
-	skills, ok := caps["skills"].(map[string]interface{})
-	if !ok {
+	if skills == nil {
 		return absent, nil
 	}
 	original, _ := skills["paths"].([]interface{})

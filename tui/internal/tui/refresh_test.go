@@ -364,3 +364,39 @@ func readJSON(t *testing.T, path string) map[string]interface{} {
 	}
 	return m
 }
+
+func TestCanonicalPresetWritersPreserveAgentOwners(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "init.json")
+	raw := []byte(`{"agent":{"name":"test","permissions":{"karma":true}},"llm":{"preset":{"active":"b.json","default":"a.json","allowed":["a.json","b.json"]}},"tools":{"shell":{"tenant":9007199254740993},"skills":{"paths":["../library"]}},"mcp":{"custom":{"command":"keep"}},"plugins":["../plugin"],"host":{"venv_path":"keep"}}`)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if readActivePreset(dir) != "b.json" || len(readAllowedPresets(dir)) != 2 {
+		t.Fatal("canonical policy not read")
+	}
+	resetActivePresetToDefault(dir)
+	if readActivePreset(dir) != "a.json" {
+		t.Fatal("canonical reset not written")
+	}
+	if err := setActivePreset(dir, "b.json"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "9007199254740993") || strings.Contains(string(got), `"manifest"`) {
+		t.Fatal("wrong owner or rounded number")
+	}
+	var before, after map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &before)
+	_ = json.Unmarshal(got, &after)
+	for _, key := range []string{"agent", "tools", "mcp", "plugins", "host"} {
+		var a, b interface{}
+		_ = json.Unmarshal(before[key], &a)
+		_ = json.Unmarshal(after[key], &b)
+		aa, _ := json.Marshal(a)
+		bb, _ := json.Marshal(b)
+		if string(aa) != string(bb) {
+			t.Fatalf("preset writer modified %s", key)
+		}
+	}
+}

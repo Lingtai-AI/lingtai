@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func startupFixture(t *testing.T, initJSON, configJSON, env string) (orchDir, gl
 	// orchDir is a child of a lingtai dir so DetectOrchestrators sees the parent.
 	lingtaiDir := filepath.Join(root, "lingtai")
 	orchDir = filepath.Join(lingtaiDir, "orch1")
-	writeTestFile(t, filepath.Join(orchDir, "init.json"), initJSON)
+	writeInspectionStartupFixture(t, filepath.Join(orchDir, "init.json"), initJSON)
 	// A minimal .agent.json with admin privileges so DetectOrchestrators counts it.
 	writeTestFile(t, filepath.Join(orchDir, ".agent.json"), `{"admin": {"karma": true}}`)
 	globalDir = filepath.Join(root, "global")
@@ -37,6 +38,53 @@ func startupFixture(t *testing.T, initJSON, configJSON, env string) (orchDir, gl
 		writeTestFile(t, filepath.Join(globalDir, ".env"), env)
 	}
 	return orchDir, globalDir
+}
+
+// Add the same explicit installed host and valid inline identity to diagnostic
+// input fixtures that historically only needed an addons/key-env fragment.
+// All decision predicates and actual inspect-init outcomes remain production.
+func writeInspectionStartupFixture(t *testing.T, path, fragment string) {
+	t.Helper()
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("explicit installed inspection host required")
+	}
+	var document map[string]interface{}
+	if json.Unmarshal([]byte(fragment), &document) != nil {
+		t.Fatal("invalid authored fixture")
+	}
+	manifest, _ := document["manifest"].(map[string]interface{})
+	if manifest == nil {
+		manifest = map[string]interface{}{}
+		document["manifest"] = manifest
+	}
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		llm = map[string]interface{}{}
+		manifest["llm"] = llm
+	}
+	if _, ok := llm["provider"]; !ok {
+		llm["provider"] = "openai"
+	}
+	if _, ok := llm["model"]; !ok {
+		llm["model"] = "fixture-model"
+	}
+	// Legacy reader requires a Pad seed input even for identity-only fixtures.
+	// It is not a provider/auth decision and never changes the original fragment.
+	if _, inline := document["pad"]; !inline {
+		if _, pointer := document["pad_file"]; !pointer {
+			document["pad_file"] = "system/pad.md"
+			writeTestFile(t, filepath.Join(filepath.Dir(path), "system", "pad.md"), "fixture memory\n")
+		}
+	}
+	document["venv_path"] = filepath.Dir(filepath.Dir(python))
+	document["env_file"] = filepath.Join(filepath.Dir(path), "fixture.env")
+	writeTestFile(t, document["env_file"].(string), "")
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, string(encoded))
 }
 
 func TestCheckStartupDecision_Healthy(t *testing.T) {
@@ -60,7 +108,7 @@ func TestCheckStartupDecision_Healthy(t *testing.T) {
 
 func TestCheckStartupDecision_CustomDeclaredKey(t *testing.T) {
 	orchDir, globalDir := startupFixture(t,
-		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"PUFFO_ATTACH_QA_DEEPSEEK_KEY"}}}`,
+		`{"manifest":{"llm":{"provider":"openai","api_key_env":"PUFFO_ATTACH_QA_DEEPSEEK_KEY"}}}`,
 		`{"keys":{"PUFFO_ATTACH_QA_DEEPSEEK_KEY":"test-only"}}`,
 		`PUFFO_ATTACH_QA_DEEPSEEK_KEY=test-only`,
 	)
@@ -71,13 +119,13 @@ func TestCheckStartupDecision_CustomDeclaredKey(t *testing.T) {
 
 func TestCheckStartupDecision_KeyDeclaredByAnotherOrchestrator(t *testing.T) {
 	selectedDir, globalDir := startupFixture(t,
-		`{"manifest":{"llm":{"provider":"deepseek"}}}`,
+		`{"manifest":{"llm":{"provider":"openai"}}}`,
 		`{"keys":{"CUSTOM_WORK_KEY":"test-only"}}`,
 		`CUSTOM_WORK_KEY=test-only`,
 	)
 	otherDir := filepath.Join(filepath.Dir(selectedDir), "orch2")
-	writeTestFile(t, filepath.Join(otherDir, "init.json"),
-		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"CUSTOM_WORK_KEY"}},"addons":["telegram"]}`)
+	writeInspectionStartupFixture(t, filepath.Join(otherDir, "init.json"),
+		`{"manifest":{"llm":{"provider":"openai","api_key_env":"CUSTOM_WORK_KEY"}},"addons":["telegram"]}`)
 	writeTestFile(t, filepath.Join(otherDir, ".agent.json"), `{"admin":{"karma":true}}`)
 
 	// Startup accepts the key declared by orch2 even when orch1 is selected.
@@ -101,7 +149,7 @@ func TestCheckStartupDecision_MirrorOnlyKeyDeclaredByAnotherOrchestrator(t *test
 		"",
 	)
 	otherDir := filepath.Join(filepath.Dir(selectedDir), "orch2")
-	writeTestFile(t, filepath.Join(otherDir, "init.json"),
+	writeInspectionStartupFixture(t, filepath.Join(otherDir, "init.json"),
 		`{"manifest":{"llm":{"api_key_env":"CUSTOM_WORK_KEY"}}}`)
 	writeTestFile(t, filepath.Join(otherDir, ".agent.json"), `{"admin":{"karma":true}}`)
 
@@ -132,7 +180,7 @@ func TestCheckStartupDecision_LoginProviderNoKeys(t *testing.T) {
 
 func TestCheckStartupDecision_APIKeyProviderNoKeysStillFails(t *testing.T) {
 	orchDir, globalDir := startupFixture(t,
-		`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"DEEPSEEK_API_KEY"}}}`,
+		`{"manifest":{"llm":{"provider":"openai","api_key_env":"DEEPSEEK_API_KEY"}}}`,
 		`{}`,
 		"",
 	)
@@ -143,7 +191,7 @@ func TestCheckStartupDecision_APIKeyProviderNoKeysStillFails(t *testing.T) {
 
 func TestCheckStartupDecision_Degraded(t *testing.T) {
 	orchDir, globalDir := startupFixture(t,
-		`{"addons": {"imap": {}}}`,
+		`{"addons": ["imap"]}`,
 		``, // no config.json → R3.1 degraded
 		`ANTHROPIC_API_KEY=sk-env`,
 	)
@@ -381,7 +429,7 @@ func TestCheckStartupDecisionCLI_HealthyProject(t *testing.T) {
 	root := t.TempDir()
 	lingtaiDir := filepath.Join(root, ".lingtai")
 	orchDir := filepath.Join(lingtaiDir, "alice")
-	writeTestFile(t, filepath.Join(orchDir, "init.json"), `{"addons": ["telegram"]}`)
+	writeInspectionStartupFixture(t, filepath.Join(orchDir, "init.json"), `{"addons": ["telegram"]}`)
 	writeTestFile(t, filepath.Join(orchDir, ".agent.json"), `{"admin": {"karma": true}}`)
 	writeTestFile(t, filepath.Join(orchDir, ".secrets", "telegram.json"), `{"bot_token": "x"}`)
 	globalDir := filepath.Join(root, "global")

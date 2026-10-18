@@ -276,3 +276,42 @@ func TestNativeRecipeInstalledInvalidByteRoots(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeRecipeCanonicalSkillsOwner(t *testing.T) {
+	for _, tools := range []string{`{}`, `{"skills":false}`, `{"skills":{"paths":[{"opaque":9007199254740993},"old"]}}`} {
+		t.Run(tools, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "worker", "init.json")
+			raw := []byte(`{"llm":{"provider":"openai","model":"fixture"},"tools":` + tools + `,"mcp":{"custom":{"command":"keep"}},"big":9007199254740993}`)
+			recipeFixtureWrite(t, path, raw)
+			native := newNativeRecipeOwner("", root)
+			observed, failed := native.ObserveSkills("worker")
+			if failed != nil {
+				t.Fatal(native.NativeError(failed))
+			}
+			recipeFixtureBytes(t, path, raw) // Observe never writes, even default-on.
+			if tools == `{"skills":false}` {
+				if observed.Present {
+					t.Fatal("explicit false must remain off")
+				}
+				return
+			}
+			if !observed.Present {
+				t.Fatal("canonical absent skills is default-on")
+			}
+			if failure := native.WriteSkills("worker", observed.Handle, append(observed.Paths, "../../lib")); failure != nil {
+				t.Fatal(native.NativeError(failure))
+			}
+			got, _ := os.ReadFile(path)
+			if !bytes.Contains(got, []byte(`9007199254740993`)) || bytes.Contains(got, []byte(`"manifest"`)) {
+				t.Fatal("wrong owner or lost exact number")
+			}
+			oldPath := filepath.Join(root, "direct.json")
+			recipeFixtureWrite(t, oldPath, raw)
+			if err := AppendSkillsPath(oldPath, "../../lib"); err != nil {
+				t.Fatal(err)
+			}
+			recipeFixtureBytes(t, oldPath, got)
+		})
+	}
+}

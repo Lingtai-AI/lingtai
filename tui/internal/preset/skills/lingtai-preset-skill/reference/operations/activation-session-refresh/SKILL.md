@@ -35,13 +35,13 @@ was on when they entered this step" — the schema invariant is that
 forced into `presetAllowed`. `allowedPresetRefs()`
 (`firstrun.go:3042-3057`) writes the default preset first, then the rest
 of the user-checked rows in row order, into
-`manifest.preset.{default,allowed}`.
+`llm.preset.{default,allowed}` (legacy `manifest.preset` stays readable).
 
 ## Setup re-edit preserves existing configuration
 
 Re-running `/setup` on an agent that already has an `init.json` hydrates
 `presetAllowed`/`presetDefaultIdx` from the **existing**
-`manifest.preset.{default,allowed}` (`firstrun.go:2945-2997`) rather than
+`llm.preset.{default,allowed}` (legacy `manifest.preset` stays readable) (`firstrun.go:2945-2997`) rather than
 resetting to "nothing allowed" — so re-running setup only changes what the
 user explicitly changes. Path comparison is normalized (`~/...` vs
 absolute) via `presetRefMatches` (`firstrun.go:3014-3035`) so the same file
@@ -92,3 +92,16 @@ eligible here (structural validation only), see
 `reference/operations/availability-save-gate/SKILL.md`. For the
 Load/Save/Delete contract, see
 `reference/operations/saved-presets/SKILL.md`.
+
+## Concrete owners and identity inspection
+
+New init stores only reference policy under `llm.preset`; `/refresh` native
+writers edit that policy (or the existing legacy `manifest.preset`), never
+materialized LLM/tools. `/setup` keep-current preloads agent identity,
+permissions and allowed/default independently from its synthetic LLM-only row.
+MCP selection is independent and starts empty for new agents. System runtime
+policy belongs to `settings/system.json`, not a preset or setup numeric editor.
+Doctor/login/startup identity comes from read-only installed Core `inspect-init`;
+a missing/old command reports unknown, without installing/retrying or guessing
+from a preset filename or stale inline model. Only Core chooses active/default
+fallback; local auth checks use the selected source path/pointer it returns.

@@ -40,6 +40,8 @@ func TestSetupRevokesActivePresetWhenDeselected(t *testing.T) {
 			},
 		},
 	}
+	// Explicit legacy compatibility input, including the required memory seed.
+	seed["pad"] = "legacy fixture memory"
 	seedData, _ := json.MarshalIndent(seed, "", "  ")
 	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), seedData, 0o644); err != nil {
 		t.Fatal(err)
@@ -115,6 +117,8 @@ func TestSetupKeepsActiveWhenStillAllowed(t *testing.T) {
 			},
 		},
 	}
+	// Explicit legacy compatibility input, including the required memory seed.
+	seed["pad"] = "legacy fixture memory"
 	seedData, _ := json.MarshalIndent(seed, "", "  ")
 	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), seedData, 0o644); err != nil {
 		t.Fatal(err)

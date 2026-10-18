@@ -1,11 +1,4 @@
-// Verifies that GenerateInitJSONWithOpts writes the new list-shape addons +
-// matching mcp activation entries pointing at the local venv Python.
-//
-// This is the wire that satisfies "default include five addons; activation
-// points to local installation, not remote". When this test passes, brand-new
-// agents created by the TUI wizard (or rehydrated from setup mode) ship with
-// all five curated MCPs registered + activated against the local venv where
-// `pip install lingtai` placed the curated lingtai.mcp_servers modules.
+// Explicit curated selection produces exactly those MCP specs, never implicit activation.
 package preset
 
 import (
@@ -46,22 +39,8 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// addons must be the new list shape.
-	addons, ok := got["addons"].([]interface{})
-	if !ok {
-		t.Fatalf("addons not a list: %T (%v)", got["addons"], got["addons"])
-	}
-	wantNames := map[string]bool{"imap": true, "telegram": true, "feishu": true, "wechat": true, "whatsapp": true}
-	if len(addons) != len(wantNames) {
-		t.Errorf("addons len = %d, want %d (%v)", len(addons), len(wantNames), addons)
-	}
-	for _, raw := range addons {
-		if name, ok := raw.(string); ok {
-			delete(wantNames, name)
-		}
-	}
-	if len(wantNames) > 0 {
-		t.Errorf("missing addon names: %v", wantNames)
+	if _, duplicate := got["addons"]; duplicate {
+		t.Fatal("fresh activation must be mcp only, not duplicated addons")
 	}
 
 	// mcp section must exist with one entry per addon and exact module/env
@@ -108,14 +87,15 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 	}
 
 	// venv_path top-level field must also point at the same local venv.
-	venvPath, _ := got["venv_path"].(string)
+	host, _ := got["host"].(map[string]interface{})
+	venvPath, _ := host["venv_path"].(string)
 	if venvPath != filepath.Join(globalDir, "runtime", "venv") {
 		t.Errorf("venv_path = %q, want %q", venvPath, filepath.Join(globalDir, "runtime", "venv"))
 	}
 }
 
-// Verifies that running GenerateInitJSONWithOpts twice — once for a fresh
-// agent, then again with extra addon selections — produces the right
+// Verifies that running GenerateInitJSONWithOpts twice on an explicitly legacy
+// agent, then again with extra addon selections, produces the right
 // preserve-vs-add behavior: pre-existing addons are kept verbatim from the
 // previous init.json, so user edits are never clobbered by /setup.
 func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
@@ -133,7 +113,12 @@ func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
 
 	p := codexPreset()
 
-	// First creation: only imap.
+	// This oracle is legacy addons preservation, not fresh canonical activation.
+	// Seed the legacy owner explicitly before either writer invocation.
+	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), []byte(`{"manifest":{},"pad":"legacy fixture memory"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// First legacy configuration: only imap.
 	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
 		Addons: []string{"imap"},
 	}); err != nil {
@@ -216,6 +201,7 @@ func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
 			"telegram": map[string]interface{}{"config": ".secrets/telegram.json"},
 		},
 	}
+	legacy["pad"] = "legacy fixture memory"
 	data, _ := json.Marshal(legacy)
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
@@ -267,6 +253,7 @@ func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
 			"imap;rm": map[string]interface{}{"config": ".secrets/evil.json"},
 		},
 	}
+	legacy["pad"] = "legacy fixture memory"
 	data, _ := json.Marshal(legacy)
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
@@ -293,5 +280,45 @@ func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
 	}
 	if names["imap;rm"] {
 		t.Errorf("invalid legacy key must not be preserved, got %v", addons)
+	}
+}
+
+// Keep fresh canonical activation separate from legacy addons preservation.
+func TestGenerateInitJSONFreshMCPNone(t *testing.T) {
+	for _, explicitEmpty := range []bool{false, true} {
+		name := "default"
+		if explicitEmpty {
+			name = "explicit-empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			root := t.TempDir()
+			lingtaiDir, global := filepath.Join(root, ".lingtai"), filepath.Join(root, "global")
+			opts := DefaultAgentOpts()
+			if explicitEmpty {
+				opts.Addons = []string{}
+			}
+			p := codexPreset()
+			if err := fixtureGenerateInitJSONWithOpts(t, p, "fresh", "fresh", lingtaiDir, global, opts); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(lingtaiDir, "fresh", "init.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]interface{}
+			if json.Unmarshal(data, &document) != nil {
+				t.Fatal("invalid canonical init")
+			}
+			mcp, ok := document["mcp"].(map[string]interface{})
+			if !ok || len(mcp) != 0 || document["addons"] != nil || document["manifest"] != nil {
+				t.Fatal("fresh none/default selected implicit MCP or legacy owners")
+			}
+			llm, _ := document["llm"].(map[string]interface{})
+			policy, _ := llm["preset"].(map[string]interface{})
+			if len(llm) != 1 || policy["active"] != RefFor(p) {
+				t.Fatal("fresh model policy must remain reference-only")
+			}
+		})
 	}
 }

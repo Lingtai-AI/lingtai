@@ -1,14 +1,17 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -406,13 +409,8 @@ func TestPresetEditorCodexPublicModelsRefreshCommitPreservesCustomModel(t *testi
 	}
 }
 
-// TestPresetEditorVisionProviderIdentityIsCommitImmutable is the
-// regression test for the always-included-capabilities change: there is
-// no longer any editor control (checkbox, provider cycle, or model
-// switch) that can change a capability's provider or other config.
-// Committing a built-in preset must round-trip its vision declaration
-// (the provider-inheriting "inherit" route) byte-for-byte.
-func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
+// Built-in commits contain only LLM settings, never a provider tool inventory.
+func TestPresetEditorBuiltinCommitIsLLMOnly(t *testing.T) {
 	for _, name := range []string{"codex", "openai", "anthropic"} {
 		t.Run(name, func(t *testing.T) {
 			p := builtinPresetForEditorTest(t, name)
@@ -423,10 +421,8 @@ func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
-			caps := commit.Preset.Manifest["capabilities"].(map[string]interface{})
-			vision := caps["vision"].(map[string]interface{})
-			if !reflect.DeepEqual(vision, map[string]interface{}{"provider": "inherit"}) {
-				t.Fatalf("commit changed vision declaration: got %#v, want provider inherit", vision)
+			if _, ok := commit.Preset.Manifest["capabilities"]; ok {
+				t.Fatal("LLM preset commit exported a tool inventory")
 			}
 		})
 	}
@@ -688,7 +684,7 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 	}
 }
 
-func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
+func TestPresetEditorOmitsLegacyShellWithoutMutatingSource(t *testing.T) {
 	p := testPresetEditorPreset()
 	caps := p.Manifest["capabilities"].(map[string]interface{})
 	legacy := caps["shell"]
@@ -696,16 +692,15 @@ func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
 	caps["bash"] = legacy
 
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	workingCaps := m.working.Manifest["capabilities"].(map[string]interface{})
-	if _, ok := workingCaps["bash"]; ok {
-		t.Fatalf("editor retained legacy bash capability: %#v", workingCaps)
+	if _, ok := m.working.Manifest["capabilities"]; ok {
+		t.Fatal("legacy tools entered the LLM-only working view")
 	}
-	if got := workingCaps["shell"].(map[string]interface{})["yolo"]; got != true {
-		t.Fatalf("editor lost legacy shell configuration: %#v", workingCaps["shell"])
+	if !reflect.DeepEqual(caps["bash"], legacy) {
+		t.Fatal("editor mutated the source capability map")
 	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
-	if !strings.Contains(m.View(), "shell") {
-		t.Fatalf("editor view does not display canonical shell capability")
+	if strings.Contains(m.View(), "shell") || strings.Contains(m.View(), "Capabilities") {
+		t.Fatal("editor displayed init-owned tools")
 	}
 }
 
@@ -744,17 +739,8 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 	if !ok {
 		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg", msg)
 	}
-	caps, ok := commit.Preset.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("committed capabilities missing/wrong type: %T", commit.Preset.Manifest["capabilities"])
-	}
-	for _, capName := range []string{"library", "skills", "file", "shell", "avatar", "daemon"} {
-		if _, ok := caps[capName]; ok {
-			t.Fatalf("commit injected core/legacy capability %q: %#v", capName, caps)
-		}
-	}
-	if _, ok := caps["web_search"]; !ok {
-		t.Fatalf("commit lost optional web_search capability: %#v", caps)
+	if _, ok := commit.Preset.Manifest["capabilities"]; ok {
+		t.Fatal("commit exported init-owned capabilities")
 	}
 }
 
@@ -799,6 +785,9 @@ func TestModelSwitchNeverTouchesCapabilities(t *testing.T) {
 
 func deepCopyCaps(t *testing.T, caps interface{}) map[string]interface{} {
 	t.Helper()
+	if caps == nil {
+		return nil
+	}
 	m, ok := caps.(map[string]interface{})
 	if !ok {
 		t.Fatalf("capabilities missing/wrong type: %T", caps)
@@ -812,12 +801,8 @@ func deepCopyCaps(t *testing.T, caps interface{}) map[string]interface{} {
 
 func assertCapsUnchanged(t *testing.T, step string, m PresetEditorModel, before map[string]interface{}) {
 	t.Helper()
-	after, ok := m.working.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("%s: capabilities missing/wrong type: %T", step, m.working.Manifest["capabilities"])
-	}
-	if !reflect.DeepEqual(after, before) {
-		t.Fatalf("%s: capabilities changed: got %#v, want %#v", step, after, before)
+	if _, ok := m.working.Manifest["capabilities"]; ok {
+		t.Fatalf("%s: LLM-only editor acquired a tool inventory", step)
 	}
 }
 
@@ -1157,37 +1142,21 @@ func TestPresetEditorProviderSwitchServiceTierScope(t *testing.T) {
 	}
 }
 
-// TestPresetEditorViewShowsOneCapabilitiesSectionWithAllRows verifies the
-// human-facing contract: a single "Capabilities" section (not "Always
-// Included") lists every capability the runtime can grant an agent,
-// including web_search and vision, alongside the kernel core floor.
-func TestPresetEditorViewShowsOneCapabilitiesSectionWithAllRows(t *testing.T) {
+// LLM-only editing has no tool section, fixed inventory, or per-model claims.
+func TestPresetEditorViewOmitsCapabilitiesSectionAndRows(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
-	if !strings.Contains(view, "Capabilities") {
-		t.Fatalf("view missing renamed \"Capabilities\" section header; view:\n%s", view)
-	}
-	if strings.Contains(view, "Always Included") {
-		t.Fatalf("view still shows the old \"Always Included\" section header; view:\n%s", view)
-	}
-	for _, capName := range []string{
-		"knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file",
-		"web_search", "vision",
-	} {
-		if !strings.Contains(view, capName) {
-			t.Fatalf("view missing always-included capability %q; view:\n%s", capName, view)
+	for _, text := range []string{"Capabilities", "Always Included", "web_search", "vision", "shell"} {
+		if strings.Contains(view, text) {
+			t.Fatalf("LLM-only editor displayed %q: %s", text, view)
 		}
 	}
 }
 
-// TestPresetEditorViewShowsCapabilitiesGuidanceLine asserts the one-line
-// explanation of how to customize capabilities (ask the agent to explain
-// init.json, then edit init.json) is present in the rendered view, and
-// that it is actually localized — not just falling back to English —
-// in all three shipped locales.
-func TestPresetEditorViewShowsCapabilitiesGuidanceLine(t *testing.T) {
+// No locale may retain per-model init-tool prompts in the LLM editor.
+func TestPresetEditorViewOmitsToolGuidanceInAllLocales(t *testing.T) {
 	for _, tc := range []struct {
 		lang string
 		want string
@@ -1208,21 +1177,14 @@ func TestPresetEditorViewShowsCapabilitiesGuidanceLine(t *testing.T) {
 			if guidance == "" || guidance == "preset_editor.capabilities_guidance" {
 				t.Fatalf("lang %q: capabilities_guidance key missing/untranslated", tc.lang)
 			}
-			if !strings.Contains(view, tc.want) {
-				t.Fatalf("lang %q: view missing capabilities guidance mentioning %q; view:\n%s", tc.lang, tc.want, view)
+			if strings.Contains(view, guidance) || strings.Contains(view, tc.want) {
+				t.Fatalf("lang %q: LLM editor still displays init-tool guidance: %s", tc.lang, view)
 			}
 		})
 	}
 }
 
-// TestPresetEditorWebSearchAndVisionViewHasNoCheckboxOrProviderNames
-// asserts the web_search/vision rows in the live editor view render
-// exactly like the other always-included tools (plain "[✓] name  desc"
-// via mandatoryCapRow) with no radio strip of provider options — those
-// are the fixed/default tool routes, not user choices. Scoped to just
-// those two row lines, since provider names like "minimax"/"gemini"
-// legitimately appear elsewhere in the view (the LLM provider/model
-// rows and their radio strips).
+// Legacy tool inputs do not create tool rows or provider controls in the editor.
 func TestPresetEditorWebSearchAndVisionViewHasNoCheckboxOrProviderNames(t *testing.T) {
 	p := testPresetEditorPreset()
 	caps := p.Manifest["capabilities"].(map[string]interface{})
@@ -1234,20 +1196,8 @@ func TestPresetEditorWebSearchAndVisionViewHasNoCheckboxOrProviderNames(t *testi
 	view := m.View()
 
 	for _, capName := range []string{"web_search", "vision"} {
-		line := findLineContaining(t, view, capName)
-		if !strings.Contains(line, "[✓]") {
-			t.Fatalf("%s row must render the informational [✓] marker; got: %q", capName, line)
-		}
-		if strings.Contains(line, "[ ]") {
-			t.Fatalf("%s row must not render an unchecked/toggleable checkbox; got: %q", capName, line)
-		}
-		if strings.Contains(line, "●") || strings.Contains(line, "○") {
-			t.Fatalf("%s row must not render a provider radio strip; got: %q", capName, line)
-		}
-		for _, providerName := range []string{"duckduckgo", "zhipu", "gemini", "inherit"} {
-			if strings.Contains(line, providerName) {
-				t.Fatalf("%s row must not display provider name %q; got: %q", capName, providerName, line)
-			}
+		if strings.Contains(view, capName) {
+			t.Fatalf("LLM-only editor displayed tool row %q", capName)
 		}
 	}
 }
@@ -1295,12 +1245,8 @@ func lbl(f editorField) string {
 	return fmt.Sprintf("field=%d", int(f))
 }
 
-// TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue
-// ensures saving an existing preset with old init.json-style capability
-// values (including a non-default web_search provider) round-trips them
-// unchanged. The editor's field-list change must not normalize, rewrite,
-// or migrate values it no longer exposes as editable UI.
-func TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue(t *testing.T) {
+// Explicit output drops legacy inventories while leaving the original input alone.
+func TestPresetEditorCommitDropsLegacyCapabilitiesWithoutMutatingSource(t *testing.T) {
 	p := testPresetEditorPreset()
 	caps := p.Manifest["capabilities"].(map[string]interface{})
 	caps["web_search"] = map[string]interface{}{"provider": "zhipu"}
@@ -1314,15 +1260,11 @@ func TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue(t *test
 	if !ok {
 		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg", msg)
 	}
-	gotCaps, ok := commit.Preset.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("committed capabilities missing/wrong type: %T", commit.Preset.Manifest["capabilities"])
+	if _, ok := commit.Preset.Manifest["capabilities"]; ok {
+		t.Fatal("explicit preset save re-exported legacy tools")
 	}
-	if !reflect.DeepEqual(gotCaps["web_search"], caps["web_search"]) {
-		t.Fatalf("web_search capability changed on save: got %#v, want %#v", gotCaps["web_search"], caps["web_search"])
-	}
-	if !reflect.DeepEqual(gotCaps["vision"], caps["vision"]) {
-		t.Fatalf("vision capability changed on save: got %#v, want %#v", gotCaps["vision"], caps["vision"])
+	if !reflect.DeepEqual(p.Manifest["capabilities"], caps) {
+		t.Fatal("editor mutated the original legacy inventory")
 	}
 }
 
@@ -2436,8 +2378,20 @@ func TestPresetEditorCodexCreditsOptInRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &init); err != nil {
 		t.Fatal(err)
 	}
-	if init["manifest"].(map[string]interface{})["llm"].(map[string]interface{})["codex_allow_credits"] != true {
-		t.Fatal("credit choice must reach the generated Agent init")
+	route, _ := init["llm"].(map[string]interface{})
+	policy, _ := route["preset"].(map[string]interface{})
+	if len(route) != 1 || policy["active"] != preset.RefFor(loaded) || init["manifest"] != nil {
+		t.Fatal("credit preset must remain reference-only in generated Agent init")
+	}
+	effective := fixtureEditorEffectiveLLM(t, filepath.Join(project, "credit-agent"))
+	if allow, ok := effective["codex_allow_credits"].(bool); !ok || !allow {
+		t.Fatal("credit choice must reach the actual Core reader as a JSON boolean")
+	}
+	if effective["provider"] != loaded.Manifest["llm"].(map[string]interface{})["provider"] || effective["model"] != loaded.Manifest["llm"].(map[string]interface{})["model"] {
+		t.Fatal("credit round trip changed LLM identity")
+	}
+	if after, err := os.ReadFile(filepath.Join(project, "credit-agent", "init.json")); err != nil || string(after) != string(data) {
+		t.Fatal("effective reader rewrote authored init")
 	}
 	m = NewPresetEditorModelWithBuiltinFlag(loaded, "en", nil, "", false)
 	if !m.codexAllowCredits() {
@@ -2480,4 +2434,30 @@ func TestPresetEditorCodexCreditsMalformedValuesDefaultOff(t *testing.T) {
 			t.Fatalf("%v must be removed on commit", value)
 		}
 	}
+}
+
+// Observe the same public Core reader composition used by inspection. No Agent,
+// provider call, resolved publication or Go materialization is involved.
+func fixtureEditorEffectiveLLM(t *testing.T, dir string) map[string]interface{} {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	const script = `import json, sys
+from pathlib import Path
+from lingtai.init_reader import read_init, reader_callbacks, InitReadStatus
+from lingtai.agent import load_preset
+materialize, prepare = reader_callbacks(Path(sys.argv[1]), load_preset=load_preset)
+result = read_init(Path(sys.argv[1]), materialize=materialize, prepare=prepare)
+assert result.status is not InitReadStatus.READ_FAILED, result.to_payload()
+print(json.dumps(result.data["manifest"]["llm"]))
+`
+	data, err := exec.CommandContext(ctx, fixtureUIProjectPython(t), "-c", script, dir).Output()
+	if err != nil {
+		t.Fatalf("installed Core reader: %v", err)
+	}
+	var llm map[string]interface{}
+	if err := preset.DecodeJSONUseNumber(data, &llm); err != nil {
+		t.Fatal(err)
+	}
+	return llm
 }

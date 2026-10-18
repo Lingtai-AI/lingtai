@@ -19,8 +19,8 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 Use this child for the named built-in codex preset — the first-run default
 template. codexPreset in tui/internal/preset/preset.go ships provider codex,
 gpt-5.6-sol, https://chatgpt.com/backend-api/codex, ChatGPT OAuth with an
-empty api_key_env, thinking xhigh, web_search on DuckDuckGo, and vision
-inheriting the agent's own (Codex) provider. It is not the OpenAI API
+empty api_key_env and thinking xhigh. Like all presets, it configures only
+the LLM; tools and MCP are agent-owned. It is not the OpenAI API
 preset: an OpenAI API key or an OpenAI-compatible endpoint uses the `openai`
 family (`reference/openai/SKILL.md`), and several ChatGPT accounts behind one
 endpoint use an external pool such as sub2api / subs-pool through that same
@@ -62,7 +62,7 @@ static fallback on any failure) and retains entries whose `display_name`
 starts with the exact case-sensitive prefix `GPT` — no numeric-generation,
 visibility, or account-entitlement filter. The retained `display_name` is the
 displayed label; the entry's `slug` is what gets persisted into
-`manifest.llm.model`. This is public metadata, not proof the current account
+`llm.model`. This is public metadata, not proof the current account
 can use a listed model — treat every entry as a suggestion and let the actual
 run be the entitlement check. A saved/custom id absent from the live/cached
 list keeps rendering (hollow) and keeps working; pressing `c` on the model
@@ -98,7 +98,7 @@ paths or tokens. This child owns Codex preset facts.
 
 In either the terminal or desktop preset editor, select **codex** and turn
 **Paid Codex credits** On to allow requests after included ChatGPT usage runs
-out. The shared field is `manifest.llm.codex_allow_credits: true` (JSON boolean).
+out. The shared field is `llm.codex_allow_credits: true` (JSON boolean).
 It defaults Off, including for existing presets; Off omits the field. Saved
 presets retain the choice. Switching away from Codex clears it. This is for
 purchased Codex credits on the signed-in account, not an OpenAI API balance,

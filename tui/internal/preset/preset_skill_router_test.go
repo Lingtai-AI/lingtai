@@ -1,6 +1,7 @@
 package preset
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -654,55 +655,71 @@ func TestPresetSkillRouter_AllBundledMaintenance(t *testing.T) {
 	}
 }
 
-// TestBuiltinPresetVisionWiring pins the template capability contract: no
-// per-vendor vision provider. Every template that can serve images declares
-// vision as "inherit" (the agent's own provider and credentials); the claude
-// template declares none.
+// Presets have no per-provider vision inventory. A model change must leave the
+// agent's explicit tools owner unchanged, including false (not absent/default).
 func TestBuiltinPresetVisionWiring(t *testing.T) {
-	for _, p := range BuiltinPresets() {
-		caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("%s capabilities has unexpected type", p.Name)
-		}
-		vision, hasVision := caps["vision"].(map[string]interface{})
-		if p.Name == "claude" {
-			if hasVision {
-				t.Fatalf("claude template must not expose a vision capability: %#v", vision)
+	for _, candidate := range BuiltinPresets() {
+		t.Run(candidate.Name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			p := candidate
+			p.Manifest["llm"].(map[string]interface{})["model"] = "vision-owner-fixture"
+			encoded, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
 			}
-			continue
-		}
-		if !hasVision {
-			t.Fatalf("%s must expose a vision capability", p.Name)
-		}
-		if got := vision["provider"]; got != "inherit" {
-			t.Fatalf("%s vision provider = %#v, want inherit", p.Name, got)
-		}
-		if len(vision) != 1 {
-			t.Fatalf("%s vision carries per-vendor fields: %#v", p.Name, vision)
-		}
+			var presetDoc map[string]interface{}
+			if json.Unmarshal(encoded, &presetDoc) != nil || presetDoc["llm"] == nil || presetDoc["manifest"] != nil || presetDoc["tools"] != nil || presetDoc["capabilities"] != nil || len(p.Manifest) != 1 {
+				t.Fatal("model preset exported a tool/vision owner")
+			}
+			root, global := t.TempDir(), t.TempDir()
+			lingtaiDir := filepath.Join(root, ".lingtai")
+			dir := filepath.Join(lingtaiDir, "agent")
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			const original = `{"agent":{"name":"agent"},"llm":{"provider":"openai","model":"before"},"tools":{"vision":false},"mcp":{},"plugins":[]}`
+			if err := os.WriteFile(filepath.Join(dir, "init.json"), []byte(original), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixtureGenerateInitJSONWithOpts(t, p, "agent", "agent", lingtaiDir, global, DefaultAgentOpts()); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "init.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var authored map[string]interface{}
+			if json.Unmarshal(data, &authored) != nil {
+				t.Fatal("invalid post-configure init")
+			}
+			tools, _ := authored["tools"].(map[string]interface{})
+			if len(tools) != 1 || tools["vision"] != false || authored["manifest"] != nil {
+				t.Fatal("preset switch changed agent-owned vision")
+			}
+			effective := fixtureCoreConfiguration(t, dir)["llm"].(map[string]interface{})
+			if effective["provider"] != p.Manifest["llm"].(map[string]interface{})["provider"] || effective["model"] != "vision-owner-fixture" {
+				t.Fatal("preserved tools concealed an ineffective model switch")
+			}
+		})
 	}
 }
 
 func TestPresetVisionManualContracts(t *testing.T) {
-	readChild := func(t *testing.T, name string) string {
-		t.Helper()
+	for _, name := range []string{"openai", "anthropic", "codex", "claude"} {
 		data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/"+name+"/SKILL.md")
 		if err != nil {
-			t.Fatalf("read %s manual: %v", name, err)
+			t.Fatal(err)
 		}
-		return string(data)
-	}
-
-	// Compare on whitespace-normalized prose so re-wrapping a paragraph does
-	// not break the contract.
-	oneLine := func(s string) string { return strings.Join(strings.Fields(s), " ") }
-	for _, name := range []string{"openai", "anthropic", "codex"} {
-		if body := oneLine(readChild(t, name)); !strings.Contains(body, "vision inheriting the agent's own") {
-			t.Errorf("%s manual does not document the inherited vision route", name)
+		body := strings.ToLower(strings.Join(strings.Fields(string(data)), " "))
+		if !strings.Contains(body, "tools and mcp are agent-owned") && !strings.Contains(body, "not tools or mcp") {
+			t.Errorf("%s manual must place tools outside the LLM preset", name)
 		}
-	}
-	if claude := oneLine(readChild(t, "claude")); !strings.Contains(claude, "or LingTai vision capability") {
-		t.Errorf("claude manual does not state it has no LingTai vision capability")
+		if strings.Contains(body, "vision inheriting the agent's own") {
+			t.Errorf("%s manual still claims a preset-owned vision route", name)
+		}
+		if name == "claude" && !strings.Contains(body, "does not establish forwarding through lingtai's cli adapter") {
+			t.Error("Claude CLI image support must not imply LingTai adapter forwarding")
+		}
 	}
 }
 

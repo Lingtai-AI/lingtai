@@ -17,52 +17,58 @@ func TestDefaultAgentOpts_ContextLimit(t *testing.T) {
 	}
 }
 
-// TestGenerateInitJSON_WritesContextLimit verifies the default flows into the
-// generated manifest as 500000, and — crucially — that an explicit user
-// override is preserved verbatim rather than being clamped back to the default.
+// The public legacy option remains accepted/projected, but System policy is
+// not serialized into new init. Existing explicit System owner bytes survive.
 func TestGenerateInitJSON_WritesContextLimit(t *testing.T) {
 	withTempPresets(t, func() {
-		tmpDir := t.TempDir()
-		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
-		os.MkdirAll(lingtaiDir, 0o755)
-		globalDir := filepath.Join(tmpDir, ".lingtai-global")
-		Bootstrap(globalDir)
-
-		readManifest := func(agent string) map[string]interface{} {
-			t.Helper()
-			initPath := filepath.Join(lingtaiDir, agent, "init.json")
-			data, err := os.ReadFile(initPath)
-			if err != nil {
-				t.Fatalf("read init.json: %v", err)
-			}
-			var initJSON map[string]interface{}
-			if err := json.Unmarshal(data, &initJSON); err != nil {
-				t.Fatalf("parse init.json: %v", err)
-			}
-			m, ok := initJSON["manifest"].(map[string]interface{})
-			if !ok {
-				t.Fatal("manifest not a map")
-			}
-			return m
-		}
-
-		// Default flows through to the manifest as 500000.
-		if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
-			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
-		}
-		// JSON numbers decode as float64.
-		if v, ok := readManifest("alice")["context_limit"].(float64); !ok || int(v) != 500000 {
-			t.Errorf("alice context_limit = %v (ok=%v), want 500000", readManifest("alice")["context_limit"], ok)
-		}
-
-		// Explicit override is preserved, not reset to the default.
-		opts := DefaultAgentOpts()
-		opts.ContextLimit = 1000000
-		if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "bob", "bob", lingtaiDir, globalDir, opts); err != nil {
-			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
-		}
-		if v, ok := readManifest("bob")["context_limit"].(float64); !ok || int(v) != 1000000 {
-			t.Errorf("bob context_limit = %v (ok=%v), want preserved 1000000", readManifest("bob")["context_limit"], ok)
+		root, global := t.TempDir(), t.TempDir()
+		lingtaiDir := filepath.Join(root, ".lingtai")
+		for _, tc := range []struct {
+			name      string
+			input     int
+			projected int
+		}{
+			{"default", 500000, 500000},
+			{"override", 1000000, 1000000},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				opts := DefaultAgentOpts()
+				opts.ContextLimit = tc.input
+				dir := filepath.Join(lingtaiDir, tc.name)
+				if err := os.MkdirAll(filepath.Join(dir, "settings"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				owner := filepath.Join(dir, "settings", "system.json")
+				// Deliberately differs from wizard value: generation must not reset owner.
+				seed := []byte(`{"schema_version":2,"context_limit":23}`)
+				if err := os.WriteFile(owner, seed, 0600); err != nil {
+					t.Fatal(err)
+				}
+				request, err := ProjectConfigurationRequest(codexPreset(), tc.name, tc.name, lingtaiDir, global, opts)
+				if err != nil || request.Options.ContextLimit != tc.projected {
+					t.Fatalf("legacy option projection: %+v %v", request.Options, err)
+				}
+				if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), tc.name, tc.name, lingtaiDir, global, opts); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "init.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var document map[string]interface{}
+				if json.Unmarshal(data, &document) != nil || document["llm"] == nil || document["manifest"] != nil {
+					t.Fatal("wrong fresh owners")
+				}
+				for _, key := range []string{"context_limit", "max_rpm"} {
+					if _, found := document[key]; found {
+						t.Fatalf("runtime knob %s exported into init", key)
+					}
+				}
+				got, err := os.ReadFile(owner)
+				if err != nil || string(got) != string(seed) {
+					t.Fatal("generation rewrote explicit System owner policy")
+				}
+			})
 		}
 	})
 }

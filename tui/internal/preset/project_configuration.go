@@ -41,11 +41,16 @@ func ProjectConfigurationRequest(p Preset, agentName, dirName, lingtaiDir, globa
 		ContextLimit: opts.ContextLimit, MaxRPM: opts.MaxRpm, MaxAEDAttempts: ClampAedAttempts(opts.MaxAedAttempts),
 		Addons: opts.Addons, AllowedPresets: opts.AllowedPresets,
 	}
-	// Seeds for the curated catalog also cover previously-selected addons whose
-	// activation entry is absent. Existing registrations/specs win in Core.
+	// Addons is compatibility selection metadata for existing legacy writers;
+	// canonical output still authors only mcp (never duplicate addons).
+	// Only explicitly selected curated MCP specs cross this request. Catalog
+	// availability is not activation; existing specs/preservation belong to Core.
 	options.MCP = map[string]interface{}{}
-	for _, name := range []string{"imap", "telegram", "feishu", "wechat", "whatsapp"} {
-		module, env, rel, _ := defaultMCPSpec(name)
+	for _, name := range opts.Addons {
+		module, env, rel, supported := defaultMCPSpec(name)
+		if !supported {
+			continue
+		}
 		options.MCP[name] = map[string]interface{}{"type": "stdio", "command": config.VenvPython(venvPath), "args": []string{"-m", module}, "env": map[string]string{env: rel}}
 	}
 	if opts.CommentFile != "" {
@@ -69,7 +74,8 @@ func configureWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir strin
 	if err != nil {
 		return process.ProjectConfigurationResult{}, err
 	}
-	python = process.ProjectPython(filepath.Join(lingtaiDir, dirName), python)
+	// The caller already selected the management SDK. Target host selection
+	// belongs to Agent launch/inspection, not this configuration operation.
 	return process.ConfigureProject(context.Background(), python, request)
 }
 
@@ -83,16 +89,22 @@ func SavedPresetPolicy(lingtaiDir, selected string) (string, []string, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("selected Project policy unavailable")
 	}
-	var document struct {
-		Manifest struct {
-			Preset struct {
-				Default string   `json:"default"`
-				Allowed []string `json:"allowed"`
-			} `json:"preset"`
-		} `json:"manifest"`
-	}
-	if DecodeJSONUseNumber(data, &document) != nil || document.Manifest.Preset.Default == "" || len(document.Manifest.Preset.Allowed) == 0 {
+	var document map[string]interface{}
+	if DecodeJSONUseNumber(data, &document) != nil {
 		return "", nil, fmt.Errorf("selected Project policy unavailable")
 	}
-	return document.Manifest.Preset.Default, document.Manifest.Preset.Allowed, nil
+	policy := InitPresetPolicy(document)
+	def, _ := policy["default"].(string)
+	var allowed []string
+	if refs, ok := policy["allowed"].([]interface{}); ok {
+		for _, ref := range refs {
+			if text, ok := ref.(string); ok {
+				allowed = append(allowed, text)
+			}
+		}
+	}
+	if def == "" || len(allowed) == 0 {
+		return "", nil, fmt.Errorf("selected Project policy unavailable")
+	}
+	return def, allowed, nil
 }

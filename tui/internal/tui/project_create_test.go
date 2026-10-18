@@ -393,17 +393,21 @@ func TestProjectConsumerProjectionPreservesReaderFieldsAndRefs(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
 	draft.DraftPreset.Manifest["llm"].(map[string]interface{})["context_limit"] = json.Number("9007199254740993")
-	draft.DraftPreset.Manifest["extension"] = map[string]interface{}{"exact": json.Number("9007199254740993"), "unknown": "preserve"}
+	draft.DraftPreset.Manifest["llm"].(map[string]interface{})["extension"] = map[string]interface{}{"exact": json.Number("9007199254740993"), "unknown": "preserve"}
+	draft.DraftPreset.Manifest["capabilities"] = map[string]interface{}{"skills": map[string]interface{}{"paths": []string{"MODEL-MUST-NOT-OWN"}}}
 	draft.AgentOpts.AllowedPresets = []string{"~/saved/other.json", "~/saved/other.json"}
 	draft.AgentOpts.Addons = []string{"imap", "unknown-addon"}
 	draft.RecipeName = "adaptive"
 	before, _ := json.Marshal(draft.DraftPreset.Manifest)
 	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
 		raw, _ := json.Marshal(req)
+		if strings.Contains(string(raw), "MODEL-MUST-NOT-OWN") || len(req.PresetManifest) != 1 {
+			t.Fatal("model tool bundle crossed Project boundary")
+		}
 		if strings.Count(string(raw), "9007199254740993") != 2 || !strings.Contains(string(raw), "unknown") || req.Recipe != "adaptive" || req.AgentName != draft.AgentName || req.PresetRef != preset.RefFor(*draft.DraftPreset) {
 			t.Fatalf("projection lost reviewed data: %s", raw)
 		}
-		if len(req.Options.AllowedPresets) != 2 || req.Options.AllowedPresets[0] != draft.AgentOpts.AllowedPresets[0] || len(req.Options.Addons) != 2 || req.Options.MCP["imap"] == nil || req.Options.MCP["unknown-addon"] != nil {
+		if len(req.Options.AllowedPresets) != 2 || req.Options.AllowedPresets[0] != draft.AgentOpts.AllowedPresets[0] || len(req.Options.Addons) != 0 || req.Options.MCP["imap"] == nil || req.Options.MCP["unknown-addon"] != nil {
 			t.Fatal("caller refs/addon semantics changed")
 		}
 		for _, retired := range []string{"context_limit", "max_rpm", "max_aed_attempts", "comment_file", "covenant_file"} {
@@ -519,7 +523,7 @@ func TestProjectConsumerDirtyPresetIsBoundAndSavedOnlyAfterReady(t *testing.T) {
 	draft.DraftPresetDirty = true
 	draft.DraftPreset.Name = "reviewed-custom"
 	draft.DraftPreset.Source = preset.SourceTemplate
-	draft.DraftPreset.Manifest["extension"] = json.Number("9007199254740993")
+	draft.DraftPreset.Manifest["llm"].(map[string]interface{})["extension"] = json.Number("9007199254740993")
 	saved := filepath.Join(opts.GlobalDir, "presets", "saved", "reviewed-custom.json")
 	opts.CreateInteractive = func(_ context.Context, _ string, req process.InteractiveProjectRequest, ready func() bool) (process.InteractiveProjectResult, error) {
 		if req.PresetRef != "~/.lingtai-tui/presets/saved/reviewed-custom.json" {

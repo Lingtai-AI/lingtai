@@ -152,14 +152,13 @@ func ApplyRecipeToLingTaiDir(bundleDir, lingtaiDir, lang string, greetSubstituto
 }
 
 // AppendSkillsPath ensures the given path string appears in the
-// manifest.capabilities.skills.paths list of the agent's init.json.
+// tools.skills.paths (or legacy manifest.capabilities.skills.paths) in init.json.
 // Idempotent: no-op if the path is already present. Preserves all other
 // fields in init.json including existing skills.paths entries.
 //
-// The skills capability object must already exist in the manifest (via
-// skillsDefault() or equivalent). If it's absent, this function is a
-// no-op — creating it would be an architectural choice best left to
-// preset generation.
+// Legacy manifest.capabilities.skills must already be present. Canonical
+// tools.skills is default-on unless explicitly false; the native exchange
+// still leaves append/no-op/order decisions with Core.
 //
 // Writes atomically via temp+rename on change. Returns nil on successful
 // no-op or successful write; returns error only on I/O or parse failure.
@@ -179,20 +178,11 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 		return fmt.Errorf("parse %s: %w", initJSONPath, err)
 	}
 	stripObsoleteInitFields(root)
-	manifest, ok := root["manifest"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	caps, ok := manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	capsChanged, err := CanonicalizeCapabilities(caps)
+	skills, capsChanged, err := recipeSkills(root)
 	if err != nil {
 		return fmt.Errorf("canonicalize %s: %w", initJSONPath, err)
 	}
-	skills, ok := caps["skills"].(map[string]interface{})
-	if !ok {
+	if skills == nil {
 		return nil
 	}
 

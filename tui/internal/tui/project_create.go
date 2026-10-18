@@ -275,13 +275,10 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 			}
 		}
 	}
-	if err := chosen.NormalizeLegacyCapabilities(); err != nil {
-		result.Err = fmt.Errorf("selected preset cannot be normalized")
-		return result
-	}
+	// Keep the old Project wire envelope, but only LLM belongs to this snapshot.
+	chosen.Manifest = map[string]interface{}{"llm": chosen.Manifest["llm"]}
 	if draft.DraftPresetDirty {
 		chosen = stampAutoEnvVar(chosen, draft.ExistingKeys.keyNames())
-		preset.SyncCapabilityAPIKeyEnv(chosen.Manifest)
 		chosen.Source = preset.SourceSaved
 	}
 	request, err := interactiveRequest(draft, opts, chosen)
@@ -411,9 +408,9 @@ func interactiveRequest(draft *ProjectDraft, opts CreateOptions, chosen preset.P
 	if dir == "" {
 		dir = draft.AgentName
 	}
-	// Public normalized snapshot retains unknown manifest extensions and exact
-	// numbers. It is not the preset profile, credential store or wizard draft.
-	manifest := chosen.Manifest
+	// The unchanged Project envelope carries only LLM route/options, retaining
+	// exact numbers and unknown LLM extensions, never provider tool bundles.
+	manifest := map[string]interface{}{"llm": chosen.Manifest["llm"]}
 	mcp := map[string]interface{}{}
 	for _, name := range draft.AgentOpts.Addons {
 		module, env, rel, ok := preset.DefaultMCPSpec(name)
@@ -430,7 +427,7 @@ func interactiveRequest(draft *ProjectDraft, opts CreateOptions, chosen preset.P
 		ProjectDir: draft.ProjectRoot, ApprovedRoot: opts.ExpectedProjectRoot,
 		AgentName: draft.AgentName, DirectoryName: dir, PresetRef: preset.RefFor(chosen), PresetManifest: manifest,
 		Options: process.InteractiveProjectOptions{Language: lang, Covenant: covenant, Karma: draft.AgentOpts.Karma, Nirvana: draft.AgentOpts.Nirvana, Pad: pad,
-			EnvFile: config.EnvFilePath(opts.GlobalDir), VenvPath: filepath.Join(opts.GlobalDir, "runtime", "venv"), Addons: draft.AgentOpts.Addons, MCP: mcp, AllowedPresets: draft.AgentOpts.AllowedPresets},
+			EnvFile: config.EnvFilePath(opts.GlobalDir), VenvPath: filepath.Join(opts.GlobalDir, "runtime", "venv"), MCP: mcp, AllowedPresets: draft.AgentOpts.AllowedPresets},
 		Recipe: draft.RecipeName, Location: "unknown", Commands: strings.Join(commands, "\n"),
 	}, nil
 }

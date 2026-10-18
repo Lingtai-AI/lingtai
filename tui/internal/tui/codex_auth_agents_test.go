@@ -23,8 +23,9 @@ func writeSyntheticAgentPreset(t *testing.T, projectDir, agentName, presetRef, p
 		llm["codex_auth_path"] = authRef
 	}
 	presetDoc := map[string]interface{}{
-		"name":     filepath.Base(presetRef),
-		"manifest": map[string]interface{}{"llm": llm},
+		"name":        filepath.Base(presetRef),
+		"description": map[string]interface{}{"summary": "auth source fixture"},
+		"llm":         llm,
 	}
 	data, err := json.Marshal(presetDoc)
 	if err != nil {
@@ -38,11 +39,15 @@ func writeSyntheticAgentPreset(t *testing.T, projectDir, agentName, presetRef, p
 
 func writeSyntheticAgentInit(t *testing.T, projectDir, agentName, presetRef string, active bool) {
 	t.Helper()
-	block := map[string]interface{}{"default": presetRef}
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("set LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON to the verified installed CLI host; no auth inspection fallback")
+	}
+	block := map[string]interface{}{"default": presetRef, "active": presetRef, "allowed": []string{presetRef}}
 	if active {
 		block["active"] = presetRef
 	}
-	doc := map[string]interface{}{"manifest": map[string]interface{}{"preset": block}}
+	doc := map[string]interface{}{"llm": map[string]interface{}{"preset": block}, "host": map[string]interface{}{"venv_path": filepath.Dir(filepath.Dir(python))}}
 	data, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +64,8 @@ func writeSyntheticAgentInit(t *testing.T, projectDir, agentName, presetRef stri
 func TestValidateCodexAuthForAgentsUsesLoadedManifestNotFilename(t *testing.T) {
 	t.Setenv("LINGTAI_TUI_DIR", "")
 	globalDir, projectDir := t.TempDir(), t.TempDir()
-	presetRef := filepath.Join(t.TempDir(), "codex-looking-name.txt")
-	writeSyntheticAgentPreset(t, projectDir, "agent-one", presetRef, "minimax", "MiniMax-M3", "", false)
+	presetRef := filepath.Join(t.TempDir(), "codex-looking-name.json")
+	writeSyntheticAgentPreset(t, projectDir, "agent-one", presetRef, "openai", "fixture-model", "", false)
 
 	if got := validateCodexAuthForAgents(globalDir, projectDir); got != "" {
 		t.Fatalf("non-Codex manifest in Codex-named path produced warning: %q", got)
@@ -93,7 +98,7 @@ func TestValidateCodexAuthForAgentsUsesCodexBoundAndLegacyFacts(t *testing.T) {
 			if tt.boundGood {
 				writeStubCodexToken(t, boundRef, "bound@example.test")
 			}
-			presetRef := filepath.Join(t.TempDir(), "preset-with-arbitrary-name.data")
+			presetRef := filepath.Join(t.TempDir(), "preset-with-arbitrary-name.json")
 			authRef := ""
 			if tt.useBound {
 				authRef = boundRef
@@ -137,8 +142,8 @@ func TestValidateCodexAuthForAgentsMalformedOrUnreadablePresetDoesNotUseFilename
 			presetRef := filepath.Join(t.TempDir(), "codex-malformed-preset.json")
 			tt.make(t, presetRef)
 			writeSyntheticAgentInit(t, projectDir, "malformed-agent", presetRef, false)
-			if got := validateCodexAuthForAgents(globalDir, projectDir); got != "" {
-				t.Fatalf("malformed/unreadable preset emitted auth-specific filename warning: %q", got)
+			if got := validateCodexAuthForAgents(globalDir, projectDir); got == "" || strings.Contains(got, i18n.TF("codex.oauth_unverified_agent", "malformed-agent")) {
+				t.Fatalf("malformed/unreadable source must report inspection failure, not auth-specific filename fallback: %q", got)
 			}
 		})
 	}
@@ -149,7 +154,7 @@ func TestValidateCodexAuthForAgentsDeduplicatesDefaultAndActiveRef(t *testing.T)
 	globalDir, projectDir := t.TempDir(), t.TempDir()
 	presetRef := filepath.Join(t.TempDir(), "arbitrary-invalid-codex-ref.json")
 	writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "legacy@example.test")
-	if err := os.WriteFile(presetRef, []byte(`{"name":"bad","manifest":{"llm":{"provider":"codex","model":"gpt-5.6-sol","codex_auth_path":"/missing/token.json"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(presetRef, []byte(`{"name":"bad","description":{"summary":"bound auth fixture"},"manifest":{"llm":{"provider":"codex","model":"gpt-5.6-sol","codex_auth_path":"/missing/token.json"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeSyntheticAgentInit(t, projectDir, "duplicate-agent", presetRef, true)
@@ -197,7 +202,7 @@ func TestValidateCodexAuthForAgentsIgnoresRetiredCodexPoolProvider(t *testing.T)
 			globalDir, projectDir := t.TempDir(), t.TempDir()
 			presetRef := filepath.Join(t.TempDir(), "retired-pool-preset.json")
 			writeSyntheticAgentPreset(t, projectDir, "pool-agent", presetRef, provider, "gpt-5.6-sol", "", false)
-			if got := validateCodexAuthForAgents(globalDir, projectDir); got != "" {
+			if got := validateCodexAuthForAgents(globalDir, projectDir); got == i18n.TF("codex.oauth_unverified_agent", "pool-agent") {
 				t.Fatalf("retired %s provider produced Codex OAuth warning: %q", provider, got)
 			}
 		})
