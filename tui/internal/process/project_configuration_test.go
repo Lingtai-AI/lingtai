@@ -178,3 +178,56 @@ func TestProjectConfigurationBoundAndCancelledStartAreUnknown(t *testing.T) {
 		t.Fatal("cancelled start not unknown")
 	}
 }
+
+// This is a real installed reader, not a mock selection/receipt engine. Parent
+// supplies the same cold host selector used by the Project configuration tests.
+func TestInspectInitInstalledSourceSelection(t *testing.T) {
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("explicit installed inspection host required")
+	}
+	dir := t.TempDir()
+	presetPath := filepath.Join(dir, "default.json")
+	presetBytes := []byte(`{"name":"default","description":{"summary":"source selection"},"llm":{"provider":"openai","model":"fixture-model","api_key":"PRIVATE-KEY","base_url":"https://private.invalid/v1"}}`)
+	initBytes := []byte(`{"agent":{"name":"reader"},"llm":{"preset":{"active":"missing.json","default":"default.json","allowed":["missing.json","default.json"]}},"tools":{"shell":{"tenant":9007199254740993}},"mcp":{},"plugins":[]}`)
+	if err := os.WriteFile(presetPath, presetBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "init.json"), initBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InspectInit(context.Background(), python, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPresetPath, err := filepath.EvalSymlinks(presetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LLMSource.Kind != "preset" || result.LLMSource.Path != wantPresetPath || result.LLMSource.Pointer != "/llm" || result.LLM.Model != "fixture-model" {
+		t.Fatalf("wrong actual Core selection: %+v", result.LLMSource)
+	}
+	safe, _ := json.Marshal(result)
+	for _, private := range []string{"PRIVATE-KEY", "private.invalid", "tenant", "9007199254740993"} {
+		if strings.Contains(string(safe), private) {
+			t.Fatal("inspection emitted non-identity configuration")
+		}
+	}
+	for path, want := range map[string][]byte{presetPath: presetBytes, filepath.Join(dir, "init.json"): initBytes} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != string(want) {
+			t.Fatal("read-only inspection rewrote authored bytes")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "system", "manifest.resolved.json")); !os.IsNotExist(err) {
+		t.Fatal("inspection published runtime artifact")
+	}
+}
+
+func TestInspectInitUnavailableHasNoFallback(t *testing.T) {
+	_, err := InspectInit(context.Background(), filepath.Join(t.TempDir(), "bin", "python"), t.TempDir())
+	var unavailable *InitInspectionError
+	if !errors.As(err, &unavailable) || unavailable.Known || strings.Contains(err.Error(), "PRIVATE") {
+		t.Fatal("missing/old CLI must remain typed unknown")
+	}
+}

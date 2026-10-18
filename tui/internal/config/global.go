@@ -518,7 +518,7 @@ func ReadAgentAPIKeyEnv(agentDir string) string {
 	return readAgentLLM(agentDir).APIKeyEnv
 }
 
-// ReadAgentProvider reads only manifest.llm.provider from an agent's
+// ReadAgentProvider reads only desired inline llm.provider from an agent's
 // init.json. A missing or malformed manifest returns "". Startup and doctor
 // classify it (preset.UsesLoginCredential) to recognize keyless orchestrators
 // such as claude-code or codex that authenticate through a CLI/OAuth login.
@@ -539,15 +539,32 @@ func readAgentLLM(agentDir string) agentLLMFields {
 	if err != nil {
 		return agentLLMFields{}
 	}
-	var init struct {
-		Manifest struct {
-			LLM agentLLMFields `json:"llm"`
-		} `json:"manifest"`
-	}
-	if json.Unmarshal(data, &init) != nil {
+	var root map[string]json.RawMessage
+	if json.Unmarshal(data, &root) != nil {
 		return agentLLMFields{}
 	}
-	return init.Manifest.LLM
+	owner := root
+	if raw, legacy := root["manifest"]; legacy {
+		owner = nil
+		if json.Unmarshal(raw, &owner) != nil {
+			return agentLLMFields{}
+		}
+		if _, policy := owner["preset"]; policy {
+			return agentLLMFields{}
+		}
+	}
+	var llm map[string]json.RawMessage
+	if json.Unmarshal(owner["llm"], &llm) != nil {
+		return agentLLMFields{}
+	}
+	if _, references := llm["preset"]; references {
+		return agentLLMFields{}
+	}
+	var fields agentLLMFields
+	if json.Unmarshal(owner["llm"], &fields) != nil {
+		return agentLLMFields{}
+	}
+	return fields
 }
 
 // writeEnvLines writes lines back to the .env file with a single

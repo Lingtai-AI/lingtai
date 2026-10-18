@@ -421,11 +421,18 @@ func preserveSpawnLanguage(agentDir, lang string) error {
 		}
 		return err
 	}
-	manifest, ok := init["manifest"].(map[string]interface{})
-	if !ok || manifest == nil {
-		return fmt.Errorf("init.json manifest is missing")
+	if manifest, legacy := init["manifest"].(map[string]interface{}); legacy {
+		manifest["language"] = lang
+	} else if _, canonical := init["llm"].(map[string]interface{}); canonical {
+		agent, _ := init["agent"].(map[string]interface{})
+		if agent == nil {
+			agent = map[string]interface{}{}
+			init["agent"] = agent
+		}
+		agent["language"] = lang
+	} else {
+		return fmt.Errorf("init.json has no canonical or legacy owner")
 	}
-	manifest["language"] = lang
 	updated, err := json.MarshalIndent(init, "", "  ")
 	if err != nil {
 		return err

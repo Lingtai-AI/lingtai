@@ -53,7 +53,7 @@
 - `/viz` — 于浏览器启网络之图。
 
 ### 设置与诊断
-- `/setup` — 器灵设置之导（供者、模型、诸能）。
+- `/setup` — 器灵设置之导（LLM、另择 MCP、凭据）。
 - `/settings` — TUI 之偏好（主题、页幅、语言）。
 - `/mcp` — 外服桥接之只读 MCP 设与状态检视台。
 - `/doctor` — 诊连接之患。
@@ -102,7 +102,7 @@ dismiss `goal.reminder`，但隐其提醒；真欲取消 goal，当删 `.notific
 
 自盘重载 `init.json`、诸能与全设，乃重启器灵。系预设之名者，重启前先换当下预设；其预设须
 在器灵 `manifest.preset.allowed` 之列（见 `/presets`）。此乃改设之后首选之命，亦用以换异之
-LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
+LLM 预设——唯器灵确已宕时方用 `/cpr`。
 
 ### `/clear` — 清上下文之窗而重启
 **用：** `/clear`
@@ -167,11 +167,13 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 依序示 `model × count` 统计。此不改 Task Card 文件，亦不纳旧录或他 backend 之模型；Telegram
 自动 Task Card/进程投影乃别一 reader。欲新之，重行 `/taskcard` 即可；若无活卡，则示一简状之语。
 
+预设唯司 LLM。新存及克隆用 `{name, description, llm}`；旧式可读而不改，亦不据以择工具。工具归器灵 init 与内核；外部 MCP 须另明择之，初皆不启。
+
 ### `/presets` — 启预设之库
 **用：** `/presets`
 
 启限于当下器灵之预设库，唯示其 `manifest.preset.allowed` 列中之预设——即尔可以
-`/refresh <名>` 换之者。当下所活之预设以 ● 标。尔可览各预设之 LLM 与诸能，并为其加一至五星
+`/refresh <名>` 换之者。当下所活之预设以 ● 标。尔可览各预设之 LLM 之设，并为其加一至五星
 之费/质等（愈高愈善）；标会传于器灵，导守护/分身之择。此视乃只读之察加标签之编——预设之全
 创建在 `/setup` 中行。
 
@@ -213,15 +215,21 @@ Space 择之，Esc 罢而不易当前会。
 ### `/setup` — 行器灵设置之导
 **用：** `/setup`
 
-启器灵设置之导，可改 LLM 之供者、模型、诸能与运行之设；其改传于诸器灵。用以首次之设，或对
-供者、模型、诸能之任何实质之改。唯 TUI 之偏好（主题、语言）用 `/settings`；预设之全创建亦在
+启器灵设置之导，可改 LLM 之供者、模型，另择 MCP 与器灵之权；其改传于诸器灵。用以首次之设，或对
+供者、模型、MCP 之择有所实改。唯 TUI 之偏好（主题、语言）用 `/settings`；预设之全创建亦在
 此导中行。
+
+新 init 以 `agent` 藏身份与权，以 `llm.preset` 藏模型之策，以 `tools` 藏工具
+（空对象则内置者皆启，`false` 则明禁）。预设惟 LLM，易模型不易工具与 MCP。
+新 MCP 之择初为空。运行之策归 System（`settings/system.json`），提示归 Psyche
+（`settings/psyche.json`），久忆归 `system/pad.md`。Doctor/login 询已安内核之只读检查，
+以知实择模型及其源；旧 CLI 或不可得者明言未知，不臆断其凭。
 
 ### `/settings` — 编 TUI 之偏好
 **用：** `/settings`
 
 启 TUI 之偏好：主题、邮件页幅、语言。用以 TUI 自身之观与客户之行。若欲改器灵之供者、
-模型或诸能，则用 `/setup`。
+模型或 MCP 之择，则用 `/setup`。
 
 ### `/mcp` — 启 MCP 控制台
 **用：** `/mcp`

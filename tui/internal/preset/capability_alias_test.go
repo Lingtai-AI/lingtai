@@ -82,43 +82,44 @@ func TestCanonicalizeCapabilitiesConflictFailsClosed(t *testing.T) {
 	}
 }
 
+// Explicit output drops legacy tools instead of canonicalizing them into a preset.
 func TestSaveCanonicalizesLegacyCapabilities(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
+	t.Setenv("HOME", t.TempDir())
 	if err := Save(legacyShellPreset("legacy-save")); err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".lingtai-tui", "presets", "saved", "legacy-save.json"))
+	data, err := os.ReadFile(filepath.Join(SavedDir(), "legacy-save.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var saved Preset
-	if err := json.Unmarshal(data, &saved); err != nil {
+	var doc map[string]interface{}
+	if err := DecodeJSONUseNumber(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	caps := saved.Manifest["capabilities"].(map[string]interface{})
-	if _, ok := caps["bash"]; ok {
-		t.Fatalf("saved preset still contains legacy bash key: %s", data)
-	}
-	if got := caps["shell"].(map[string]interface{})["yolo"]; got != true {
-		t.Fatalf("saved shell config lost yolo value: %#v", caps["shell"])
+	if len(doc) != 3 || doc["llm"] == nil || doc["manifest"] != nil {
+		t.Fatalf("noncanonical preset output: %s", data)
 	}
 }
 
+// Conflicting legacy tool declarations are irrelevant to the LLM-only view;
+// the standalone CanonicalizeCapabilities conflict oracle above remains intact.
 func TestListFailsClosedOnConflictingCapabilities(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := filepath.Join(home, ".lingtai-tui", "presets", "saved", "conflict.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(SavedDir(), "conflict.json")
+	if err := os.MkdirAll(SavedDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"name":"conflict","description":{"summary":"conflict"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"yolo":true},"shell":{"yolo":false}}}}`
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	input := []byte(`{"name":"conflict","description":{"summary":"conflict"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"yolo":true},"shell":{"yolo":false}}}}`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := List(); err == nil || !strings.Contains(err.Error(), "bash") || !strings.Contains(err.Error(), "shell") {
-		t.Fatalf("List conflict error = %v, want explicit bash/shell error", err)
+	listed, err := List()
+	if err != nil || len(listed) != 1 || len(listed[0].Manifest) != 1 {
+		t.Fatalf("legacy LLM read: %#v err=%v", listed, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(input) {
+		t.Fatal("ordinary list changed legacy bytes")
 	}
 }
 
@@ -126,107 +127,86 @@ func TestGenerateInitJSONWritesCanonicalShellCapability(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
-	globalDir := filepath.Join(tmp, "global")
-	if err := fixtureGenerateInitJSONWithOpts(t, legacyShellPreset("legacy-init"), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
-		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
+	if err := fixtureGenerateInitJSONWithOpts(t, legacyShellPreset("legacy-init"), "alice", "alice", lingtaiDir, filepath.Join(tmp, "global"), DefaultAgentOpts()); err != nil {
+		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]interface{}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	caps := doc["manifest"].(map[string]interface{})["capabilities"].(map[string]interface{})
-	if _, ok := caps["bash"]; ok {
-		t.Fatalf("generated init.json still contains legacy bash key: %s", data)
-	}
-	if got := caps["shell"].(map[string]interface{})["metadata"].(map[string]interface{})["source"]; got != "user" {
-		t.Fatalf("generated init.json lost shell configuration: %#v", caps["shell"])
+	// Fresh init tools come from the kernel, not the selected legacy preset.
+	if strings.Contains(string(data), `"source": "user"`) {
+		t.Fatalf("preset tools leaked into fresh init: %s", data)
 	}
 }
 
 func TestLoadCanonicalizesLegacyCapabilities(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := filepath.Join(home, ".lingtai-tui", "presets", "saved", "legacy-load.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(SavedDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(legacyShellPreset("legacy-load"))
-	if err != nil {
+	path := filepath.Join(SavedDir(), "legacy-load.json")
+	input := []byte(`{"name":"legacy-load","description":{"summary":"legacy"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"metadata":{"source":"user"}}}}}`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	loaded, err := Load("legacy-load")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	if err != nil || len(loaded.Manifest) != 1 || loaded.Manifest["llm"] == nil {
+		t.Fatalf("legacy load exposed tools: %#v err=%v", loaded, err)
 	}
-	caps := loaded.Manifest["capabilities"].(map[string]interface{})
-	if _, ok := caps["bash"]; ok {
-		t.Fatalf("loaded preset still contains legacy bash key: %#v", caps)
-	}
-	if got := caps["shell"].(map[string]interface{})["metadata"].(map[string]interface{})["source"]; got != "user" {
-		t.Fatalf("loaded shell config lost metadata: %#v", caps["shell"])
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(input) {
+		t.Fatal("ordinary load changed legacy bytes")
 	}
 }
 
 func TestLoadSaveAndGeneratePreserveLargeLegacyCapabilityNumber(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := filepath.Join(home, ".lingtai-tui", "presets", "saved", "legacy-number.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(SavedDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"name":"legacy-number","description":{"summary":"large number"},"manifest":{"llm":{"provider":"openai","model":"test"},"capabilities":{"bash":{"tenant_id":9007199254740993}}}}`
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	path := filepath.Join(SavedDir(), "legacy-number.json")
+	input := []byte(`{"name":"legacy-number","description":{"summary":"large number"},"manifest":{"llm":{"provider":"openai","model":"test","route_id":9007199254740993},"capabilities":{"bash":{"tenant_id":9007199254740993}}}}`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
 		t.Fatal(err)
 	}
-
 	loaded, err := Load("legacy-number")
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-	caps := loaded.Manifest["capabilities"].(map[string]interface{})
-	shell := caps["shell"].(map[string]interface{})
-	if got := shell["tenant_id"].(json.Number); got != json.Number("9007199254740993") {
-		t.Fatalf("loaded tenant_id = %q, want exact token 9007199254740993", got)
+	if got := loaded.Manifest["llm"].(map[string]interface{})["route_id"]; got != json.Number("9007199254740993") {
+		t.Fatalf("loaded route_id lost precision: %v", got)
 	}
-
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(input) {
+		t.Fatal("ordinary load changed legacy number bytes")
+	}
 	if err := Save(loaded); err != nil {
-		t.Fatalf("Save: %v", err)
+		t.Fatal(err)
 	}
-	savedData, err := os.ReadFile(filepath.Join(home, ".lingtai-tui", "presets", "saved", "legacy-number.json"))
+	savedData, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var saved Preset
 	if err := DecodeJSONUseNumber(savedData, &saved); err != nil {
-		t.Fatalf("decode saved preset: %v", err)
+		t.Fatal(err)
 	}
-	savedShell := saved.Manifest["capabilities"].(map[string]interface{})["shell"].(map[string]interface{})
-	if got := savedShell["tenant_id"].(json.Number); got != json.Number("9007199254740993") {
-		t.Fatalf("saved tenant_id = %q, want exact token 9007199254740993", got)
+	if got := saved.Manifest["llm"].(map[string]interface{})["route_id"]; got != json.Number("9007199254740993") {
+		t.Fatalf("saved route_id lost precision: %v", got)
 	}
-
+	if strings.Contains(string(savedData), "tenant_id") || strings.Contains(string(savedData), "capabilities") {
+		t.Fatalf("save re-exported legacy tools: %s", savedData)
+	}
 	projectDir := t.TempDir()
 	if err := fixtureGenerateInitJSONWithOpts(t, loaded, "alice", "alice", filepath.Join(projectDir, ".lingtai"), filepath.Join(projectDir, "global"), DefaultAgentOpts()); err != nil {
-		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
+		t.Fatal(err)
 	}
 	initData, err := os.ReadFile(filepath.Join(projectDir, ".lingtai", "alice", "init.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var initDoc map[string]interface{}
-	if err := DecodeJSONUseNumber(initData, &initDoc); err != nil {
-		t.Fatalf("decode generated init.json: %v", err)
-	}
-	initShell := initDoc["manifest"].(map[string]interface{})["capabilities"].(map[string]interface{})["shell"].(map[string]interface{})
-	if got := initShell["tenant_id"].(json.Number); got != json.Number("9007199254740993") {
-		t.Fatalf("generated tenant_id = %q, want exact token 9007199254740993", got)
+	if strings.Contains(string(initData), "tenant_id") {
+		t.Fatalf("preset tool kwargs leaked into init: %s", initData)
 	}
 }

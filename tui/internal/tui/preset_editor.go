@@ -64,12 +64,8 @@ const (
 	feSave
 )
 
-// editorFieldOrder is the rendering order of fields. The cursor walks
-// this slice; section headers render between transitions. Capabilities
-// are not cursor-navigable or editable fields — every capability the
-// kernel can grant an agent is always included, and the Capabilities
-// section renders as a fixed informational list below (see formRows'
-// capabilityRows), not as form rows.
+// editorFieldOrder contains only LLM route and preset metadata fields.
+// Tools and external MCP configuration belong to the agent, not this form.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feServiceTier, feCodexCredits, feThinking, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
@@ -212,8 +208,8 @@ type PresetEditorModel struct {
 	original preset.Preset // pristine copy for dirty diff + cancel
 	working  preset.Preset // mutates as user edits
 
-	// isBuiltin is set by the host. When true, semantic edits (llm.*
-	// or capabilities.*) trigger a clone-first prompt on save so the
+	// isBuiltin is set by the host. When true, semantic LLM edits
+	// trigger a clone-first prompt on save so the
 	// upstream built-in stays pristine and TUI upgrades can refresh it.
 	isBuiltin bool
 
@@ -302,13 +298,6 @@ func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]
 // callers that want to override built-in protection (e.g. tests, or
 // a future "fork built-in" flow that has already cloned upstream).
 func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, globalDir string, isBuiltin bool) PresetEditorModel {
-	// Normalize legacy capability aliases before cloning so the form and its
-	// eventual write path expose only the canonical shell key. Conflicts are
-	// retained for Validate/commit to reject, but the error is visible now.
-	normalizationErr := ""
-	if err := p.NormalizeLegacyCapabilities(); err != nil {
-		normalizationErr = err.Error()
-	}
 	// Inline editor uses textarea — paste from the system clipboard
 	// works reliably (textinput drops chars on multi-byte pastes).
 	// We render only one row; updateInline intercepts Enter and the
@@ -353,7 +342,6 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		existingKeys:   existingKeys,
 		globalDir:      globalDir,
 		apiKey:         apiKey,
-		saveErr:        normalizationErr,
 		codexModels:    config.DefaultCodexModelOptions(),
 	}
 }
@@ -1258,11 +1246,6 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	// differs from the template's name), respect that name. Otherwise
 	// gap-fill the next "<template>-N" slot.
 	committed := clonePresetForEditor(m.working)
-	// Kernel core capabilities (knowledge, skills, shell, avatar, daemon,
-	// mcp, file group) are floor-injected by apply_core_defaults at
-	// runtime, so we deliberately do NOT stamp them into the saved
-	// manifest. That keeps preset JSON minimal and avoids implying these
-	// are ordinary opt-ins.
 	if m.isBuiltin && (m.hasSemanticEdits() || m.apiKeySet) {
 		if committed.Name == m.original.Name {
 			existing, _ := preset.List()
@@ -1615,26 +1598,6 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
-	// Capabilities — every tool/subsystem the runtime can grant an agent,
-	// including web_search and vision. All of them are always included:
-	// there is no separate editable-capability concept, no checkbox, and
-	// no provider control on this page that can remove or change one.
-	// Customizing what an agent can do is done outside the preset editor
-	// by asking the agent to explain init.json and hand-editing it there
-	// (capabilitiesGuidanceRow below).
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
-	capabilityRows := []string{
-		"email", "psyche", "system",
-		"knowledge", "skills", "shell",
-		"avatar", "daemon", "mcp", "file",
-		"web_search", "vision",
-	}
-	for _, capName := range capabilityRows {
-		rows = append(rows, plain(m.mandatoryCapRow(capName, width-4)))
-	}
-	rows = append(rows, plain(""))
-	rows = append(rows, plain(m.capabilitiesGuidanceRow(width-4)))
-	rows = append(rows, plain(""))
 	rows = append(rows, row(feSave, m.renderSaveButton()))
 	return rows
 }
@@ -1700,32 +1663,6 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 		value = truncate(value, width-lipgloss.Width(marker)-presetEditorFieldLabelWidth)
 	}
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
-}
-
-// mandatoryCapRow renders one capability row in the Capabilities section:
-// a fixed, always-checked "[✓] name  description" line. Every capability
-// listed in formRows' capabilityRows renders this way — there is no
-// toggleable or provider-cyclable variant anymore; the row is purely
-// informational.
-func (m PresetEditorModel) mandatoryCapRow(name string, width int) string {
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	check := subtle.Render("[✓]")
-	keyCol := subtle.Render(lipgloss.NewStyle().Width(15).Render(name))
-	desc := i18n.T("firstrun.cap_desc." + name)
-	desc = strings.ReplaceAll(desc, "\n", "  ")
-	desc = truncate(desc, width-21)
-	val := subtle.Render(desc)
-	return "  " + check + " " + keyCol + val
-}
-
-// capabilitiesGuidanceRow renders the one-line explanation of how to
-// customize an agent's capabilities now that this page offers no
-// checkbox or provider control that can remove or change one: ask the
-// agent to explain init.json, then hand-edit init.json directly.
-func (m PresetEditorModel) capabilitiesGuidanceRow(width int) string {
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
-	text := truncate(i18n.T("preset_editor.capabilities_guidance"), width)
-	return "  " + subtle.Render(text)
 }
 
 // modelRadioStrip renders the model field as a horizontal radio strip

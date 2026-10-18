@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +78,7 @@ type SettingsModel struct {
 	editing      bool
 	width        int
 	height       int
+	saveErr      error // Agent-language refusal or truthful partial write outcome
 }
 
 func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUIConfig) SettingsModel {
@@ -160,7 +163,7 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		if data, err := os.ReadFile(initPath); err == nil {
 			var initData map[string]interface{}
 			if err := json.Unmarshal(data, &initData); err == nil {
-				if m, ok := initData["manifest"].(map[string]interface{}); ok {
+				if m, err := fs.ProjectInitManifest(initData); err == nil {
 					if l, ok := m["language"].(string); ok {
 						for i, lang := range agentLangOptions {
 							if lang == l {
@@ -275,16 +278,28 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			if m.cursor < localStart {
 				f := &m.fields[m.cursor]
 				if f.Current > 0 {
+					previous := f.Current
 					f.Current--
-					return m, m.applyField(f)
+					cmd := m.applyField(f)
+					if f.Key == "agent_lang" && m.saveErr != nil {
+						f.Current = previous
+						m.reloadAgentLanguage(f)
+					}
+					return m, cmd
 				}
 			}
 		case "right":
 			if m.cursor < localStart {
 				f := &m.fields[m.cursor]
 				if f.Current < len(f.Options)-1 {
+					previous := f.Current
 					f.Current++
-					return m, m.applyField(f)
+					cmd := m.applyField(f)
+					if f.Key == "agent_lang" && m.saveErr != nil {
+						f.Current = previous
+						m.reloadAgentLanguage(f)
+					}
+					return m, cmd
 				}
 			}
 		}
@@ -318,7 +333,7 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		m.tuiConfig.Theme = val
 		SetThemeByName(val)
 	case "agent_lang":
-		m.saveAgentLang(val)
+		m.saveErr = m.saveAgentLang(val)
 		return nil // don't save TUI config — this writes to init.json
 	}
 	config.SaveTUIConfig(m.globalDir, m.tuiConfig)
@@ -378,6 +393,15 @@ func (m *SettingsModel) saveAgentName() {
 			delete(init, "procedures_file")
 			if manifest, ok := init["manifest"].(map[string]interface{}); ok {
 				manifest["agent_name"] = m.agentName
+			} else if _, canonical := init["llm"].(map[string]interface{}); canonical {
+				agent, _ := init["agent"].(map[string]interface{})
+				if agent == nil {
+					agent = map[string]interface{}{}
+					init["agent"] = agent
+				}
+				agent["name"] = m.agentName
+			} else {
+				return
 			}
 			if out, err := json.MarshalIndent(init, "", "  "); err == nil {
 				fs.WriteFileAtomic(initPath, out, 0o644)
@@ -386,30 +410,156 @@ func (m *SettingsModel) saveAgentName() {
 	}
 }
 
-func (m *SettingsModel) saveAgentLang(lang string) {
-	if m.orchDir == "" {
+// AgentLanguageSaveError reports independent owner writes, not a transaction.
+// PsycheWritten means the preceding covenant write completed; no rollback occurs.
+type AgentLanguageSaveError struct {
+	PsycheWritten bool
+	Cause         error
+}
+
+func (e *AgentLanguageSaveError) Error() string {
+	if e.PsycheWritten {
+		return fmt.Sprintf("agent language not saved; Psyche covenant was written (no rollback): %v", e.Cause)
+	}
+	return fmt.Sprintf("agent language not saved: %v", e.Cause)
+}
+func (e *AgentLanguageSaveError) Unwrap() error { return e.Cause }
+
+func (m *SettingsModel) reloadAgentLanguage(f *SettingField) {
+	data, err := os.ReadFile(filepath.Join(m.orchDir, "init.json"))
+	if err != nil {
 		return
+	}
+	var root map[string]interface{}
+	if preset.DecodeJSONUseNumber(data, &root) != nil {
+		return
+	}
+	manifest, err := fs.ProjectInitManifest(root)
+	if err != nil {
+		return
+	}
+	for i, lang := range f.Options {
+		if manifest["language"] == lang {
+			f.Current = i
+			return
+		}
+	}
+}
+
+func (m *SettingsModel) saveAgentLang(lang string) error {
+	psycheWritten := false
+	fail := func(err error) error { return &AgentLanguageSaveError{PsycheWritten: psycheWritten, Cause: err} }
+	if m.orchDir == "" {
+		return fail(fmt.Errorf("no agent directory"))
 	}
 	initPath := filepath.Join(m.orchDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return
+		return fail(err)
 	}
 	var initData map[string]interface{}
 	if err := preset.DecodeJSONUseNumber(data, &initData); err != nil {
-		return
+		return fail(err)
 	}
 	delete(initData, "principle_file")
 	delete(initData, "procedures_file")
 	if manifest, ok := initData["manifest"].(map[string]interface{}); ok {
 		manifest["language"] = lang
+		// Explicit writes to legacy documents retain the old owner shape.
+		initData["covenant_file"] = preset.CovenantPath(m.globalDir, lang)
+		delete(initData, "covenant")
+		delete(initData, "principle")
+	} else if _, canonical := initData["llm"].(map[string]interface{}); canonical {
+		if err := saveSettingsCovenant(m.orchDir, preset.CovenantPath(m.globalDir, lang)); err != nil {
+			return fail(err)
+		}
+		psycheWritten = true
+		agent, _ := initData["agent"].(map[string]interface{})
+		if agent == nil {
+			agent = map[string]interface{}{}
+			initData["agent"] = agent
+		}
+		agent["language"] = lang
+	} else {
+		return fail(fmt.Errorf("unsupported init owner shape"))
 	}
-	initData["covenant_file"] = preset.CovenantPath(m.globalDir, lang)
-	delete(initData, "covenant")
-	delete(initData, "principle")
-	if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
-		fs.WriteFileAtomic(initPath, out, 0o644)
+	out, err := json.MarshalIndent(initData, "", "  ")
+	if err != nil {
+		return fail(err)
 	}
+	if err := fs.WriteFileAtomic(initPath, out, 0o644); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// saveSettingsCovenant writes the explicit field in the closed Psyche v1
+// owner. A later init write failure may leave this preceding authorized write;
+// there is no transaction, automatic repair or rollback across owner files.
+func saveSettingsCovenant(agentDir, covenantFile string) error {
+	path := filepath.Join(agentDir, "settings", "psyche.json")
+	owner := map[string]interface{}{"schema_version": json.Number("1")}
+	data, err := readSettingsPsycheOwner(path)
+	if err == nil {
+		owner = map[string]interface{}{}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			return fmt.Errorf("invalid Psyche settings")
+		}
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return fmt.Errorf("invalid Psyche settings")
+			}
+			key, ok := token.(string)
+			if !ok {
+				return fmt.Errorf("invalid Psyche settings")
+			}
+			if _, duplicate := owner[key]; duplicate {
+				return fmt.Errorf("duplicate Psyche field")
+			}
+			var value interface{}
+			if decoder.Decode(&value) != nil {
+				return fmt.Errorf("invalid Psyche settings")
+			}
+			owner[key] = value
+		}
+		if _, err := decoder.Token(); err != nil {
+			return fmt.Errorf("invalid Psyche settings")
+		}
+		var trailing interface{}
+		if decoder.Decode(&trailing) != io.EOF {
+			return fmt.Errorf("invalid Psyche settings")
+		}
+		if version, ok := owner["schema_version"].(json.Number); !ok || version.String() != "1" {
+			return fmt.Errorf("unsupported Psyche settings")
+		}
+		for key, value := range owner {
+			switch key {
+			case "schema_version":
+			case "base_prompt", "base_prompt_file", "covenant", "covenant_file":
+				if _, ok := value.(string); !ok {
+					return fmt.Errorf("invalid Psyche field")
+				}
+			default:
+				return fmt.Errorf("unknown Psyche field")
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	owner["covenant_file"] = covenantFile
+	delete(owner, "covenant")
+	out, err := json.MarshalIndent(owner, "", "  ")
+	if err != nil || len(out) > 65536 {
+		return fmt.Errorf("invalid Psyche settings")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return fs.WriteFileAtomic(path, append(out, '\n'), 0o644)
 }
 
 func (m SettingsModel) View() string {
@@ -509,6 +659,10 @@ func (m SettingsModel) View() string {
 			b.WriteString("  " + StyleFaint.Render(lf.hint))
 		}
 		b.WriteString("\n")
+	}
+
+	if m.saveErr != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ColorStuck).Render(m.saveErr.Error()) + "\n")
 	}
 
 	// Footer

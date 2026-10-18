@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/process"
 )
@@ -226,4 +228,116 @@ func TestProjectConfigurationInstalledSharedMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Canonical companion to the retained shared legacy matrix: real configure
+// changes only Core-owned model policy/explicit identity options, never copies
+// a model tool bundle or loses existing agent owners/large numeric tokens.
+func TestProjectConfigurationCanonicalModelSwitchPreservesOwners(t *testing.T) {
+	withTempPresets(t, func() {
+		root, global := t.TempDir(), t.TempDir()
+		lingtaiDir := filepath.Join(root, ".lingtai")
+		dir := filepath.Join(lingtaiDir, "orch")
+		if err := os.MkdirAll(filepath.Join(dir, "system"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		model := func(name string) Preset {
+			return Preset{Name: name, Source: SourceSaved, Description: PresetDescription{Summary: "canonical configure"}, Manifest: map[string]interface{}{"llm": map[string]interface{}{"provider": "openai", "model": name}}}
+		}
+		a, b := model("one"), model("two")
+		fixturePresetDocument(t, a)
+		fixturePresetDocument(t, b)
+		original := map[string]interface{}{
+			"agent": map[string]interface{}{"name": "Old", "language": "zh", "permissions": map[string]interface{}{"karma": true}},
+			"llm":   map[string]interface{}{"preset": map[string]interface{}{"active": RefFor(a), "default": RefFor(a), "allowed": []string{RefFor(a)}}},
+			"tools": map[string]interface{}{"shell": map[string]interface{}{"tenant": json.Number("9007199254740993123456789")}, "skills": map[string]interface{}{"paths": []string{"../library"}}, "vision": false},
+			"mcp":   map[string]interface{}{"custom": map[string]interface{}{"type": "stdio", "command": "echo", "args": []string{"keep"}}}, "plugins": []string{}, "host": map[string]interface{}{"venv_path": "custom/venv", "env_file": "custom.env"},
+		}
+		path := filepath.Join(dir, "init.json")
+		raw, _ := json.Marshal(original)
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		pad := filepath.Join(dir, "system", "pad.md")
+		if err := os.WriteFile(pad, []byte("durable Pad"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Management must use the supplied SDK while launch/inspection continue
+		// selecting this nonexistent canonical target host without relocation.
+		selected := process.ProjectPython(dir, fixtureProjectPython(t))
+		if filepath.Dir(filepath.Dir(selected)) != filepath.Join(dir, "custom", "venv") {
+			t.Fatal("canonical runtime host was relocated to management SDK")
+		}
+		if _, err := os.Stat(selected); !os.IsNotExist(err) {
+			t.Fatal("fixture target interpreter must be absent")
+		}
+		opts := DefaultAgentOpts()
+		if err := fixtureGenerateInitJSONWithOpts(t, b, "New", "orch", lingtaiDir, global, opts); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved map[string]interface{}
+		if DecodeJSONUseNumber(data, &saved) != nil {
+			t.Fatal("invalid saved canonical document")
+		}
+		for _, key := range []string{"tools", "mcp", "plugins", "host"} {
+			before, _ := json.Marshal(original[key])
+			after, _ := json.Marshal(saved[key])
+			if string(before) != string(after) {
+				t.Fatalf("model change altered %s", key)
+			}
+		}
+		llm, ok := saved["llm"].(map[string]interface{})
+		if !ok || len(llm) != 1 || llm["preset"] == nil || saved["manifest"] != nil || saved["addons"] != nil {
+			t.Fatal("new policy copied model or legacy owners")
+		}
+		def, allowed, err := SavedPresetPolicy(lingtaiDir, "orch")
+		if err != nil || def != RefFor(b) || len(allowed) != 1 || allowed[0] != RefFor(b) {
+			t.Fatal("post-save canonical policy unavailable")
+		}
+		if count, err := PropagatePresetPolicy(lingtaiDir, "orch", RefFor(b), []string{RefFor(b)}, fixtureProjectPython(t)); err != nil || count != 0 {
+			t.Fatalf("policy management reselected absent target host: count=%d err=%v", count, err)
+		}
+		unchanged, _ := os.ReadFile(path)
+		if string(unchanged) != string(data) {
+			t.Fatal("policy read rewrote init")
+		}
+		memory, _ := os.ReadFile(pad)
+		if string(memory) != "durable Pad" {
+			t.Fatal("model change reset memory")
+		}
+	})
+}
+
+// fixtureCoreConfiguration observes the public reader and Psyche owner, without
+// booting an Agent, publishing resolved state or reconstructing policy in Go.
+func fixtureCoreConfiguration(t *testing.T, dir string) map[string]interface{} {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	const script = `import json, sys
+from pathlib import Path
+from lingtai.init_reader import read_init, reader_callbacks, InitReadStatus
+from lingtai.agent import load_preset
+from lingtai.tools.psyche.settings import read_resolved_prompt_inputs
+root = Path(sys.argv[1])
+materialize, prepare = reader_callbacks(root, load_preset=load_preset)
+result = read_init(root, materialize=materialize, prepare=prepare)
+assert result.status is not InitReadStatus.READ_FAILED, result.to_payload()
+prompts = read_resolved_prompt_inputs(root)
+print(json.dumps({"llm": result.data["manifest"]["llm"], "covenant": prompts.covenant}))
+`
+	cmd := exec.CommandContext(ctx, fixtureProjectPython(t), "-c", script, dir)
+	data, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("installed Core reader: %v", err)
+	}
+	var result map[string]interface{}
+	if err := DecodeJSONUseNumber(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

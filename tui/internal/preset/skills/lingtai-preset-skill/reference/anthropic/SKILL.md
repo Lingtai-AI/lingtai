@@ -20,8 +20,7 @@ Use this child for the built-in `anthropic` template (display
 "Anthropic-compatible") and for any saved preset whose provider is
 `anthropic`. anthropicPreset in tui/internal/preset/preset.go ships provider
 `anthropic`, an empty model, `api_key_env` `ANTHROPIC_API_KEY`, and
-`base_url` null, with web_search on DuckDuckGo, vision inheriting the agent's
-own provider, and the skills default. It is an API-key route; the Claude Code
+`base_url` null. Tools and MCP are agent-owned, not part of this preset. It is an API-key route; the Claude Code
 CLI login is the separate `claude` preset (`reference/claude/SKILL.md`).
 
 ## Template-specific settings
@@ -71,5 +70,5 @@ Maintenance: If the relevant TUI preset/page is revised, check whether this sub-
 For save, endpoint/capability, availability, activation/refresh, or
 troubleshooting, use the five shared operation children under
 `reference/operations/`; this child owns the Anthropic-compatible family
-facts, so inspect the actual saved manifest for user-owned endpoint, model,
-credential, and capability facts.
+facts, so inspect the actual saved preset for user-owned endpoint, model,
+and credential-reference facts.

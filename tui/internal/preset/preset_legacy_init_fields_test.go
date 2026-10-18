@@ -12,6 +12,14 @@ func TestGenerateInitJSONFreshOmitsObsoletePromptFiles(t *testing.T) {
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, "global")
+	const defaultCovenant = "default Covenant fixture\n"
+	defaultPath := CovenantPath(globalDir, "en")
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultPath, []byte(defaultCovenant), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := fixtureGenerateInitJSON(t, codexPreset(), "fresh", "fresh", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
@@ -28,8 +36,19 @@ func TestGenerateInitJSONFreshOmitsObsoletePromptFiles(t *testing.T) {
 			t.Errorf("fresh generated init.json contains obsolete %q", key)
 		}
 	}
-	if covenant, ok := got["covenant_file"].(string); !ok || covenant == "" {
-		t.Errorf("fresh generated init.json missing supported covenant_file: %#v", got["covenant_file"])
+	if got["covenant_file"] != nil || got["manifest"] != nil {
+		t.Error("fresh canonical init must not copy legacy prompt owners")
+	}
+	// default_covenant_file was legacy metadata, not an active Psyche edit.
+	// Exact-base and canonical controls both resolve an empty Covenant here;
+	// a readable fallback file must not silently activate a new prompt owner.
+	dir := filepath.Join(lingtaiDir, "fresh")
+	if _, err := os.Lstat(filepath.Join(dir, "settings", "psyche.json")); !os.IsNotExist(err) {
+		t.Errorf("default metadata unexpectedly authored a Psyche owner: %v", err)
+	}
+	observed := fixtureCoreConfiguration(t, dir)
+	if covenant, _ := observed["covenant"].(string); covenant != "" {
+		t.Error("legacy default metadata unexpectedly activated a Covenant")
 	}
 }
 

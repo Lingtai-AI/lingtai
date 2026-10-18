@@ -235,7 +235,7 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 	}
 
 	// 1. Read orchestrator's active provider/model.
-	if active, err := readLLMConfig(orchDir); err == nil {
+	if active, err := readLLMConfig(orchDir, globalDir); err == nil {
 		m.activePreset = active.Provider
 		m.activeModel = active.Model
 	}

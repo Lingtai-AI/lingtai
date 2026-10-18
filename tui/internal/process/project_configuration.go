@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -219,4 +221,104 @@ func runProjectConfiguration(ctx context.Context, python, operation, status stri
 		return unknown()
 	}
 	return result, &ProjectConfigurationError{Result: result, Known: result.Outcome != "unknown"}
+}
+
+// InitInspection is Core's safe read-only identity and exact selected source.
+// It contains no endpoint, kwargs, credentials or effective document.
+type InitInspection struct {
+	Schema        string  `json:"schema"`
+	ReaderStatus  string  `json:"reader_status"`
+	ShapeDecision string  `json:"shape_decision"`
+	FailureStage  *string `json:"failure_stage"`
+	JSONPath      string  `json:"json_path,omitempty"`
+	NextStep      string  `json:"next_step,omitempty"`
+	Agent         *struct {
+		Name     *string `json:"name,omitempty"`
+		Language string  `json:"language,omitempty"`
+	} `json:"agent,omitempty"`
+	LLM *struct {
+		Provider    string      `json:"provider,omitempty"`
+		Model       string      `json:"model,omitempty"`
+		WireAPI     string      `json:"wire_api,omitempty"`
+		Thinking    interface{} `json:"thinking,omitempty"`
+		ServiceTier string      `json:"service_tier,omitempty"`
+	} `json:"llm,omitempty"`
+	LLMSource *struct {
+		Kind    string `json:"kind"`
+		Path    string `json:"path"`
+		Pointer string `json:"pointer"`
+	} `json:"llm_source,omitempty"`
+	Host *struct {
+		VenvPath string `json:"venv_path,omitempty"`
+		EnvFile  string `json:"env_file,omitempty"`
+	} `json:"host,omitempty"`
+}
+
+type InitInspectionError struct{ Known bool }
+
+func (e *InitInspectionError) Error() string {
+	if e.Known {
+		return "kernel init inspection refused configuration; inspect authored owner sections with the kernel reader"
+	}
+	return "kernel init inspection unknown/unavailable; an installed sibling CLI supporting inspect-init is required (no automatic install, retry or PATH fallback)"
+}
+
+// InspectInit uses exactly the caller's current agent-host/sibling installed CLI.
+// Unsupported/old CLIs remain typed unknown, never a Go materialization fallback.
+func InspectInit(ctx context.Context, python, agentDir string) (InitInspection, error) {
+	unknown := func() (InitInspection, error) { return InitInspection{}, &InitInspectionError{} }
+	if python == "" || !filepath.IsAbs(python) || agentDir == "" {
+		return unknown()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, kernelCLI(python), "inspect-init", "--agent-dir", agentDir)
+	cmd.WaitDelay = time.Second
+	stdout, stderr := boundedProjectOutput{limit: 65536}, boundedProjectOutput{limit: 4096}
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil || stdout.overflow || stderr.overflow || stderr.Len() != 0 {
+		return unknown()
+	}
+	var result InitInspection
+	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&result) != nil {
+		return unknown()
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(stdout.Bytes(), &fields) != nil {
+		return unknown()
+	}
+	for _, key := range []string{"schema", "reader_status", "shape_decision", "failure_stage", "next_step"} {
+		if _, present := fields[key]; !present {
+			return unknown()
+		}
+	}
+	var trailing interface{}
+	if decoder.Decode(&trailing) != io.EOF || result.Schema != "lingtai.init.inspection/v1" {
+		return unknown()
+	}
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 && result.ReaderStatus == "READ_FAILED" && result.FailureStage != nil && (result.ShapeDecision == "BLOCKED" || result.ShapeDecision == "UNKNOWN" || result.ShapeDecision == "PASS" || result.ShapeDecision == "NUDGE") {
+			return result, &InitInspectionError{Known: true}
+		}
+		return unknown()
+	}
+	if (result.ReaderStatus != "FULLY_EFFECTIVE" && result.ReaderStatus != "READ_OK_WITH_IGNORED_FIELDS") || (result.ShapeDecision != "PASS" && result.ShapeDecision != "NUDGE") || result.FailureStage != nil || result.LLM == nil || result.LLMSource == nil {
+		return unknown()
+	}
+	if result.LLM.Provider == "" || result.LLM.Model == "" {
+		return unknown()
+	}
+	source := result.LLMSource
+	if (source.Kind != "preset" && source.Kind != "init") || source.Path == "" || (source.Pointer != "/llm" && source.Pointer != "/manifest/llm") {
+		return unknown()
+	}
+	return result, nil
 }

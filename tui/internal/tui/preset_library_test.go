@@ -73,3 +73,17 @@ func TestPresetLibraryForwardsCodexPublicModelsMsgToEmbeddedEditor(t *testing.T)
 		t.Fatalf("editor.codexModels while unfocused = %#v, want untouched", updated.editor.codexModels)
 	}
 }
+
+func TestPresetLibraryPreviewIsLLMOnly(t *testing.T) {
+	p := testPresetEditorPreset() // includes legacy tools in its input
+	m := PresetLibraryModel{presets: []preset.Preset{p}, lang: "en"}
+	view := m.renderPreview(100, 40)
+	if !strings.Contains(view, "model") {
+		t.Fatalf("preview lost LLM settings: %s", view)
+	}
+	for _, forbidden := range []string{"Capabilities", "web_search", "vision", "shell"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("preview displayed init-owned inventory %q: %s", forbidden, view)
+		}
+	}
+}

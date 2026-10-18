@@ -234,3 +234,13 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 - **Provider derivation.** `DeriveLedgerProvider` uses endpoint host substring matching first, then model prefix fallback. Unknown endpoints surface the hostname so the UI still shows a breakdown.
 - **Location is cached for 1 hour and merged into the latest manifest.** `UpdateHumanLocation` holds one `Abs(Clean(manifestPath))` process mutex from the stale check through the ≤5-second resolve and final commit. The commit rereads a valid `.agent.json`, retains any newer fresh location, otherwise changes only the top-level `location` object (whose timestamp is nested `resolved_at`), and publishes through the package's cleaned unique sibling atomic replacement. `StoreResolvedHumanLocation` uses the same transaction without network I/O; missing or malformed manifests remain best-effort no-ops. Nirvana's final filesystem boundary calls `RemoveHumanManifestForReset` only after durable Mail drain: it waits for this same mutex, removes the location writer's commit target, releases the mutex, and only then recursively removes `.lingtai`, preventing late partial resurrection without holding the manifest lock across discovery, suspension, or `RemoveAll`.
 - **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.
+
+### Authored-init structural view
+
+`ProjectInitManifest` in `tui/internal/fs/agent.go` projects canonical
+agent/llm/tools/plugins into the existing presentation vocabulary once; legacy
+input stays a structural view. It never opens a preset or computes tool defaults.
+Raw reference policy does not expose a stale expanded inline LLM as effective.
+`ReadResolvedInitManifest` shares the existing schema/version/source/freshness
+gate with the library reader; a valid resolved absence remains authoritative.
+Ordinary reads never rewrite authored input.

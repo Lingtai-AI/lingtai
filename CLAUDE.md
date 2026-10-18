@@ -173,7 +173,7 @@ Per-machine analogue of `tui/internal/migrate/`. Same conventions (versioned, ap
 
 ### Preset architecture (`tui/internal/preset/`)
 
-Presets are atomic `{llm, capabilities}` bundles agents can swap into at runtime. The on-disk layout under `~/.lingtai-tui/presets/`:
+Presets are LLM-only `{name, description, llm}` configurations. Legacy manifest-wrapped presets remain readable without rewriting; explicit saves/clones never re-export tools. Tools and external MCP belong to the agent, not the model preset. The on-disk layout under `~/.lingtai-tui/presets/`:
 
 - **`templates/`** — TUI-owned. `RefreshTemplates()` rewrites this directory wholesale on every Bootstrap from embedded data, prunes retired entries. Users should never edit files here directly; an upgrade will erase their changes.
 - **`saved/`** — user-owned. `Save()` always writes here; Bootstrap never touches it. The wizard's auto-clone-on-edit lands new presets here as `<template>-<N>.json`.

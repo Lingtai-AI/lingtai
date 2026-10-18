@@ -24,6 +24,17 @@ purely from which directory a file was loaded from, and is never
 serialized. Two presets with byte-identical JSON but different directories
 are treated differently.
 
+## LLM-only authored envelope
+
+New saves, template output, exports and clones contain only
+`{name, description, llm}`. The LLM block retains route options and non-secret
+credential references (`api_key_env`, `codex_auth_path`); credentials themselves
+remain external. Legacy `{manifest:{llm,capabilities}}` files remain readable,
+and ordinary reads leave their bytes unchanged. Their tool inventories are not
+preset policy and are never re-exported by an explicit preset save or clone.
+The editor and library show only LLM settings. Tools belong to agent init/kernel;
+external MCP is separately selected and defaults to none, never all catalog entries.
+
 ## Load order — saved wins
 
 `Load(name)` looks in `saved/` first, then `templates/`. A saved preset with

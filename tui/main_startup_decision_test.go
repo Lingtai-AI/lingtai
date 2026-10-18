@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,9 +123,7 @@ func TestStartupDecisionFromWizardManifestCustomKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	const keyName = "PUFFO_ATTACH_QA_DEEPSEEK_KEY"
-	if err := os.WriteFile(filepath.Join(orchDir, "init.json"), []byte(`{"manifest":{"llm":{"provider":"deepseek","api_key_env":"PUFFO_ATTACH_QA_DEEPSEEK_KEY"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeStartupIdentityFixture(t, orchDir, "openai", "PUFFO_ATTACH_QA_DEEPSEEK_KEY")
 	if err := os.WriteFile(filepath.Join(orchDir, ".agent.json"), []byte(`{"admin":{"karma":true}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +137,11 @@ func TestStartupDecisionFromWizardManifestCustomKey(t *testing.T) {
 	if len(orchestrators) != 1 || orchestrators[0] != "qa" {
 		t.Fatalf("detected orchestrators = %v, want [qa]", orchestrators)
 	}
-	declared := config.ReadAgentAPIKeyEnv(filepath.Join(root, ".lingtai", orchestrators[0]))
+	declaredEnvs, _, inspectErr := tui.OrchestratorCredentials(filepath.Join(root, ".lingtai"), orchestrators, globalDir)
+	if inspectErr != nil || len(declaredEnvs) != 1 {
+		t.Fatalf("inspect credential source: %v", inspectErr)
+	}
+	declared := declaredEnvs[0]
 	if declared != keyName {
 		t.Fatalf("declared key = %q, want %q", declared, keyName)
 	}
@@ -166,7 +169,7 @@ func TestStartupDecisionFromManifestLoginProvider(t *testing.T) {
 		{provider: "claude_agent_sdk"},
 		{provider: "codex"},
 		{provider: "codex_oauth"},
-		{provider: "deepseek", wantRecovery: true},
+		{provider: "openai", wantRecovery: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.provider, func(t *testing.T) {
@@ -180,10 +183,7 @@ func TestStartupDecisionFromManifestLoginProvider(t *testing.T) {
 			if err := os.MkdirAll(globalDir, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			initJSON := `{"manifest":{"llm":{"provider":"` + tc.provider + `","api_key_env":""}}}`
-			if err := os.WriteFile(filepath.Join(orchDir, "init.json"), []byte(initJSON), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			writeStartupIdentityFixture(t, orchDir, tc.provider, "")
 			if err := os.WriteFile(filepath.Join(orchDir, ".agent.json"), []byte(`{"admin":{"karma":true}}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -191,7 +191,10 @@ func TestStartupDecisionFromManifestLoginProvider(t *testing.T) {
 				t.Fatal(err)
 			}
 			orchestrators := tui.DetectOrchestrators(lingtaiDir)
-			declared, login := tui.OrchestratorCredentials(lingtaiDir, orchestrators)
+			declared, login, inspectErr := tui.OrchestratorCredentials(lingtaiDir, orchestrators, globalDir)
+			if inspectErr != nil {
+				t.Fatal(inspectErr)
+			}
 			resolved, configOK := config.ResolveKeys(globalDir)
 			mirror, err := config.LoadConfigReadOnly(globalDir)
 			if err != nil {
@@ -203,5 +206,25 @@ func TestStartupDecisionFromManifestLoginProvider(t *testing.T) {
 					tc.provider, firstRun, recovery, degraded, tc.wantRecovery)
 			}
 		})
+	}
+}
+
+func writeStartupIdentityFixture(t *testing.T, dir, provider, keyEnv string) {
+	t.Helper()
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("explicit installed inspection host required")
+	}
+	env := filepath.Join(dir, "fixture.env")
+	if err := os.WriteFile(env, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]interface{}{"llm": map[string]interface{}{"provider": provider, "model": "fixture-model", "api_key_env": keyEnv}, "host": map[string]interface{}{"venv_path": filepath.Dir(filepath.Dir(python)), "env_file": env}}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "init.json"), data, 0600); err != nil {
+		t.Fatal(err)
 	}
 }

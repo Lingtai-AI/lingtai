@@ -1,277 +1,30 @@
-// =============================================================
-// LingTai Agent — init.json example
-// =============================================================
-// Copy this file to your agent's working directory as "init.json"
-// and REMOVE all comments (JSON does not allow comments).
-//
-// Secrets go in a .env file (see env_file below).
-// Example .env:
-//   OPENAI_API_KEY=your-api-key
-//   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-//   IMAP_PASSWORD=your-email-password
-// =============================================================
-
+// Authored init: tools belong to this Agent, never to an LLM preset.
+// Choose this inline LLM route OR {"preset":{"active":...,"default":...,"allowed":[...]}}.
+// Credentials stay external; host.env_file is required when using api_key_env.
 {
-  // Path to .env file for loading secrets as environment variables.
-  // Relative to the working directory.
-  "env_file": ".env",
-
-  "manifest": {
-    // Agent's true name (真名). Set once, never changes.
-    // Used for identification in multi-agent networks.
-    "agent_name": "my-agent",
-
-    // Language for tool descriptions and system prompt.
-    // "en" = English, "zh" = Chinese, "wen" = Classical Chinese (文言文)
-    "language": "en",
-
-    // -------------------------------------------------------
-    // LLM configuration
-    // -------------------------------------------------------
-    "llm": {
-      // Provider — exactly four families:
-      //   "openai"      any OpenAI-compatible endpoint (official OpenAI when
-      //                 base_url is omitted; any vendor, gateway, or local
-      //                 server via base_url)
-      //   "anthropic"   any Anthropic-compatible (Messages API) endpoint
-      //                 (official Anthropic when base_url is omitted)
-      //   "codex"       Codex / ChatGPT OAuth (one account)
-      //   "claude-code" the local Claude Code CLI login
-      // Other vendors and subscriptions: point "openai"/"anthropic" at that
-      // vendor's compatible base_url, or at an external pool (sub2api /
-      // subs-pool). Removed provider names (deepseek, zhipu/glm, mimo,
-      // minimax, openrouter, grok, qwen, kimi, gemini, kimi-code, custom,
-      // claude_code, codex-pool) fail validation with that pointer.
-      "provider": "openai",
-
-      // Model name as recognized by the provider's API.
-      "model": "gpt-5.5",
-
-      // API key — set to null and use api_key_env to read from environment (recommended).
-      // Never hardcode secrets here.
-      "api_key": null,
-
-      // Environment variable name that holds the API key.
-      // Resolved at startup from .env or system environment.
-      "api_key_env": "OPENAI_API_KEY",
-
-      // Base URL for the provider's API. Set to null (or omit) to use the
-      // official endpoint of the chosen family; set it to any compatible
-      // endpoint, e.g. "https://api.deepseek.com" or "http://127.0.0.1:8000/v1".
-      //
-      // "openai" only: "wire_api" selects "chat_completions" (default; the
-      // legacy "auto" means the same) or "responses" (always stateless
-      // full-history replay; never previous_response_id).
-      //
-      // Standard parameters (sent verbatim, no per-vendor mapping):
-      //   "thinking": none/minimal/low/medium/high/xhigh/max — every
-      //     provider. openai sends it as reasoning.effort (Responses) /
-      //     reasoning_effort (Chat Completions) and omits it when unset;
-      //     codex defaults to xhigh; anthropic maps it to a thinking budget;
-      //     claude-code maps it to --effort.
-      //   "service_tier": "fast" (sent as priority) or auto/default/flex/
-      //     priority — openai and codex only; any other value fails
-      //     validation.
-      // Retired keys "api_compat", "reasoning_effort_vocab", and
-      // "use_responses_api" are ignored.
-      // "wire_api": "responses",
-      // "thinking": "minimal",
-      // "service_tier": "fast",
-      "base_url": null
-    },
-
-    // -------------------------------------------------------
-    // Capabilities — the agent's tool surface
-    // -------------------------------------------------------
-    // Shape layers (kernel reader contract): new/canonical writes use
-    // `manifest.capabilities.shell`. For read-only compatibility, the reader
-    // accepts legacy `manifest.capabilities.bash` and maps it in memory to
-    // `manifest.capabilities.shell`; the kernel never writes `bash`.
-    // If both keys are present, differing values are a conflict (BLOCKED).
-    // Equal dual values are compatibility-only; effective memory keeps `shell`.
-    //
-    // The kernel reader owns this classification; these comments are informative
-    // shape guidance, not a migration registry or a runtime history file.
-    // The kernel boots the `lingtai.core.*` floor by default on every
-    // agent: knowledge, skills, shell, avatar, daemon, mcp, read, write,
-    // edit, glob, grep — plus the always-on intrinsics psyche and email.
-    // You do NOT need to list those here unless you want to OVERRIDE
-    // their default kwargs (e.g. give `shell` a deny-list policy file
-    // instead of the default yolo mode).
-    //
-    // Top-level "disable" (sibling of "capabilities") opts a capability
-    // out entirely: e.g. "disable": ["avatar"].
-    //
-    // Entries below are either:
-    //   1. Overrides for default-on capabilities (shell, skills here).
-    //   2. Opt-in capabilities not in the default set (vision, web_search).
-    // -------------------------------------------------------
-    "capabilities": {
-      // --- Shell access (override) ---
-      // Kernel default is { "yolo": true } (no deny-list). The TUI ships
-      // a deny-list at bash_policy.json so agents started via lingtai-tui
-      // get the sandboxed surface by default.
-      "shell": { "policy_file": "bash_policy.json" },
-
-      // --- Skills catalog (override) ---
-      // `skills` is default-on; this entry adds extra search paths to the
-      // prompt catalog. Defaults overlaid:
-      //   ../.library_shared       — network-shared skill shelf
-      //   ~/.lingtai-tui/utilities — TUI-shipped utility skills
-      // Edit and call system.refresh to apply. init.json is ground truth.
-      "skills": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] },
-
-      // --- Vision ---
-      // Omitted (or "provider": "inherit"): the agent's own provider family at
-      // its effective endpoint and key (openai, anthropic, codex; claude-code
-      // gets `claude -p` guidance). Explicit providers: "openai" (+ base_url,
-      // api_key_env, model, wire_api), "anthropic" (+ base_url, api_key_env,
-      // model), "codex" (+ model, token_path), "local" (OpenAI-compatible
-      // local server, no API key), "mlx" (on-device).
-      "vision": { "provider": "inherit" },
-
-      // --- Web search ---
-      // Engines: "duckduckgo" (no API key, default), "openai" / "anthropic"
-      // (only when this agent's own LLM provider is that family).
-      "web_search": { "provider": "duckduckgo" }
-
-      // --- Removed capabilities (for reference) ---
-      // "web_read"        — covered by `web_search` and its built-in `manual` action.
-      // "compose"/"video"/"draw"/"talk" — use the `media-creation` skill + an MCP server.
-      // "listen"          — use the `listen` skill (faster-whisper + librosa).
-    },
-
-    // -------------------------------------------------------
-    // Lifecycle limits
-    // -------------------------------------------------------
-
-    // Max context window tokens. null = use generic cap (1M tokens).
-    // Set this to cap memory usage or force earlier molt.
-    "context_limit": null,
-
-    // Per-wake loop budget: max iterations of the LLM/tool-call loop per
-    // wake cycle. Every tool call counts as a turn, not just LLM requests.
-    // Safety limit — agent sleeps once the budget is exhausted.
-    "max_turns": 500,
-
-    // Max LLM API requests per minute, gated at the adapter layer.
-    // Shared across all agents in the same TUI process that use the same
-    // (provider, base_url) — so a network of N agents cooperatively shares
-    // this cap instead of each hitting the provider independently. Set to
-    // 0 to disable gating. Default 60 is conservative; bump for paid
-    // high-tier providers, lower for free tiers.
-    "max_rpm": 60,
-
-    // Whether to serialize chat history into system/context.md mid-session.
-    // When true (default), every Nth idle flush rebuilds context.md and
-    // nukes the live wire chat — the serialized replay becomes the agent's
-    // memory of prior turns. When false, history stays on the wire until
-    // molt.
-    // The serializer strips inline <think>/<thought>/<thinking> reasoning
-    // tags emitted by OpenAI-compat providers, so serialization is safe
-    // regardless of adapter. Set to false only if you want wire-only
-    // history (e.g. to maximize the cacheable growing-prefix shape, trading
-    // off restart durability since context.md won't survive a crash).
-    "context_serialization_enabled": true,
-
-    // When context_serialization_enabled is true, number of idle flushes
-    // between context.md rebuild+nuke pairs. Each idle always appends new
-    // turns to chat_history.jsonl (cheap); only every Nth idle rebuilds
-    // context.md and wipes the live chat. Larger N = wire chat carries
-    // the tail across more idles, keeping Batch 3 of the system prompt
-    // byte-stable longer (higher prompt-cache hit rate) at the cost of a
-    // slightly larger wire chat between rebuilds. Default 3.
-    "context_rebuild_every_n_idles": 3,
-
-    // -------------------------------------------------------
-    // Pseudo-agent outbox subscriptions
-    // -------------------------------------------------------
-    // Paths (relative to this agent's working directory) of pseudo-agent
-    // folders whose outbox this agent polls. Pseudo-agents are mailbox-only
-    // entities — they have .agent.json but no running process (admin: null),
-    // so mail "from" them is written into their own outbox for subscribed
-    // real agents to pick up. The default polls the human folder so a
-    // human-typed message delivered via the TUI reaches the orchestrator.
-    // Polling is mechanical — the agent's LLM never sees this list.
-    "pseudo_agent_subscriptions": ["../human"],
-
-    // -------------------------------------------------------
-    // Admin privileges
-    // -------------------------------------------------------
-    // karma: allows lull (sleep other), interrupt, suspend actions.
-    // nirvana: allows permanent destruction of other agents.
-    // Avatars always get {} (no privileges) regardless of parent.
-    "admin": { "karma": true, "nirvana": false },
-
-    // Whether to use streaming for LLM responses.
-    "streaming": false
-  },
-
-  // =============================================================
-  // Addons — curated MCP server integrations
-  // =============================================================
-  // Curated addons are MCP servers bundled in the `lingtai` wheel under
-  // `lingtai.mcp_servers.*`. The TUI installs that wheel in its local runtime
-  // venv and wires the selected addons up in two halves:
-  //
-  // 1. The `addons:` list below — names of curated MCPs the agent
-  //    should "register" on boot. The kernel's `mcp` capability looks
-  //    each name up in its catalog and decompresses the record into
-  //    <agent>/mcp_registry.jsonl (idempotent, append-only).
-  //
-  // 2. The `mcp:` activation map below — for each registered MCP,
-  //    the subprocess spec (which Python interpreter, which module,
-  //    which env vars). Activation is gated by registry membership,
-  //    so a name in `mcp:` without a matching `addons:` entry would
-  //    be skipped with a warning.
-  //
-  // Default for new agents (auto-populated by the TUI wizard):
-  //
-  //   "addons": ["imap", "telegram", "feishu", "wechat", "whatsapp"],
-  //   "mcp": {
-  //     "imap":     { "type": "stdio", "command": "<venv>/bin/python",
-  //                   "args": ["-m", "lingtai.mcp_servers.imap"],
-  //                   "env": { "LINGTAI_IMAP_CONFIG": ".secrets/imap.json" } },
-  //     "telegram": { ... }, "feishu": { ... }, "wechat": { ... },
-  //     "whatsapp": { ... }
-  //   }
-  //
-  // The `command` always points at the local venv Python where the `lingtai`
-  // wheel installed its bundled MCP modules — no remote fetch at runtime.
-  //
-  // Per-MCP secrets live in <agent>/.secrets/<name>.json — plaintext JSON
-  // (no *_env indirection in the new MCP shape). Each MCP's README
-  // documents the schema; setup skills are available via the agent's
-  // library tool. Canonical contract spec: lingtai-kernel-anatomy skill,
-  // reference/mcp-protocol.md.
-
-  // =============================================================
-  // Agent personality & initial state
-  // =============================================================
-  // Each field accepts inline text OR a file path via the _file variant.
-  // Examples:
-  //   "covenant": "You are a helpful assistant."     ← inline
-  //   "covenant_file": "covenant.md"                 ← reads from file
-  // If both are present, the file takes precedence.
-
-  // Principle is kernel-owned prompt content and is not configured here.
-
-  // Covenant — protected prompt section the agent cannot modify.
-  // Core behavioral rules that persist across molts.
-  "covenant": "You are a helpful assistant.",
-  // Or use a file: "covenant_file": "covenant.md"
-
-  // Procedures prompt content is managed by the TUI as system/procedures.md;
-  // init.json procedures/procedures_file overrides are no longer honored by the kernel.
-
-  // Initial pad — pre-loaded into system/pad.md.
-  // The agent can edit this via the eigen intrinsic.
-  "pad": ""
-  // Or use a file: "pad_file": "pad.md"
-
-  // Character / 灵台 is NOT seeded here. It is durable state the agent owns
-  // and authors for itself after creation — managed via system/lingtai.md
-  // (psyche), not written into init.json by the TUI. There is no seed field
-  // for it in this file; omitting it lets the agent start with an empty
-  // character and write its own.
+  "agent": {"name": null, "language": "en", "permissions": {},
+            "time_awareness": true, "timezone_awareness": true},
+  "llm": {"provider": "openai", "model": "gpt-4o"},
+  // Omitted / {} enables every shipped selectable builtin. Per-tool kwargs
+  // override setup. false explicitly disables an ordinary builtin. Mandatory
+  // Core and notification remain available. No external MCP/account activates.
+  "tools": {},
+  // Optional Core owner configs inside tools (not selectable capabilities):
+  // "email": {"pseudo_agent_subscriptions": ["../human"]}
+  // "context": {"summarize_notification_threshold": 3000}
+  // Use tools.skills.paths for additional skill roots; plugins declares packages.
+  // Desired MCPs ONLY. Curated names derive shipped metadata automatically;
+  // plugin names derive package metadata; third-party entries supply type +
+  // command/args or url, and external env/account references as appropriate.
+  "mcp": {},
+  "plugins": []
+  // Optional: "host": {"venv_path": "...", "env_file": "..."}
+  // System policy: settings/system.json and env. Psyche: settings/psyche.json.
+  // Durable memory: system/pad.md; do not embed live Pad/Character here.
 }
+// Preset files: {"name":"main","description":{"summary":"main"},"llm":{...}}.
+// Old manifest/preset-capabilities/addons/pad/pad_file/lingtai inputs remain
+// readable where previously supported, without read-time rewriting. Preset
+// capabilities never choose tools, including legacy presets. Mixed canonical
+// and legacy owner sections fail: explicitly convert with effective comparison.
+// Canonical mcp plus a nonempty old mcp/servers.json also requires conversion.

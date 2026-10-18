@@ -39,10 +39,14 @@ func TestGenerateInitJSONOmitsMoltPrompt(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	manifest, ok := got["manifest"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("manifest not a dict: %T", got["manifest"])
+	manifest, ok := got["agent"].(map[string]interface{})
+	if !ok || got["manifest"] != nil {
+		t.Fatal("missing canonical agent or legacy owner exported")
 	}
+	if _, present := got["molt_prompt"]; present {
+		t.Fatal("retired field exported at root")
+	}
+
 	if _, present := manifest["molt_prompt"]; present {
 		t.Fatal("manifest.molt_prompt must not be written — the kernel no longer accepts a configurable molt_prompt (Jason #4140)")
 	}

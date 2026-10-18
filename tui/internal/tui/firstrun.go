@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -110,9 +109,8 @@ const (
 
 // stepProgress returns the 1-based index and total for progress display:
 // library • presets-config • details. Templates always exist after
-// Bootstrap, so there is no separate API-key step; capabilities live in the
-// preset (edited via the preset editor) and addons default to all-on, so
-// there is no capabilities step either.
+// Bootstrap, so there is no separate API-key step. Presets configure only
+// the LLM; external MCP selection is an independent explicit agent setting.
 //
 // The 2026-04-30 redesign added stepAgentPresets between the library
 // pick-list and the runtime page: the pick-list is now a pure library
@@ -298,7 +296,7 @@ type FirstRunModel struct {
 	presetDefaultIdx int
 	presetCfgCursor  int    // cursor on the agent-preset-config page (row index)
 	presetCfgMessage string // transient validation flash (e.g. "default cannot be unallowed")
-	// Addon selection state: every known addon defaults on (setup mode
+	// Addon selection state: every known addon defaults off (setup mode
 	// preserves the agent's existing list); see enterAgentDetails.
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
@@ -624,12 +622,9 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	// "Keep current preset" (cursor == -1) in the preset picker, downstream code reads
 	// this synthetic preset via currentPreset() instead of indexing m.presets[-1].
 	//
-	// Shape: init.json has the runtime config under a top-level "manifest" key
-	// (with addons sitting alongside at the top level). Preset.Manifest is the
-	// inner shape — every consumer does p.Manifest["language"], ["llm"],
-	// ["capabilities"], etc. — so we extract the inner manifest dict.
-	// Stash the outer dict separately so enterAgentNameDir can read fields
-	// like covenant_file that lives at top level.
+	// Extract a structural agent/options view once, and keep the authored root
+	// separately. The synthetic model preset contains LLM only; it cannot own
+	// tools, permissions, MCP or memory, and its sentinel is never a reference.
 	if orchDir != "" {
 		initPath := filepath.Join(orchDir, "init.json")
 		if data, err := os.ReadFile(initPath); err == nil {
@@ -655,23 +650,28 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 						m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
 					}
 				}
-				inner, _ := existing["manifest"].(map[string]interface{})
-				if inner == nil {
-					// Defensive: malformed or pre-wrapper init.json — fall back to
-					// treating the whole file as the inner manifest.
-					inner = existing
+				// Old addons is the explicit selection even when empty: legacy mcp
+				// maps could contain catalog seeds, not activation. Canonical
+				// documents omit addons and declare only the selected MCP specs.
+				_, hasLegacySelection := existing["addons"]
+				if declared, ok := existing["mcp"].(map[string]interface{}); ok && !hasLegacySelection {
+					m.setupLoadedAddonNames = nil
+					for name, spec := range declared {
+						if spec != nil && spec != false && config.ValidateAddonKey(name) == nil {
+							m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
+						}
+					}
 				}
+				inner, _ := fs.ProjectInitManifest(existing)
 				if agentName, _ := inner["agent_name"].(string); agentName != "" {
 					m.setupOrchName = agentName
 				}
 				keepPreset := preset.Preset{
 					Name:        "keep_current",
 					Description: preset.PresetDescription{Summary: i18n.T("setup.keep_current_preset")},
-					Manifest:    inner,
+					Manifest:    map[string]interface{}{"llm": inner["llm"]},
 				}
-				if err := keepPreset.NormalizeLegacyCapabilities(); err != nil {
-					m.message = fmt.Sprintf("cannot load current shell capability configuration: %v", err)
-				}
+				// Tool compatibility/validation belongs to the unchanged init/Core reader.
 				m.setupKeepPreset = keepPreset
 				m.setupKeepInitJSON = existing
 			}
@@ -901,8 +901,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// The user advances explicitly with Enter when they're ready —
 		// editing is no longer an implicit advance.
 		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
-		// Sync capability api_key_env to match the LLM's stamped env var.
-		preset.SyncCapabilityAPIKeyEnv(toSave.Manifest)
 		// (No "one-codex" enforcement — multiple codex presets are
 		// allowed by design, each pinning a different model. The
 		// credential is shared via codex-auth.json.)
@@ -1941,6 +1939,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, m.focusAgentField()
 				}
 				m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
+				if m.fieldIdx >= 3 && m.fieldIdx <= 5 {
+					m.fieldIdx = 6
+				}
 				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 2
 				}
@@ -1951,6 +1952,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, m.focusAgentField()
 				}
 				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
+				if m.fieldIdx >= 3 && m.fieldIdx <= 5 {
+					m.fieldIdx = 2
+				}
 				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 0
 				}
@@ -1996,6 +2000,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// accidental submits while typing in numeric fields.
 				if m.fieldIdx >= 0 && m.fieldIdx < agentNameDirBackIdx {
 					m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
+					if m.fieldIdx >= 3 && m.fieldIdx <= 5 {
+						m.fieldIdx = 6
+					}
 					if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 {
 						m.fieldIdx = 2
 					}
@@ -2300,16 +2307,10 @@ func (m FirstRunModel) View() string {
 			if needsCredential {
 				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
 			}
-			// Tier + vision chips render between name and summary. Tier
-			// only when set; vision only for presets with the capability.
-			// Capabilities are otherwise uniform across builtins, so
-			// surfacing vision is the one distinction worth highlighting.
+			// Preset metadata describes only the model route.
 			var meta string
 			if label := tierLabel(p.Description.Tier, i18n.Lang()); label != "" {
 				meta += "  " + tierChipStyle(p.Description.Tier).Render(label)
-			}
-			if presetHasVision(p) {
-				meta += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(i18n.T("preset.vision_chip"))
 			}
 			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + meta + desc + "\n")
@@ -2593,23 +2594,8 @@ func (m FirstRunModel) View() string {
 		langVal := langs[m.agentLangIdx]
 		b.WriteString(cur(2) + i18n.T("firstrun.language") + ": " + renderToggle(langVal, m.fieldIdx == 2) + "\n")
 
-		// ── Runtime ──
-		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_runtime")+" ──") + "\n")
-		type numField struct {
-			idx   int
-			label string
-			hint  string
-			view  string
-		}
-		numFields := []numField{
-			{3, i18n.T("firstrun.context_limit"), i18n.T("firstrun.context_limit_hint"), m.ctxLimitInput.View()},
-			{4, i18n.T("firstrun.max_rpm"), i18n.T("firstrun.max_rpm_hint"), m.maxRpmInput.View()},
-			{5, i18n.T("firstrun.max_aed_attempts"), i18n.T("firstrun.max_aed_attempts_hint"), m.maxAedInput.View()},
-		}
-		for _, nf := range numFields {
-			hint := StyleFaint.Render(" (" + nf.hint + ")")
-			b.WriteString(cur(nf.idx) + nf.label + ": " + nf.view + hint + "\n")
-		}
+		// System owns runtime policy; don't present ignored init/preset controls.
+		b.WriteString("\n  " + StyleFaint.Render(i18n.T("firstrun.runtime_owner_hint")) + "\n")
 
 		// ── Authority ──
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_authority")+" ──") + "\n")
@@ -2808,7 +2794,7 @@ const agentNameDirFieldCount = 12
 
 // Field indices:
 // 0=name, 1=dir, 2=lang,
-// 3=context_limit, 4=max_rpm, 5=max_aed_attempts,
+// 3..5=retired UI slots (legacy public input state only; navigation skips),
 // 6=karma, 7=nirvana,
 // 8=covenant, 9=comment
 // 10=Back, 11=Next  (footer buttons; no input is focused here)
@@ -2898,30 +2884,13 @@ func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Pre
 	return p
 }
 
-// enterAgentDetails jumps to the agent runtime page (stepAgentNameDir).
-// Capabilities live in the preset (edited via the preset editor) and are
-// written into init.json from it unchanged, so there is no capabilities
-// step; addons default to all-on.
-//
-// It sets addonSelected: every addon from AllAddons defaulted to true,
-// unless setup mode has explicit prior selections to preserve.
-//
-// Returns the same tea.Cmd the runtime page expects (textinput.Blink
-// since that page focuses an input on entry).
+// enterAgentDetails opens agent settings, independently of the LLM preset.
+// External MCP is explicit opt-in: fresh and existing empty selections stay empty.
 func (m *FirstRunModel) enterAgentDetails() tea.Cmd {
-	// Default-on every known addon. Setup mode preserves the user's
-	// previously-saved addons, since /setup is a re-edit, not a fresh
-	// build.
 	m.addonOrder = AllAddons
 	m.addonSelected = map[string]bool{}
-	if len(m.setupLoadedAddonNames) > 0 {
-		for _, name := range m.setupLoadedAddonNames {
-			m.addonSelected[name] = true
-		}
-	} else {
-		for _, name := range AllAddons {
-			m.addonSelected[name] = true
-		}
+	for _, name := range m.setupLoadedAddonNames {
+		m.addonSelected[name] = true
 	}
 
 	// enterAgentNameDir focuses the name textinput and returns no cmd; we
@@ -2988,7 +2957,7 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	// Path matching is normalized so absolute and ~/-prefixed forms of
 	// the same path compare equal.
 	if m.setupMode && m.setupKeepInitJSON != nil {
-		if manifest, ok := m.setupKeepInitJSON["manifest"].(map[string]interface{}); ok {
+		if manifest, err := fs.ProjectInitManifest(m.setupKeepInitJSON); err == nil {
 			if pre, ok := manifest["preset"].(map[string]interface{}); ok {
 				existingDefault, _ := pre["default"].(string)
 				var existingAllowed []string
@@ -3197,7 +3166,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	// typed fields fall through to the default, so a partially-malformed
 	// init.json still lets the wizard render.
 	if m.setupMode && m.setupKeepInitJSON != nil {
-		manifest, _ := m.setupKeepInitJSON["manifest"].(map[string]interface{})
+		manifest, _ := fs.ProjectInitManifest(m.setupKeepInitJSON)
 		if manifest != nil {
 			if v, ok := numberFromJSON(manifest["context_limit"]); ok {
 				m.ctxLimitInput.SetValue(formatNumber(v))
@@ -3246,6 +3215,18 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		}
 	}
 
+	if m.setupMode && m.setupKeepInitJSON != nil {
+		if _, legacy := m.setupKeepInitJSON["manifest"]; !legacy {
+			if data, err := os.ReadFile(filepath.Join(m.setupOrchDir, "settings", "psyche.json")); err == nil {
+				var owner map[string]interface{}
+				if preset.DecodeJSONUseNumber(data, &owner) == nil {
+					if path, ok := owner["covenant_file"].(string); ok {
+						setPromptPathInputValue(&m.covenantInput, path)
+					}
+				}
+			}
+		}
+	}
 	m.setupPromptCovenantBaseline = normalizePromptPathValue(m.covenantInput.Value())
 	m.setupPromptCommentBaseline = normalizePromptPathValue(m.commentInput.Value())
 	m.step = stepAgentNameDir
@@ -3256,6 +3237,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 // when the value is missing, nil, or genuinely non-numeric.
 func numberFromJSON(v interface{}) (float64, bool) {
 	switch x := v.(type) {
+	case json.Number:
+		value, err := x.Float64()
+		return value, err == nil
 	case float64:
 		return x, true
 	case int:
@@ -3375,24 +3359,6 @@ func normalizePromptPathValue(value string) string {
 }
 
 // getPresetProvider extracts provider name from a preset
-// presetHasVision reports whether the preset's capabilities include a
-// non-empty vision block. Used by the pick-list to surface the one
-// capability distinction that meaningfully varies across presets.
-func presetHasVision(p preset.Preset) bool {
-	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
-	if caps == nil {
-		return false
-	}
-	v, ok := caps["vision"]
-	if !ok || v == nil {
-		return false
-	}
-	if cfg, ok := v.(map[string]interface{}); ok && len(cfg) == 0 {
-		return false
-	}
-	return true
-}
-
 func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 		if provider, ok := llm["provider"].(string); ok {
@@ -3536,27 +3502,6 @@ func presetModelName(p preset.Preset) string {
 	return model
 }
 
-// presetCapabilitiesSummary lists the capability names actually configured
-// in the preset's manifest.capabilities object — the same location
-// Preset.Validate() type-checks — as a
-// short, comma-joined, alphabetically sorted row for the Review page. This
-// reflects whatever the preset (template or user-edited) actually declares,
-// never a placeholder or a fixed capability list: a preset that
-// configures none of them truthfully shows "—" (via the caller's row()
-// helper on an empty string), not a fabricated "none available".
-func presetCapabilitiesSummary(p preset.Preset) string {
-	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-	if !ok || len(caps) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(caps))
-	for name := range caps {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
-}
-
 // viewReview renders the draft-mode-only final confirmation page — the
 // single place before "Start project" where the user sees the complete set
 // of choices gathered across the wizard. Every draft page (not just this
@@ -3582,7 +3527,6 @@ func (m FirstRunModel) viewReview() string {
 	agentName := m.agentName
 	recipeName := ""
 	modelName := ""
-	capabilitiesSummary := ""
 	if m.draft != nil {
 		if m.draft.ProjectRoot != "" {
 			projectRoot = m.draft.ProjectRoot
@@ -3590,7 +3534,6 @@ func (m FirstRunModel) viewReview() string {
 		if m.draft.DraftPreset != nil {
 			presetName = m.draft.DraftPreset.Name
 			modelName = presetModelName(*m.draft.DraftPreset)
-			capabilitiesSummary = presetCapabilitiesSummary(*m.draft.DraftPreset)
 		}
 		if m.draft.AgentName != "" {
 			agentName = m.draft.AgentName
@@ -3603,7 +3546,6 @@ func (m FirstRunModel) viewReview() string {
 	row(i18n.T("firstrun.review.preset"), presetName)
 	row(i18n.T("firstrun.review.model"), modelName)
 	row(i18n.T("firstrun.review.recipe"), recipeName)
-	row(i18n.T("firstrun.review.capabilities"), capabilitiesSummary)
 
 	b.WriteString("\n  " + lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("> "+i18n.T("firstrun.review.start")) + "\n")
 

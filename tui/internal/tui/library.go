@@ -276,15 +276,24 @@ func readLibraryPaths(agentDir string) []string {
 	if err != nil {
 		return nil
 	}
-	var initFile struct {
-		Manifest struct {
-			Capabilities map[string]json.RawMessage `json:"capabilities"`
-		} `json:"manifest"`
-	}
-	if err := json.Unmarshal(data, &initFile); err != nil {
+	var raw map[string]interface{}
+	if json.Unmarshal(data, &raw) != nil {
 		return nil
 	}
-	return skillsPathsFromCapabilities(initFile.Manifest.Capabilities)
+	view, err := fs.ProjectInitManifest(raw)
+	if err != nil {
+		return nil
+	}
+	caps, _ := view["capabilities"].(map[string]interface{})
+	encoded, err := json.Marshal(caps)
+	if err != nil {
+		return nil
+	}
+	var messages map[string]json.RawMessage
+	if json.Unmarshal(encoded, &messages) != nil {
+		return nil
+	}
+	return skillsPathsFromCapabilities(messages)
 }
 
 // readResolvedLibraryPaths reads skills.paths from the kernel-published
@@ -293,36 +302,20 @@ func readLibraryPaths(agentDir string) []string {
 // unreadable / malformed (caller falls back to raw init.json), true means the
 // artifact is authoritative — including when it declares no skills paths.
 func readResolvedLibraryPaths(agentDir string) ([]string, bool) {
-	artifactPath := filepath.Join(agentDir, "system", "manifest.resolved.json")
-	if isResolvedLibraryManifestStale(filepath.Join(agentDir, "init.json"), artifactPath) {
-		return nil, false
-	}
-
-	data, err := os.ReadFile(artifactPath)
+	manifest, err := fs.ReadResolvedInitManifest(agentDir)
 	if err != nil {
 		return nil, false
 	}
-	var artifact struct {
-		Schema        string  `json:"schema"`
-		SchemaVersion float64 `json:"schema_version"`
-		Source        string  `json:"source"`
-		Manifest      *struct {
-			Capabilities map[string]json.RawMessage `json:"capabilities"`
-		} `json:"manifest"`
-	}
-	if err := json.Unmarshal(data, &artifact); err != nil || artifact.Manifest == nil {
-		return nil, false
-	}
-	if artifact.Schema != "lingtai.manifest.resolved/v1" || artifact.SchemaVersion != 1 || artifact.Source != "kernel" {
-		return nil, false
-	}
-	if raw, ok := artifact.Manifest.Capabilities["skills"]; ok {
+	caps, _ := manifest["capabilities"].(map[string]interface{})
+	if raw, present := caps["skills"]; present && raw != nil && raw != false {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil, false
+		}
 		var lib struct {
 			Paths []string `json:"paths"`
 		}
-		if err := json.Unmarshal(raw, &lib); err != nil {
-			// skills block doesn't parse — treat the artifact as malformed
-			// rather than silently hiding paths init.json still declares.
+		if json.Unmarshal(data, &lib) != nil {
 			return nil, false
 		}
 		return lib.Paths, true

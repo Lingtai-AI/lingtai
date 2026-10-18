@@ -813,3 +813,25 @@ func TestReadStatusInvalidEconomyValuesOmitWholeTuple(t *testing.T) {
 		})
 	}
 }
+
+func TestReadInitManifestCanonicalDesiredViewNeverSelectsPreset(t *testing.T) {
+	dir := t.TempDir()
+	raw := `{"agent":{"name":"desired","language":"zh","permissions":{"karma":true}},"llm":{"preset":{"active":"missing","default":"also-missing","allowed":["missing","also-missing"]}},"tools":{"skills":{"paths":["../lib"]},"shell":false},"mcp":{},"plugins":[]}`
+	writeInitManifestTestFile(t, dir, "init.json", raw)
+	view, err := ReadInitManifest(dir)
+	if err != nil || view["agent_name"] != "desired" || view["admin"] == nil || view["preset"] == nil {
+		t.Fatalf("canonical projection: %#v %v", view, err)
+	}
+	if view["provider"] != nil || view["model"] != nil {
+		t.Fatal("Go invented effective model for unresolved refs")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "init.json"))
+	if string(data) != raw {
+		t.Fatal("ordinary read rewrote init")
+	}
+	writeInitManifestTestFile(t, dir, "init.json", `{"manifest":{"preset":{"active":"missing"},"llm":{"provider":"stale","model":"stale"}}}`)
+	view, err = ReadInitManifest(dir)
+	if err != nil || view["model"] != nil || view["llm"] != nil {
+		t.Fatal("raw stale inline copy must not claim effective model")
+	}
+}

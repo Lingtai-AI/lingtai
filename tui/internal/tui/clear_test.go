@@ -10,12 +10,13 @@ import (
 )
 
 func TestRequestClearContextAliveWritesClearAndPreservesHistory(t *testing.T) {
+	python := fixtureUILifecycle(t)
 	dir := t.TempDir()
 	historyPath, contextPath := writeClearTestHistory(t, dir)
 	writeJSON(t, filepath.Join(dir, ".agent.json"), map[string]interface{}{"molt_count": 7})
 
 	reviveCalled := false
-	completed, err := requestClearContextWithDeps("python", dir, shortClearTestConfig(), clearContextDeps{
+	completed, err := requestClearContextWithDeps(python, dir, shortClearTestConfig(), clearContextDeps{
 		isAlive: func(string, float64) bool { return true },
 		revive: func(string, string) error {
 			reviveCalled = true
@@ -41,6 +42,7 @@ func TestRequestClearContextAliveWritesClearAndPreservesHistory(t *testing.T) {
 }
 
 func TestRequestClearContextDeadRevivesClearsAndSuspends(t *testing.T) {
+	python := fixtureUILifecycle(t)
 	dir := t.TempDir()
 	historyPath, contextPath := writeClearTestHistory(t, dir)
 	writeJSON(t, filepath.Join(dir, ".agent.json"), map[string]interface{}{"molt_count": 1})
@@ -52,10 +54,10 @@ func TestRequestClearContextDeadRevivesClearsAndSuspends(t *testing.T) {
 		kernelDone <- simulateClearKernel(dir, &alive)
 	}()
 
-	completed, err := requestClearContextWithDeps("python", dir, shortClearTestConfig(), clearContextDeps{
+	completed, err := requestClearContextWithDeps(python, dir, shortClearTestConfig(), clearContextDeps{
 		isAlive: func(string, float64) bool { return alive.Load() },
 		revive: func(cmd, gotDir string) error {
-			if cmd != "python" {
+			if cmd != python {
 				return fmt.Errorf("lingtaiCmd = %q", cmd)
 			}
 			if gotDir != dir {
@@ -88,6 +90,7 @@ func TestRequestClearContextDeadRevivesClearsAndSuspends(t *testing.T) {
 }
 
 func TestRequestClearContextDeadIgnoresStaleClearCompletionDuringRevive(t *testing.T) {
+	python := fixtureUILifecycle(t)
 	dir := t.TempDir()
 	writeJSON(t, filepath.Join(dir, ".agent.json"), map[string]interface{}{"molt_count": 1})
 	if err := os.WriteFile(filepath.Join(dir, ".clear"), []byte("old-tui-clear\n"), 0o644); err != nil {
@@ -100,7 +103,7 @@ func TestRequestClearContextDeadIgnoresStaleClearCompletionDuringRevive(t *testi
 		kernelDone <- simulateDelayedTuiClearKernel(dir, &alive, 3, 50*time.Millisecond)
 	}()
 
-	completed, err := requestClearContextWithDeps("python", dir, shortClearTestConfig(), clearContextDeps{
+	completed, err := requestClearContextWithDeps(python, dir, shortClearTestConfig(), clearContextDeps{
 		isAlive: func(string, float64) bool { return alive.Load() },
 		revive: func(string, string) error {
 			// Simulate the revived kernel consuming a stale previous TUI clear

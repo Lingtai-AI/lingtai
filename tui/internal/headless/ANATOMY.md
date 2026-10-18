@@ -66,3 +66,10 @@ The best-effort plain Recipe apply in `spawn.go` now passes nil for the distinct
 kernel identity mode through the original preset API. It never invokes a
 callback or retries/falls back on transport failure. Bundle copy and selected
 TUI Recipe state remain separately owned and best-effort/required respectively.
+
+### Post-create language owner
+
+`preserveSpawnLanguage` in `spawn.go` runs only after the existing trusted Core
+create receipt. It writes canonical `agent.language`, or retains the legacy
+`manifest.language` owner for legacy input, preserving exact JSON number tokens.
+No public Project create grammar or native callback frame changed.

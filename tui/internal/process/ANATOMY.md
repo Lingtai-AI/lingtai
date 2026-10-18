@@ -120,3 +120,19 @@ control. Full terminal/identity/transcript/exit validation precedes error exposu
 Management Core children use the explicit or exact managed SDK, never the controlled
 agent venv/PATH; the original native launch keeps its own selected-agent resolver.
 `project_lifecycle_host_test.go` checks both boundaries without launching agents.
+
+### Authored-init inspection and host selection
+
+`InspectInit` / `InitInspection` / `InitInspectionError` in
+`tui/internal/process/project_configuration.go` run one bounded read-only
+`lingtai-agent inspect-init --agent-dir DIR` beside the current agent host
+interpreter. The schema is `lingtai.init.inspection/v1`; exit-1 reader refusals
+remain typed, while unsupported/malformed/timeout results are unknown. No
+PATH SDK fallback, retry, installation, Agent construction or paid call occurs.
+`resolvePython` reads canonical `host.venv_path` exclusively when present; an
+explicit canonical selector expands the user's home and anchors relative paths
+against the agent directory before deriving an absolute interpreter. This is
+spelling normalization, not relocation when its interpreter is absent.
+Legacy root selection retains its historical availability behavior.
+`TestProjectPythonCanonicalHostNormalizesSpelling` exercises the actual selector
+with home-relative and agent-relative hosts, including absent interpreters.

@@ -41,64 +41,59 @@ func TestClampAedAttempts(t *testing.T) {
 	}
 }
 
-// TestGenerateInitJSON_WritesMaxAedAttempts verifies the manifest carries the
-// chosen value, that it round-trips through JSON, and that a zero-value opt is
-// normalized to the default rather than written as 0.
+// The public legacy option remains accepted/projected, but System policy is
+// not serialized into new init. Existing explicit System owner bytes survive.
 func TestGenerateInitJSON_WritesMaxAedAttempts(t *testing.T) {
 	withTempPresets(t, func() {
-		tmpDir := t.TempDir()
-		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
-		os.MkdirAll(lingtaiDir, 0o755)
-		globalDir := filepath.Join(tmpDir, ".lingtai-global")
-		Bootstrap(globalDir)
-
-		readManifest := func(agent string) map[string]interface{} {
-			t.Helper()
-			initPath := filepath.Join(lingtaiDir, agent, "init.json")
-			data, err := os.ReadFile(initPath)
-			if err != nil {
-				t.Fatalf("read init.json: %v", err)
-			}
-			var initJSON map[string]interface{}
-			if err := json.Unmarshal(data, &initJSON); err != nil {
-				t.Fatalf("parse init.json: %v", err)
-			}
-			m, ok := initJSON["manifest"].(map[string]interface{})
-			if !ok {
-				t.Fatal("manifest not a map")
-			}
-			return m
-		}
-
-		// Explicit value round-trips.
-		opts := DefaultAgentOpts()
-		opts.MaxAedAttempts = 7
-		if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
-			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
-		}
-		// JSON numbers decode as float64.
-		if v, ok := readManifest("alice")["max_aed_attempts"].(float64); !ok || int(v) != 7 {
-			t.Errorf("alice max_aed_attempts = %v (ok=%v), want 7", readManifest("alice")["max_aed_attempts"], ok)
-		}
-
-		// Zero-value opt normalizes to the default (never written as 0).
-		zeroOpts := DefaultAgentOpts()
-		zeroOpts.MaxAedAttempts = 0
-		if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "bob", "bob", lingtaiDir, globalDir, zeroOpts); err != nil {
-			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
-		}
-		if v, ok := readManifest("bob")["max_aed_attempts"].(float64); !ok || int(v) != DefaultMaxAedAttempts {
-			t.Errorf("bob max_aed_attempts = %v (ok=%v), want %d", readManifest("bob")["max_aed_attempts"], ok, DefaultMaxAedAttempts)
-		}
-
-		// Out-of-range opt is clamped to the ceiling.
-		bigOpts := DefaultAgentOpts()
-		bigOpts.MaxAedAttempts = 5000
-		if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "carol", "carol", lingtaiDir, globalDir, bigOpts); err != nil {
-			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
-		}
-		if v, ok := readManifest("carol")["max_aed_attempts"].(float64); !ok || int(v) != MaxMaxAedAttempts {
-			t.Errorf("carol max_aed_attempts = %v (ok=%v), want %d", readManifest("carol")["max_aed_attempts"], ok, MaxMaxAedAttempts)
+		root, global := t.TempDir(), t.TempDir()
+		lingtaiDir := filepath.Join(root, ".lingtai")
+		for _, tc := range []struct {
+			name      string
+			input     int
+			projected int
+		}{
+			{"explicit", 7, 7},
+			{"zero", 0, 5},
+			{"above-max", 5000, 100},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				opts := DefaultAgentOpts()
+				opts.MaxAedAttempts = tc.input
+				dir := filepath.Join(lingtaiDir, tc.name)
+				if err := os.MkdirAll(filepath.Join(dir, "settings"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				owner := filepath.Join(dir, "settings", "system.json")
+				// Deliberately differs from wizard value: generation must not reset owner.
+				seed := []byte(`{"schema_version":2,"max_aed_attempts":23}`)
+				if err := os.WriteFile(owner, seed, 0600); err != nil {
+					t.Fatal(err)
+				}
+				request, err := ProjectConfigurationRequest(codexPreset(), tc.name, tc.name, lingtaiDir, global, opts)
+				if err != nil || request.Options.MaxAEDAttempts != tc.projected {
+					t.Fatalf("legacy option projection: %+v %v", request.Options, err)
+				}
+				if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), tc.name, tc.name, lingtaiDir, global, opts); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "init.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var document map[string]interface{}
+				if json.Unmarshal(data, &document) != nil || document["llm"] == nil || document["manifest"] != nil {
+					t.Fatal("wrong fresh owners")
+				}
+				for _, key := range []string{"max_aed_attempts", "max_rpm"} {
+					if _, found := document[key]; found {
+						t.Fatalf("runtime knob %s exported into init", key)
+					}
+				}
+				got, err := os.ReadFile(owner)
+				if err != nil || string(got) != string(seed) {
+					t.Fatal("generation rewrote explicit System owner policy")
+				}
+			})
 		}
 	})
 }

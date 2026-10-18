@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -109,15 +110,43 @@ func InitProject(projectRoot string, python ...string) error {
 }
 
 // resolvePython returns the Python executable for an agent.
-// Priority: agent init.json venv_path → fallbackCmd.
+// Canonical host.venv_path is source-exclusive; legacy root venv_path retains
+// its existing availability fallback. Never relocate an explicit canonical host.
 func resolvePython(agentDir, fallbackCmd string) string {
 	initPath := filepath.Join(agentDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err == nil {
 		var init map[string]interface{}
 		if json.Unmarshal(data, &init) == nil {
-			if vp, ok := init["venv_path"].(string); ok && vp != "" {
+			owner := init
+			_, canonicalHost := init["host"]
+			if canonicalHost {
+				owner, _ = init["host"].(map[string]interface{})
+			}
+			if vp, ok := owner["venv_path"].(string); ok && vp != "" {
+				if canonicalHost {
+					// Normalize spelling, not ownership: missing explicit hosts
+					// remain exclusive and never trigger fallback/installation.
+					if vp == "~" || strings.HasPrefix(vp, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(vp, "~\\")) {
+						if home, err := os.UserHomeDir(); err == nil {
+							if vp == "~" {
+								vp = home
+							} else {
+								vp = filepath.Join(home, vp[2:])
+							}
+						}
+					}
+					if !filepath.IsAbs(vp) {
+						vp = filepath.Join(agentDir, vp)
+					}
+					if absolute, err := filepath.Abs(vp); err == nil {
+						vp = absolute
+					}
+				}
 				python := config.VenvPython(vp)
+				if canonicalHost {
+					return python
+				}
 				if _, err := os.Stat(python); err == nil {
 					return python
 				}

@@ -48,7 +48,7 @@ var recipeAssetsFS embed.FS
 //go:embed skills
 var skillsFS embed.FS
 
-// Preset is a reusable agent bundle. Templates ship with the TUI and
+// Preset is a reusable LLM configuration. Templates ship with the TUI and
 // live under ~/.lingtai-tui/presets/templates/ (regenerated on every
 // launch, never user-edited). User-saved variants live under
 // ~/.lingtai-tui/presets/saved/. The two directories are the only
@@ -62,12 +62,56 @@ var skillsFS embed.FS
 type Preset struct {
 	Name        string                 `json:"name"`
 	Description PresetDescription      `json:"description"`
-	Manifest    map[string]interface{} `json:"manifest"`
+	Manifest    map[string]interface{} `json:"-"` // bounded internal LLM view, not an init/tool policy
 
 	// Source is set by List/Load to record where the preset was read
 	// from on disk. Runtime-only — never marshaled. Callers use this
 	// instead of name-matching to ask "is this a template?".
 	Source PresetSource `json:"-"`
+}
+
+// MarshalJSON authors only the canonical LLM-only envelope. Legacy tool and
+// agent fields can never escape through Save, export, templates, or cloning.
+func (p Preset) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Name        string            `json:"name"`
+		Description PresetDescription `json:"description"`
+		LLM         interface{}       `json:"llm"`
+	}{p.Name, p.Description, p.Manifest["llm"]})
+}
+
+// UnmarshalJSON accepts old manifest-wrapped files without rewriting them.
+// Only LLM data enters the preset view; init-owned tools are not preset policy.
+// Mixed envelopes are ambiguous and rejected rather than silently choosing one.
+func (p *Preset) UnmarshalJSON(data []byte) error {
+	var doc struct {
+		Name        string            `json:"name"`
+		Description PresetDescription `json:"description"`
+		LLM         json.RawMessage   `json:"llm"`
+		Manifest    json.RawMessage   `json:"manifest"`
+	}
+	if err := DecodeJSONUseNumber(data, &doc); err != nil {
+		return err
+	}
+	if len(doc.LLM) > 0 && len(doc.Manifest) > 0 {
+		return fmt.Errorf("preset must not combine llm and legacy manifest")
+	}
+	view := map[string]interface{}{}
+	if len(doc.LLM) > 0 {
+		var llm interface{}
+		if err := DecodeJSONUseNumber(doc.LLM, &llm); err != nil {
+			return err
+		}
+		view["llm"] = llm
+	} else if len(doc.Manifest) > 0 {
+		if err := DecodeJSONUseNumber(doc.Manifest, &view); err != nil {
+			return err
+		}
+	}
+	*p = Preset{Name: doc.Name, Description: doc.Description, Manifest: view}
+	p.NormalizeLegacyContextLimit()
+	p.Manifest = map[string]interface{}{"llm": p.Manifest["llm"]}
+	return nil
 }
 
 // PresetSource records which directory a preset was read from. The
@@ -313,9 +357,6 @@ func loadFromPath(path string) (Preset, error) {
 		return Preset{}, fmt.Errorf("parse preset %s: %w", path, err)
 	}
 	p.NormalizeLegacyContextLimit()
-	if err := p.NormalizeLegacyCapabilities(); err != nil {
-		return Preset{}, fmt.Errorf("canonicalize preset capabilities: %w", err)
-	}
 	return p, nil
 }
 
@@ -367,9 +408,6 @@ var validTiers = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5"
 func (p Preset) Validate() []error {
 	p.NormalizeLegacyContextLimit()
 	var errs []error
-	if err := p.NormalizeLegacyCapabilities(); err != nil {
-		errs = append(errs, err)
-	}
 	if p.Description.Summary == "" {
 		errs = append(errs, fmt.Errorf("description.summary must be non-empty"))
 	}
@@ -413,11 +451,6 @@ func (p Preset) Validate() []error {
 	if _, hasRootCtx := p.Manifest["context_limit"]; hasRootCtx {
 		errs = append(errs, fmt.Errorf("context_limit must live inside manifest.llm, not at manifest root"))
 	}
-	if caps, ok := p.Manifest["capabilities"]; ok {
-		if _, isMap := caps.(map[string]interface{}); !isMap {
-			errs = append(errs, fmt.Errorf("manifest.capabilities must be an object"))
-		}
-	}
 	return errs
 }
 
@@ -452,9 +485,7 @@ func Save(p Preset) error {
 	if err := ValidateSafeName(p.Name); err != nil {
 		return fmt.Errorf("invalid preset name %q: %w", p.Name, err)
 	}
-	if err := p.NormalizeLegacyCapabilities(); err != nil {
-		return fmt.Errorf("canonicalize preset capabilities: %w", err)
-	}
+	p.NormalizeLegacyContextLimit()
 	dir := SavedDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create saved presets dir: %w", err)
@@ -472,8 +503,11 @@ func Save(p Preset) error {
 func Clone(src Preset, newName string) Preset {
 	// Deep copy via JSON round-trip to avoid shared map references
 	manifest := make(map[string]interface{})
-	if data, err := json.Marshal(src.Manifest); err == nil {
-		_ = DecodeJSONUseNumber(data, &manifest)
+	if data, err := json.Marshal(src.Manifest["llm"]); err == nil {
+		var llm interface{}
+		if DecodeJSONUseNumber(data, &llm) == nil {
+			manifest["llm"] = llm
+		}
 	}
 	desc := src.Description
 	if src.Description.Extra != nil {
@@ -1046,41 +1080,10 @@ func SavedCount(presets []Preset) int {
 	return n
 }
 
-// skillsDefault returns the default skills capability config — two Tier 1
-// paths: the network-shared skills shelf (resolved relative to the agent dir)
-// and the TUI's per-user utilities directory. Users can edit init.json to
-// add or remove paths; init.json is the ground truth and the capability
-// reads it on every setup.
-//
-// `skills` itself is default-on in the kernel; this entry exists only to
-// override the default kwargs (which carry no extra paths).
-func skillsDefault() map[string]interface{} {
-	return map[string]interface{}{
-		"paths": []interface{}{
-			"../.library_shared",
-			"~/.lingtai-tui/utilities",
-		},
-	}
-}
-
-// familyCapabilities is the capability block shared by every template that
-// can serve images and search: web_search uses the provider-agnostic
-// DuckDuckGo engine, and vision inherits the agent's own LLM provider and
-// credentials (the kernel expands "inherit" at boot). If the configured
-// endpoint or model cannot take image input, the vision call fails at
-// runtime — the TUI makes no per-vendor vision claim.
-func familyCapabilities() map[string]interface{} {
-	return map[string]interface{}{
-		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-		"vision":     map[string]interface{}{"provider": "inherit"},
-		"skills":     skillsDefault(),
-	}
-}
-
 func codexPreset() Preset {
 	return Preset{
 		Name:        "codex",
-		Description: PresetDescription{Summary: "ChatGPT account (Codex OAuth) — vision + web search + tools"},
+		Description: PresetDescription{Summary: "ChatGPT account (Codex OAuth)"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				// Keep gpt-5.6-sol as the default: gpt-6-astra is documented and
@@ -1098,7 +1101,6 @@ func codexPreset() Preset {
 				// generated init.json actually receive xhigh.
 				"thinking": "xhigh",
 			},
-			"capabilities": familyCapabilities(),
 		},
 	}
 }
@@ -1121,15 +1123,6 @@ func claudePreset() Preset {
 				"provider": ProviderClaudeCode, "model": "opus",
 				"api_key": nil, "api_key_env": "",
 			},
-			// Conservative capabilities: Claude Code is wired here as a completion
-			// provider only. We do NOT route web_search or vision through it —
-			// the CLI's own native tool surface is out of scope, and the
-			// kernel's claude-code vision route only returns CLI guidance.
-			// Keep the standard LingTai skills default so agents behave like
-			// any other preset.
-			"capabilities": map[string]interface{}{
-				"skills": skillsDefault(),
-			},
 		},
 	}
 }
@@ -1150,7 +1143,6 @@ func openaiPreset() Preset {
 				"api_key": nil, "api_key_env": DefaultAPIKeyEnv(ProviderOpenAI),
 				"base_url": nil, "wire_api": WireAPIChatCompletions,
 			},
-			"capabilities": familyCapabilities(),
 		},
 	}
 }
@@ -1169,7 +1161,6 @@ func anthropicPreset() Preset {
 				"api_key": nil, "api_key_env": DefaultAPIKeyEnv(ProviderAnthropic),
 				"base_url": nil,
 			},
-			"capabilities": familyCapabilities(),
 		},
 	}
 }
@@ -1493,38 +1484,9 @@ func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string
 	return GenerateInitJSONWithOpts(p, agentName, dirName, lingtaiDir, globalDir, opts)
 }
 
-// SyncCapabilityAPIKeyEnv propagates the LLM's api_key_env to any
-// capability whose provider matches the LLM provider. This ensures
-// capabilities that name the agent's own provider use the same resolved
-// env var slot (e.g. "OPENAI_1_API_KEY") rather than a stale preset
-// placeholder (e.g. "OPENAI_API_KEY"). Capabilities declared as
-// "inherit" are expanded by the kernel and need no rewrite here.
-func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {
-	llm, _ := manifest["llm"].(map[string]interface{})
-	if llm == nil {
-		return
-	}
-	llmProvider, _ := llm["provider"].(string)
-	llmKeyEnv, _ := llm["api_key_env"].(string)
-	if llmProvider == "" || llmKeyEnv == "" {
-		return
-	}
-	caps, _ := manifest["capabilities"].(map[string]interface{})
-	if caps == nil {
-		return
-	}
-	for _, cfg := range caps {
-		capMap, ok := cfg.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		capProvider, _ := capMap["provider"].(string)
-		if capProvider != llmProvider {
-			continue
-		}
-		capMap["api_key_env"] = llmKeyEnv
-	}
-}
+// SyncCapabilityAPIKeyEnv is retained for source compatibility only.
+// Deprecated: LLM credential selection must never rewrite init-owned tools.
+func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {}
 
 // retiredLLMFields are manifest.llm keys the kernel no longer reads. The TUI
 // never writes them: the preset editor drops them on commit and init.json
@@ -1576,7 +1538,8 @@ func PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef string, allowed []str
 		}
 		cmd = config.LingtaiCmd(globalDir)
 	}
-	cmd = process.ProjectPython(filepath.Join(lingtaiDir, skipDir), cmd)
+	// Policy management uses the explicit/exact managed SDK selected above,
+	// independently of the controlled Agent's runtime host.
 	result, err := process.PropagateProjectPolicy(context.Background(), cmd, filepath.Dir(lingtaiDir), skipDir, defaultRef, allowed)
 	return result.Updated, err
 }

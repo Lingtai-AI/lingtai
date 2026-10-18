@@ -52,11 +52,8 @@ func TestFirstRunModelForwardsCodexPublicModelsMsgToEmbeddedEditor(t *testing.T)
 }
 
 // TestSetupViewOmitsMoltPressureField guards the removal of the molt_pressure
-// configurable field from the agent setup wizard. molt_pressure is no longer a
-// user-facing setup input — it is written to init.json at its DefaultAgentOpts
-// value by the preset layer, but the wizard exposes no row for it. The Runtime
-// section still renders its other numeric fields (e.g. Max RPM), so the
-// assertion proves the molt row was removed, not the whole section.
+// configurable field from the agent setup wizard. Runtime policy now routes
+// to System rather than offering ignored init/preset numeric controls.
 func TestSetupViewOmitsMoltPressureField(t *testing.T) {
 	i18n.SetLang("en")
 	baseDir := t.TempDir()
@@ -90,9 +87,9 @@ func TestSetupViewOmitsMoltPressureField(t *testing.T) {
 	if strings.Contains(view, "firstrun.molt_pressure") || strings.Contains(view, "Molt pressure") {
 		t.Fatalf("setup view should not expose the molt_pressure field; view=%s", view)
 	}
-	// Sanity: the Runtime section is still present (Max RPM row remains).
-	if maxRpm := i18n.T("firstrun.max_rpm"); !strings.Contains(view, maxRpm) {
-		t.Fatalf("setup view should still render the Runtime section (%q missing)", maxRpm)
+	// Runtime policy now belongs to System, never a silently ignored wizard edit.
+	if !strings.Contains(view, i18n.T("firstrun.runtime_owner_hint")) || strings.Contains(view, i18n.T("firstrun.max_rpm")+":") {
+		t.Fatal("setup must route runtime policy to its actual owner")
 	}
 }
 
@@ -592,9 +589,13 @@ func TestSetupModeDefaultsToKeepCurrentPreset(t *testing.T) {
 	if got := m.getPresetProvider(m.currentPreset()); got != "deepseek" {
 		t.Fatalf("currentPreset should be synthesized from existing init.json, provider=%q", got)
 	}
-	caps, ok := m.currentPreset().Manifest["capabilities"].(map[string]interface{})
+	if _, coupled := m.currentPreset().Manifest["capabilities"]; coupled {
+		t.Fatal("keep-current model must not own agent tools")
+	}
+	owner := m.setupKeepInitJSON["manifest"].(map[string]interface{})
+	caps, ok := owner["capabilities"].(map[string]interface{})
 	if !ok || caps["web_search"] == nil || caps["vision"] == nil {
-		t.Fatalf("currentPreset should preserve existing optional capabilities, caps=%#v", caps)
+		t.Fatalf("setup raw owner must preserve existing optional capabilities, caps=%#v", caps)
 	}
 }
 
@@ -1264,5 +1265,75 @@ func TestSetupModeSelfHealFromEnv(t *testing.T) {
 	}
 	if !strings.Contains(string(envAfter), "LINGTAI_SOUL_FLOW_ENABLED=1") {
 		t.Fatalf(".env lost the unmanaged retired-feature line:\n%s", envAfter)
+	}
+}
+
+// Selection is agent-owned: fresh none, existing empty none, explicit preserved.
+func TestAgentMCPSelectionIndependentOfPreset(t *testing.T) {
+	for _, names := range [][]string{nil, {}, {"telegram"}} {
+		m := FirstRunModel{
+			presets:               []preset.Preset{testPresetEditorPreset()},
+			setupLoadedAddonNames: names,
+			setupMode:             names != nil,
+			globalDir:             t.TempDir(),
+			nameInput:             textinput.New(),
+			dirInput:              textinput.New(),
+			ctxLimitInput:         textinput.New(),
+			maxRpmInput:           textinput.New(),
+			maxAedInput:           textinput.New(),
+			covenantInput:         textinput.New(),
+			commentInput:          textinput.New(),
+		}
+		m.enterAgentDetails()
+		for _, name := range AllAddons {
+			want := name == "telegram" && len(names) > 0
+			if m.addonSelected[name] != want {
+				t.Fatalf("prior=%v: %s selected=%v want=%v", names, name, m.addonSelected[name], want)
+			}
+		}
+	}
+}
+
+func TestSetupCanonicalOwnersPreloadWithoutModelCoupling(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	base, global := t.TempDir(), t.TempDir()
+	dir := filepath.Join(base, "orch")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	a := preset.Preset{Name: "a", Source: preset.SourceSaved}
+	b := preset.Preset{Name: "b", Source: preset.SourceSaved}
+	doc := map[string]interface{}{
+		"agent": map[string]interface{}{"name": "Canonical", "language": "zh", "permissions": map[string]interface{}{"karma": true, "nirvana": true}},
+		"llm":   map[string]interface{}{"preset": map[string]interface{}{"active": preset.RefFor(b), "default": preset.RefFor(b), "allowed": []string{preset.RefFor(b)}}},
+		"tools": map[string]interface{}{"shell": map[string]interface{}{"tenant": json.Number("9007199254740993")}}, "mcp": map[string]interface{}{}, "plugins": []string{},
+	}
+	raw, _ := json.Marshal(doc)
+	path := filepath.Join(dir, "init.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewSetupModeModel(base, global, dir, "old-name")
+	m.presets = []preset.Preset{a, b}
+	if m.setupOrchName != "Canonical" || m.currentPreset().Manifest["capabilities"] != nil || len(m.currentPreset().Manifest) != 1 {
+		t.Fatal("keep-current preset owns non-model configuration")
+	}
+	m.enterAgentPresets()
+	if m.presetDefaultIdx != 1 || m.presetAllowed[0] || !m.presetAllowed[1] {
+		t.Fatal("canonical default/allowed not preloaded")
+	}
+	m.enterAgentNameDir(m.currentPreset())
+	if m.nameInput.Value() != "Canonical" || m.agentLangIdx != 1 || m.karmaIdx != 0 || m.nirvanaIdx != 0 {
+		t.Fatal("agent identity/options lost on model page")
+	}
+	m.fieldIdx = 2
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated
+	if m.fieldIdx != 6 {
+		t.Fatal("ignored runtime controls still reachable")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != string(raw) {
+		t.Fatal("ordinary setup preload rewrote authored bytes")
 	}
 }

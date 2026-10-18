@@ -1245,15 +1245,11 @@ func resetActivePresetToDefault(dir string) {
 		return
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &raw); err != nil {
 		return
 	}
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return
-	}
-	pre, ok := manifest["preset"].(map[string]interface{})
-	if !ok {
+	pre := preset.InitPresetPolicy(raw)
+	if pre == nil {
 		return
 	}
 	def, ok := pre["default"].(string)
@@ -1264,6 +1260,9 @@ func resetActivePresetToDefault(dir string) {
 		return // already on default, nothing to write
 	}
 	pre["active"] = def
+	if legacy, ok := raw["manifest"].(map[string]interface{}); ok {
+		delete(legacy, "llm")
+	}
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return
@@ -1284,15 +1283,11 @@ func readAllowedPresets(dir string) []string {
 		return nil
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &raw); err != nil {
 		return nil
 	}
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	pre, ok := manifest["preset"].(map[string]interface{})
-	if !ok {
+	pre := preset.InitPresetPolicy(raw)
+	if pre == nil {
 		return nil
 	}
 	allowed, ok := pre["allowed"].([]interface{})
@@ -1319,15 +1314,11 @@ func readActivePreset(dir string) string {
 		return ""
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &raw); err != nil {
 		return ""
 	}
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	pre, ok := manifest["preset"].(map[string]interface{})
-	if !ok {
+	pre := preset.InitPresetPolicy(raw)
+	if pre == nil {
 		return ""
 	}
 	active, _ := pre["active"].(string)
@@ -1363,18 +1354,17 @@ func setActivePreset(dir, presetPath string) error {
 		return err
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &raw); err != nil {
 		return err
 	}
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("init.json missing 'manifest' object")
-	}
-	pre, ok := manifest["preset"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("init.json missing 'manifest.preset' object")
+	pre := preset.InitPresetPolicy(raw)
+	if pre == nil {
+		return fmt.Errorf("init.json missing preset policy object")
 	}
 	pre["active"] = presetPath
+	if legacy, ok := raw["manifest"].(map[string]interface{}); ok {
+		delete(legacy, "llm")
+	}
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
@@ -2228,12 +2218,10 @@ func codexOAuthConfigured(globalDir string) bool {
 	return codexAuthPathValid(legacyCodexAuthPath(globalDir))
 }
 
-// validateCodexAuthForAgents scans active/default preset manifests for every
-// agent under projectDir. Single-account Codex presets validate their bound
-// account. Provider ownership comes only from a successfully loaded manifest,
-// never from a preset filename or path, so malformed/unreadable refs are
-// skipped. Returns a warning naming the first Codex agent without usable
-// credentials, or "" when every discovered Codex agent is eligible.
+// validateCodexAuthForAgents inspects each actual selected LLM source through
+// Core, including missing-active fallback. It validates only that selection's
+// local authorized binding; unknown/unavailable inspection is not auth failure
+// or success, and never falls back by filename or stale expanded inline copy.
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	entries, _ := os.ReadDir(projectDir)
 	auth := preset.AuthState{
@@ -2244,39 +2232,22 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 		if !e.IsDir() {
 			continue
 		}
-		initPath := filepath.Join(projectDir, e.Name(), "init.json")
-		raw, err := os.ReadFile(initPath)
+		dir := filepath.Join(projectDir, e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "init.json")); err != nil {
+			continue
+		}
+		result, llm, err := selectedAgentLLM(dir, globalDir)
 		if err != nil {
+			return fmt.Sprintf("%s: %s", e.Name(), err)
+		}
+		if preset.ClassifyCredentialFamily(result.LLM.Provider) != preset.CredentialFamilyCodexSingle {
 			continue
 		}
-		var init map[string]interface{}
-		if json.Unmarshal(raw, &init) != nil {
-			continue
+		selected := preset.Preset{Manifest: map[string]interface{}{"llm": llm}}
+		if !preset.ResolvePresetWithAuth(selected, nil, auth).HasKey {
+			return i18n.TF("codex.oauth_unverified_agent", e.Name())
 		}
-		manifest, _ := init["manifest"].(map[string]interface{})
-		presetBlock, _ := manifest["preset"].(map[string]interface{})
-		if presetBlock == nil {
-			continue
-		}
-		seen := map[string]bool{}
-		for _, key := range []string{"default", "active"} {
-			presetRef, _ := presetBlock[key].(string)
-			if presetRef == "" || seen[presetRef] {
-				continue
-			}
-			seen[presetRef] = true
-			// The family and auth facts come exclusively from the loaded
-			// manifest. Unreadable/malformed refs have no family and are
-			// intentionally skipped; in particular they never fall back to
-			// a legacy Codex credential based on a filename or path.
-			rr := preset.ResolveRefsWithAuth([]string{presetRef}, nil, auth)
-			if len(rr) != 1 || !rr[0].ManifestValid {
-				continue
-			}
-			if rr[0].Family == preset.CredentialFamilyCodexSingle && !rr[0].HasKey {
-				return i18n.TF("codex.oauth_unverified_agent", e.Name())
-			}
-		}
+
 	}
 	return ""
 }

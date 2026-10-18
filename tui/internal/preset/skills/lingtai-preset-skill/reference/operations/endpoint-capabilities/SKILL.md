@@ -12,7 +12,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 # Endpoint and capability declarations
 
-Every built-in preset's `manifest.llm` declares a fixed set of fields; this
+Every built-in preset's `llm` declares a fixed set of fields; this
 child names what each one is and is not, so provider children can link here
 instead of re-explaining the shape every time.
 
@@ -40,13 +40,9 @@ instead of re-explaining the shape every time.
   and `anthropic` (`none`..`xhigh`, omitted = kernel default); Codex keeps its
   `low`..`xhigh` ladder with an explicit `xhigh` default. `service_tier`
   (`fast` → priority) applies to `openai` and `codex` only.
-- **`capabilities.vision` / `capabilities.web_search` / `capabilities.skills`**
-  — opt-in capability declarations, not proof the underlying model actually
-  performs an image/search call correctly. Templates declare
-  `web_search: duckduckgo` and `vision: inherit` (the agent's own provider and
-  credentials) rather than any per-vendor capability provider. A capability
-  being wired only means the kernel *will attempt* the corresponding route;
-  whether the live call succeeds is a runtime fact, not a manifest fact.
+- **Tools and MCP** — not preset fields. Configure them in the agent's init
+  document; the kernel owns tool defaults. New presets never select tools,
+  activate external MCP, or copy tool credential references from the LLM.
 
 ## Distinct from credentials and live probes
 
