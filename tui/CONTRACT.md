@@ -3,6 +3,29 @@ name: tui-runtime-contract
 contract_version: 2
 root_contract: CONTRACT.md
 related_files:
+  - tui/project_inventory_binding.go
+  - tui/project_inventory_kernel_test.go
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/tui/project_lifecycle.go
+  - tui/internal/tui/project_lifecycle_test.go
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/project_bundle.go
+  - tui/internal/preset/project_bundle_test.go
+  - tui/internal/preset/project_recipe_native.go
+  - tui/internal/preset/project_recipe_native_test.go
+  - tui/internal/process/ANATOMY.md
+  - tui/internal/process/project_bundle.go
+  - tui/internal/process/project_bundle_test.go
+  - tui/internal/process/project_inventory.go
+  - tui/internal/process/project_inventory_test.go
+  - tui/internal/process/project_lifecycle.go
+  - tui/internal/process/project_lifecycle_test.go
+  - tui/internal/process/project_recipe_native.go
+  - tui/internal/process/project_recipe_native_test.go
+  - tui/internal/inventory/ANATOMY.md
+  - tui/internal/inventory/project_kernel_test.go
+  - tui/internal/inventory/project_query.go
+  - tui/internal/inventory/project_query_test.go
   - tui/ANATOMY.md
   - tui/internal/config/global.go
   - tui/internal/tui/firstrun.go
@@ -11,6 +34,19 @@ related_files:
   - tui/internal/processscan/check.go
   - tui/internal/processscan/check_test.go
   - tui/internal/process/launcher.go
+  - tui/internal/process/project_interactive.go
+  - tui/internal/process/project_inspection_exchange.go
+  - tui/internal/process/project_recipe.go
+  - tui/internal/process/project_recipe_test.go
+  - tui/internal/preset/project_recipe.go
+  - tui/internal/preset/project_recipe_test.go
+  - tui/internal/preset/recipe_apply.go
+  - tui/internal/headless/spawn.go
+  - tui/internal/process/project_interactive_test.go
+  - tui/internal/tui/project_create.go
+  - tui/internal/tui/project_create_test.go
+  - tui/internal/tui/launcher.go
+  - tui/main_project_inspection_test.go
   - tui/purge_common.go
   - tui/internal/tui/layout.go
   - tui/internal/tui/props.go
@@ -411,3 +447,193 @@ new opt-in. The editor does not query or change billing. A supporting kernel
 checks included usage with the option off and permits credit-backed requests
 with it on; OpenAI decides charges. See the
 [Codex preset manual](internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md).
+
+## Project inspection and fresh interactive creation
+
+This is a partial Project migration, not completion of setup, existing-project
+Recipe reconciliation, import, lifecycle or Avatar work. Avatar is not retired.
+The kernel Project CONTRACT's Inspection and Interactive creation transaction
+sections own the operation-specific wire contract; Go's concrete consumer is
+`internal/process/project_interactive.go`, called by `main.go:prepareApp` and
+`internal/tui/project_create.go:RunProjectCreate`.
+
+- Ordinary `InspectProject` retains EOF `{project_dir}` and capped/default
+  process semantics, decoding the ordinary closed startup_readiness shape.
+  Actual `prepareApp` uses `InspectProjectReadiness`, the same command with one
+  newline `{project_dir,init_observation_mode:"callback"}` and live stdin.
+  Kernel owns eligibility/order and readiness: init stat failure precedes mixed
+  presence, which precedes orchestrator refusal. Legacy null/missing-admin
+  humans, malformed members and dot helpers do not count. Go only renders the
+  selected reason with the original multiline English prose and all advice.
+- Each closed observe_init_presence frame binds sequence (1++) and canonical
+  padded native directory bytes. Go stats only the original requested joined
+  init path EXACTLY ONCE: any success is present, os.IsNotExist absent, other
+  actual errors stat_failed. Ack is flushed synchronously with same identity,
+  presence and null or factual path_b64/native_errno/native_winerror. No raw
+  exception text, second stat, fallback enumeration or guessed operation.
+- Full mode-specific closed terminal, authoritative native identities, raw
+  surrogate labels, ordered stopping prefix and presence/failure transcript
+  must match before consuming readiness. Only then, after exit 0/empty stderr,
+  cannot_stat_init uses the retained ORIGINAL error/path with the original
+  sanity-check %w wrapper and unwrap chain. Forged/lost/truncated/extra/null or
+  wrong-sequence evidence never authorizes initialization/registration.
+- Callback transport adds no cap, deadline, callback thread, retry, cache or
+  lifecycle mechanism. Existing WaitDelay and context inherited-pipe release
+  remain; deferred panic/Goexit closes input, kills/reaps ONLY the owned direct
+  child and closes stdout, without recovery or substitute ack. Arbitrary
+  descendant termination/no-orphan guarantees are explicitly not claimed.
+  Ordinary generic strictProjectObject behavior stays unchanged. Missing outer
+  Project, original member display-name fallback, registration, wizard,
+  prerequisites and lifecycle remain separate, unchanged responsibilities.
+- `project create-interactive` receives explicit reviewed public projection as
+  a newline-terminated JSON request, never a whole draft or secret argv. Go
+  normalizes/deep-copies the public preset manifest, preserving unknown public
+  extensions and exact JSON numbers; current options only, exact allowed refs,
+  adaptive/blank Recipe, public addon/MCP selections and outer greeting text.
+  Independently approved existing roots must match after filesystem resolution;
+  a fresh OS inventory immediately before request yields clean/blocked/unknown.
+- Kernel owns staging/Recipe/readers/exclusive publication and its proved-owned
+  cleanup. Go owns exact preset and credential persistence/verification only
+  after one valid `ready_for_prerequisites`, committed false, bound attempt/ref.
+  It sends a secret-free accepted true/false acknowledgement of that same pair.
+  No credential writes before actual staged-reader validation/readiness.
+- Accept only exact created/committed-true identities/ref/attempt/warnings,
+  exactly two stdout envelopes and exit 0. Exit 1 with the one bounded documented
+  committed-false stderr envelope is a known refusal; any other envelope/exit,
+  start failure, timeout/cancel/signal/broken transport is unknown. Unknown never
+  triggers automatic replay, registration/launch, final deletion or staging
+  sweep; launcher confirmation for that attempt is blocked until leaving it.
+- External prerequisite writes may remain after refusal. Known publication permits
+  separate preferences/registration/library/launch; their failures are warnings,
+  never rollback. Headless create, UI/login and Portal responses are unchanged.
+  An unsupported installed kernel fails actionably: no legacy creation fallback,
+  automatic update, version pin, new installer/provider/bridge/API surface.
+
+Source fixtures in `project_interactive_test.go`, `project_create_test.go` and
+`main_project_inspection_test.go` lock transport/order/consumer preservation.
+They do not replace real installed-kernel/Go startup, wheel and native acceptance.
+
+## Existing Project configuration consumer (PRJ003 candidate)
+
+This is the next paired slice after inspection/fresh creation, **not completion
+of all Project work**. Recipe selection/import/UI policy and lifecycle remain Go-owned; existing apply/observation now use the bounded kernel consumer;
+Avatar and the credentials/UI/OS-process boundary are not abolished or migrated.
+The existing kernel Project configuration contract is authoritative. Its concrete
+Go consumer is `internal/process/project_configuration.go`, with public option
+projection in `internal/preset/project_configuration.go` and real composition in
+`main.go`, `internal/tui/app.go`, `firstrun.go` and `detect.go`.
+
+- Literal `lingtai-agent project OP`, no flags, one EOF JSON object (1 MiB bound):
+  initialize gets parent `project_dir`; configure/rehydrate get parent root,
+  directory/display identities, persisted real ref or explicit Keep-current,
+  public options and optional partial Psyche edits. Preset/credential persistence
+  precedes these existing-project operations; whole drafts/config/auth do not cross.
+- Existing init custom env/venv/pad/MCP/settings and blueprint identity/history,
+  unknown fields and exact integers are preserved by the kernel, not a second Go
+  merger. Displayed setup prompt defaults are not edits. Explicit covenant file
+  edits still map to current Psyche; comment file content maps to current Pad.
+  The public projection also supplies the inherited legacy init covenant path:
+  explicit `covenant_file` and outer language `default_covenant_file`. Kernel Core
+  selects explicit, existing nonempty, then default; fallback alone never edits
+  Psyche or reactivates ignored legacy prompt loading.
+- Policy propagation preserves the wizard's empty-allowed no-op. Go reads only
+  selected post-save default/allowed values; Core owns active authorization and
+  member filtering. Policy-only writes preserve the old parsed-preset-block
+  input domain without imposing whole-runtime Pad/env/owner readiness; no reader
+  effectiveness is claimed. Config propagation is kernel-owned too and retains
+  actual owner checks; no silent partial green.
+- Import replaces the old source-configure/worker-copy pair with one rehydrate
+  request. All-present is unchanged, mixed refused before init writes, all-absent
+  configures source then absent workers once. App does not immediately re-propagate
+  normal config over those imported workers. Recipe work remains a separate step.
+- Accept only exact closed response/source envelopes, expected status, zero exit,
+  empty stderr/code/error and complete/unchanged. Exit 1 carries one static error
+  envelope: rejected/partial/unknown, explicit counts and actual source write flags/
+  reader status. Partial writes are retained, not rolled back. Counts are init
+  writes, never whole-network readiness; ignored-field reader status stays ignored.
+- Cancellation/deadline/signal/start/unsupported/malformed/extra output is unknown,
+  even if files may have been written. Neither driver nor UI automatically retries,
+  installs, falls back to Go mutation policy, repairs/deletes state or launches after
+  failure. A failed wizard attempt exits for inspection, not resumptive replay.
+
+Authored portable wire and thin caller fixtures plus the shared kernel matrix do
+not prove runtime acceptance. Parent owns full suite adaptation/execution, installed
+CLI/native startup/cold packages and independent review before paired PR decisions.
+
+## Existing Recipe consumer (PRJ004 source candidate)
+
+The original `preset.RecipeNeedsApply`, `ApplyRecipe` and
+`ApplyRecipeToLingTaiDir` signatures remain the actual startup, first-run,
+choice-save and headless paths. Existing installed-CLI selection is reused; no
+product configuration/env flag or automatic install/repair is introduced. The
+kernel owns local Recipe selection, raw greet read, conditional metadata reread,
+one sorted eligible native-member enumeration, prompt/skills writes and normal-
+traversal snapshot. Bundle/import/resources and TUI selection persistence remain
+separate, not a full Project ownership claim.
+
+For a nonnil callback, Go MUST validate the closed member frame, sequence,
+canonical base64 and decoded byte length BEFORE executing the ORIGINAL function
+exactly once on the calling goroutine. Kernel writes the result before the next
+callback, including empty/truncating and arbitrary binary/large results. Go MUST
+NOT precompute, batch, run the function on a parallel goroutine, substitute a
+static token map, replay or fall back to local mutation. Nil/headless identity
+executes no callbacks. Explicit staging destination remains independent of the
+bundle root. Growing line I/O has no inherited 1 MiB/request-timeout limit.
+
+Normal completion requires validated terminal, EOF, expected child exit and
+fully drained/validated stderr. The old return count is `legacy_applied`;
+first old prompt/skills/snapshot failures determine nonnil error. Additional
+reader failures and ignored snapshot-removal evidence MUST NOT become new launch
+gates. Existing startup warning, first-run failure gate, choice-save after old
+success and headless best-effort policies stay unchanged. The bool-only observe
+API retains kernel booleans; unknown transport returns true to route to apply's
+actionable error, never a false equality/absence claim.
+
+Original callback panic/Goexit MUST preserve original unwind semantics. Input
+closes, the owned child is terminated/reaped as needed; no recover-to-error,
+substitute acknowledgement, later callback or snapshot is allowed. Lost output,
+ack or child crash means UNKNOWN partial physical outcome; earlier writes and
+callback side effects may remain. No retry, rollback or cleanup is implied.
+Factual failure phase/path/errno/Windows error/parse offset stays typed in the
+error chain. Exact old JSON decoder text/types and syscall formatting are NOT
+proved by the frozen ABI: insufficient native evidence MUST stay explicit rather
+than being guessed from Python exception strings or rereading owner contents.
+
+Conformance source: five installed-CLI concern groups under preset and two
+portable wire/lifecycle groups under process, plus unchanged baseline and actual
+UI assertions. Only parent-owned formatted/tested/native/installed acceptance
+evidence can establish conformance; authored source is not test PASS or full A.
+
+## Project native consumer ownership
+
+Kernel Project Core owns running-inventory/enterability/grouping, Recipe source
+selection/materialization/layers/opaque-document mutation policy and external
+lifecycle phase/target/preset decisions. Go retains exact native filesystem/JSON/
+process effects, original error identities, UI/registry/preset storage and existing
+confirmation/generation/writer barriers. One native adapter is not permission to
+reimplement whole domain actions in Go as a fallback.
+
+List and ProjectsModel use one managed-runtime Query and revalidate native row/PID
+identity; missing/failed query is an error, never empty success. Native Recipe
+mode keeps old Go decoder and owner document bytes without Python reparse of
+unknown deep values; native-only not_read_native is not readiness. The live save
+consumer aborts unknown layer transport before configure; native stat/read quirks
+remain unchanged. Bundle copy uses unchanged native tree/file helpers in Core's
+old phase order, including local-first wizard/import/headless behavior.
+
+Force refresh, normal revive, temporary clear, CLI clean and nirvana remain
+distinct. Go executes only request-bound phase/target operations, and validates
+full terminal/transcript/EOF/exit before restoring native errors or UI completion.
+Unknown means no replay/fallback/later effect; nirvana cannot emit Done/re-init.
+Cleanup receipt phases are validated before native effects. The management Core
+uses the explicit or exact managed SDK; native launch retains its original
+selected-agent interpreter resolution. Specialized native Recipe requests carry
+both filesystem roots losslessly, without changing the retained raw CLI ABI.
+Existing native best-effort errors, Puffo race checks, confirmation/force semantics
+and human-manifest writer barrier retain their prior behavior. Kernel self-refresh
+and native ACP/process transport are not replaced by these external actions.
+
+Native Recipe metadata failures retain the original `json.SyntaxError` chain.
+When available, the native receipt parse offset is that decoder's consumed-byte
+count, not a synthesized Python character/index position; raw-mode diagnostics
+remain their existing adapter facts.

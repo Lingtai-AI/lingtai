@@ -61,3 +61,8 @@ maintenance: |
 - **Readiness is bounded, not guaranteed.** `RunSpawn` waits up to `defaultReadyTimeout` for the agent to publish a heartbeat and reports what it observed; it does not block forever, and a not-yet-ready agent is reported, not treated as a failure to launch.
 - **Error codes are the stable surface.** `invalid_args`, `init_failed`, `bootstrap_failed`, and the spawn-specific codes are consumed by callers. Rename one only with the callers in the same change.
 - **Revision is explicit and staged.** `RunPresetRevision` uses only the manifest/input paths supplied by the caller. `dry-run` and `check` never write; `apply` validates once, stages a document/bundle in a hidden sibling, refuses an output path observed to exist, and attempts one rename into the requested path. A concurrent creator can race that inspection/publication window, with platform-dependent rename behavior; provider, OAuth, MCP, network, auth, Bootstrap, saved-preset, and current-runtime reads are outside this path.
+
+The best-effort plain Recipe apply in `spawn.go` now passes nil for the distinct
+kernel identity mode through the original preset API. It never invokes a
+callback or retries/falls back on transport failure. Bundle copy and selected
+TUI Recipe state remain separately owned and best-effort/required respectively.

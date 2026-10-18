@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
@@ -55,36 +56,8 @@ func requestClearContext(lingtaiCmd, dir string) (completed bool, err error) {
 func requestClearContextWithDeps(lingtaiCmd, dir string, cfg clearWaitConfig, deps clearContextDeps) (completed bool, err error) {
 	deps = normalizeClearContextDeps(deps)
 	cfg = normalizeClearWaitConfig(cfg)
-
-	if deps.isAlive(dir, 3.0) {
-		return false, writeClearSignal(dir)
-	}
-
-	if err := deps.revive(lingtaiCmd, dir); err != nil {
-		return false, err
-	}
-	if err := waitForAgentAlive(dir, cfg.aliveTimeout, cfg.pollInterval, deps); err != nil {
-		_ = suspendTemporaryClearAgent(dir, cfg, deps)
-		return false, err
-	}
-
-	beforeMoltCount, hasBeforeMoltCount := readMoltCount(dir)
-	eventsOffset := eventLogOffset(dir)
-
-	if err := writeClearSignal(dir); err != nil {
-		_ = suspendTemporaryClearAgent(dir, cfg, deps)
-		return false, err
-	}
-
-	waitErr := waitForClearCompletion(dir, beforeMoltCount, hasBeforeMoltCount, eventsOffset, cfg, deps)
-	suspendErr := suspendTemporaryClearAgent(dir, cfg, deps)
-	if waitErr != nil {
-		return false, waitErr
-	}
-	if suspendErr != nil {
-		return true, suspendErr
-	}
-	return true, nil
+	result, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "clear", Selected: dir}, clearLifecycleNative(lingtaiCmd, cfg, deps))
+	return result.Completed, err
 }
 
 func normalizeClearContextDeps(deps clearContextDeps) clearContextDeps {

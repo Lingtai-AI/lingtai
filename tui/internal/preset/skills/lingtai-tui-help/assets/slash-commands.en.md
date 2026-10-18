@@ -3,6 +3,32 @@
 Slash commands drive everything in `lingtai-tui` beyond plain chat. They open
 views, manage the agent lifecycle, and configure the runtime.
 
+## New-project confirmation and uncertain creation
+
+The no-project launcher's Review remains write-free until **Start project**.
+An installed kernel supporting `project inspect` and `project create-interactive`
+is required. Unsupported kernels fail with guidance to use the normal installer
+explicitly; creation does not silently update the kernel or fall back to Go
+project writers. Existing login/setup, headless commands and Avatar are retained.
+
+After confirmation, the kernel builds hidden staging, applies the local/adaptive
+Recipe and validates its readers before Go saves/verifies the selected preset and
+pending credentials. The kernel then publishes `.lingtai/`. External preset,
+credential or `.recipe` writes can remain if publication later fails. Once known
+created, a registration/preferences/launch warning does not undo the project.
+
+A timeout, cancellation, broken exchange or unexpected response is **unknown**,
+not proof that nothing was created. Do not repeatedly confirm, delete the final
+project or sweep hidden staging. Leave the attempt and inspect the approved
+project directory first. Read-only kernel inspection accepts
+`{"project_dir":"/absolute/project"}` on stdin to `lingtai-agent project inspect`;
+it never initializes a skeleton and says nothing about process liveness. The old
+launcher Discard screen recognizes legacy Go markers only, not new kernel
+attempts. This migration covers inspection and fresh interactive creation only;
+existing/import/Recipe reconciliation and lifecycle migration continue separately.
+
+Implementation and owner promises: [TUI contract](../../../../../CONTRACT.md#project-inspection-and-fresh-interactive-creation).
+
 ## Using the command palette
 
 - Type `/` in the message box to open the **command palette**.

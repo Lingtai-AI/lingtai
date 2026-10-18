@@ -2,6 +2,9 @@ package preset
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +24,26 @@ func TestDecodeJSONUseNumberPreservesExactTokenAndSingleDocumentSemantics(t *tes
 		var got map[string]interface{}
 		if err := DecodeJSONUseNumber([]byte(input), &got); err == nil {
 			t.Fatalf("DecodeJSONUseNumber(%q) error = nil, want trailing-data rejection", input)
+		}
+	}
+}
+
+func TestProjectLoadedContextLimitRetainsLargeExactInteger(t *testing.T) {
+	for _, input := range []string{`{"manifest":{"llm":{"provider":"custom","model":"test","context_limit":9007199254740993}}}`, `{"manifest":{"llm":{"provider":"custom","model":"test"},"context_limit":9007199254740993}}`} {
+		path := filepath.Join(t.TempDir(), "selected.json")
+		if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		p, err := loadFromPath(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(p.Manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "9007199254740993") {
+			t.Fatalf("loaded context limit rounded: %s", raw)
 		}
 	}
 }

@@ -22,6 +22,10 @@ func listMain() {
 		os.Exit(1)
 	}
 	snap := inventory.FromProcesses(found, inventory.Options{FilterDir: opts.FilterDir, SelfPID: os.Getpid(), IncludeHuman: true})
+	if snap.Err != nil {
+		fmt.Fprintf(os.Stderr, "error querying Project inventory: %v\n", snap.Err)
+		os.Exit(1)
+	}
 	for i := range snap.Records {
 		snap.Records[i].Uptime = humanUptimeFromEtime(snap.Records[i].Uptime)
 	}

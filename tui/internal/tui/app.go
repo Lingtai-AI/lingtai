@@ -560,7 +560,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ensure human folder exists before launching — InitProject is
 		// idempotent and prevents the race where the agent tries to
 		// send mail before the human mailbox is ready.
-		if err := process.InitProject(a.projectDir); err != nil {
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -570,24 +570,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
-		// Propagate LLM config to all agents in the network
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		// Combined rehydrate already initialized workers with the import-specific
+		// admin/identity rules. Do not immediately overwrite them via normal config
+		// propagation, including the all-present unchanged branch.
+		if msg.ProjectResult == nil || msg.ProjectResult.Status != "rehydrated" {
+			if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+				return a.projectConfigurationFailed(err)
+			}
+		}
 
-		// Recipe application: when the project carries a .recipe/ bundle
-		// (set by the first-run wizard or imported from a bundle), make
-		// sure every agent's .prompt + skills.paths + .tui-asset/.recipe/
-		// snapshot are in sync before the agent process boots. This
-		// catches the rehydration case: RehydrateNetwork just generated
-		// init.json for each imported agent, but .prompt and library
-		// registration haven't run yet for this launch. The startup
-		// reconciliation in main.go covers subsequent launches, but the
-		// very first launch after rehydration needs this hook too.
-		//
+		// Ordinary first-run Recipe reconcile uses the kernel consumer. Combined import
+		// already performed its separate Recipe step after kernel completion,
+		// or was all-present unchanged; do not repeat it here.
 		// a.projectDir is the .lingtai/ dir (main.go passes lingtaiDir to
 		// NewApp); the recipe resolvers want the parent project root that
 		// contains both .recipe/ and .lingtai/, so derive it here.
 		projectRoot := filepath.Dir(a.projectDir)
-		if preset.RecipeNeedsApply(projectRoot) {
+		if (msg.ProjectResult == nil || msg.ProjectResult.Status != "rehydrated") && preset.RecipeNeedsApply(projectRoot) {
 			humanDir := filepath.Join(a.projectDir, "human")
 			haddr := "human"
 			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
@@ -632,6 +631,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		addr := humanAddr(a.projectDir)
 		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
 
+		if msg.ProjectResult != nil && msg.ProjectResult.Source.ReaderStatus == "READ_OK_WITH_IGNORED_FIELDS" {
+			a.mail.AddSystemMessage(fmt.Sprintf("Project source reader: %s; init writes=%d (not whole-network readiness)", msg.ProjectResult.Source.ReaderStatus, msg.ProjectResult.Updated))
+		}
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
@@ -643,7 +645,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// deliver mail once the new orchestrator starts.
 		a.nirvanaCleanupPending = false
 		a.nirvanaCleanupStarted = false
-		process.InitProject(a.projectDir)
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -660,14 +664,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Recovery: global config was lost but agents are intact.
 			// Propagate the new LLM + capabilities to all agents, init
 			// the mail view, and launch the orchestrator.
-			a.recoveryMode = false
 			a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 			// Persist config.json so the recovery wizard does not
 			// re-trigger on next launch for OAuth / no-key presets
 			// (codex etc.). Without this, recovery would loop forever
 			// because config.json was never created. See issue #181.
 			config.EnsureConfigPersisted(a.globalDir)
-			PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+			if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+				return a.projectConfigurationFailed(err)
+			}
+			a.recoveryMode = false
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -679,20 +685,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir, a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 
 	case UsePresetMsg:
 		// Create agent from preset
-		process.InitProject(a.projectDir)
+		if err := process.InitProject(filepath.Dir(a.projectDir), a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
+		}
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil
 		}
 		agentName := p.Name
-		if err := preset.GenerateInitJSON(p, agentName, agentName, a.projectDir, a.globalDir); err != nil {
-			return a, nil
+		opts := preset.DefaultAgentOpts()
+		if language, ok := p.Manifest["language"].(string); ok && language != "" {
+			opts.Language = language
+		}
+		if err := preset.GenerateInitJSONWithOpts(p, agentName, agentName, a.projectDir, a.globalDir, opts, a.projectPython()); err != nil {
+			return a.projectConfigurationFailed(err)
 		}
 		orchDir := filepath.Join(a.projectDir, agentName)
 		var launchErr string
@@ -881,74 +895,44 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		targetName = target.Address
 	}
 	switch command {
-	case "sleep":
-		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					os.WriteFile(filepath.Join(agent.WorkingDir, ".sleep"), []byte(""), 0o644)
-					count++
-				}
-			}
-			addMsg(i18n.TF("mail.sleep_all", count))
-		} else if targetDir != "" {
-			os.WriteFile(filepath.Join(targetDir, ".sleep"), []byte(""), 0o644)
-			addMsg(i18n.T("mail.sleep_sent"))
+	case "sleep", "suspend":
+		result, err := externalProjectLifecycle(a.lingtaiCmd, process.ProjectLifecycleOptions{Action: command, Root: a.projectDir, Selected: targetDir, All: args == "all"}, projectLifecycleNative())
+		if err != nil {
+			addMsg(firstLine(err))
+			return a, nil
 		}
-		return a, nil
-	case "suspend":
 		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					os.WriteFile(filepath.Join(agent.WorkingDir, ".suspend"), []byte(""), 0o644)
-					count++
-				}
+			if command == "sleep" {
+				addMsg(i18n.TF("mail.sleep_all", result.Count))
+			} else {
+				addMsg(i18n.TF("mail.suspended_all", result.Count))
 			}
-			addMsg(i18n.TF("mail.suspended_all", count))
 		} else if targetDir != "" {
-			os.WriteFile(filepath.Join(targetDir, ".suspend"), []byte(""), 0o644)
-			addMsg(i18n.TF("mail.suspended", targetName))
+			if command == "sleep" {
+				addMsg(i18n.T("mail.sleep_sent"))
+			} else {
+				addMsg(i18n.TF("mail.suspended", targetName))
+			}
 		}
 		return a, nil
 	case "cpr":
+		result, err := externalProjectLifecycle(a.lingtaiCmd, process.ProjectLifecycleOptions{Action: "cpr", Root: a.projectDir, Selected: targetDir, All: args == "all"}, projectLifecycleNative())
+		if err != nil {
+			addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
+			return a, nil
+		}
 		if args == "all" {
-			agents, _ := fs.DiscoverAgents(a.projectDir)
-			count := 0
-			var failures []string
-			for _, agent := range agents {
-				if agent.IsHuman {
-					continue
-				}
-				if !fs.IsAlive(agent.WorkingDir, fs.AgentAliveThresholdSec()) {
-					count++
-					if err := reviveAgentDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
-						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
-					}
-				}
-			}
+			failures := projectLifecycleFailures(result)
 			if len(failures) > 0 {
-				addMsg(i18n.TF("mail.cpr_all_with_failures", count-len(failures), len(failures), strings.Join(failures, ", ")))
+				addMsg(i18n.TF("mail.cpr_all_with_failures", result.Count-len(failures), len(failures), strings.Join(failures, ", ")))
 			} else {
-				addMsg(i18n.TF("mail.cpr_all", count))
+				addMsg(i18n.TF("mail.cpr_all", result.Count))
 			}
 		} else if targetDir != "" {
-			if !fs.IsAlive(targetDir, fs.AgentAliveThresholdSec()) {
-				if err := reviveAgentDir(a.lingtaiCmd, targetDir); err != nil {
-					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
-				} else {
-					addMsg(i18n.TF("mail.cpr", targetName))
-				}
-			} else {
+			if result.AlreadyAlive {
 				addMsg(i18n.T("mail.cpr_alive"))
+			} else {
+				addMsg(i18n.TF("mail.cpr", targetName))
 			}
 		}
 		return a, nil
@@ -975,19 +959,11 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			projectDir := a.projectDir
 			generation := a.mail.generation
 			return a, func() tea.Msg {
-				agents, _ := fs.DiscoverAgents(projectDir)
-				count := 0
-				var failures []string
-				for _, agent := range agents {
-					if agent.IsHuman {
-						continue
-					}
-					count++
-					if err := hardRefreshDir(lingtaiCmd, agent.WorkingDir); err != nil {
-						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
-					}
+				result, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Root: projectDir, All: true}, projectLifecycleNative())
+				if err != nil {
+					return refreshDoneMsg{generation: generation, err: err}
 				}
-				return refreshAllDoneMsg{generation: generation, count: count, failures: failures}
+				return refreshAllDoneMsg{generation: generation, count: result.Count, failures: projectLifecycleFailures(result)}
 			}
 		} else if args != "" && targetDir != "" && a.lingtaiCmd != "" {
 			// `/refresh <preset>` — switch to a named preset and
@@ -1237,38 +1213,8 @@ var hasPuffoManagedAgent = process.HasPuffoManagedAgent
 //  6. ForceLaunchAgent (bypassing the duplicate-protection gate; we've
 //     already verified the agent dir is clear above).
 func hardRefreshDir(lingtaiCmd, dir string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	suspendFile := filepath.Join(dir, ".suspend")
-	os.WriteFile(suspendFile, []byte(""), 0o644)
-	waitForLockClear(dir)
-	// Escalation: if the agent ignored .suspend (deadlocked, slow shutdown,
-	// detached child), kill the lingering interpreter so LaunchAgent's
-	// duplicate-protection gate doesn't refuse the relaunch.
-	if process.IsAgentRunning(dir) {
-		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
-			return err // ownership changed during the refresh; preserve its lock
-		}
-	}
-	// Clear lingering handshake files. waitForLockClear may have force-removed
-	// .agent.lock; the others (.refresh/.refresh.taken/.suspend) get removed
-	// here so the new interpreter doesn't immediately observe a stale signal.
-	os.Remove(filepath.Join(dir, ".agent.lock"))
-	os.Remove(filepath.Join(dir, ".refresh"))
-	os.Remove(filepath.Join(dir, ".refresh.taken"))
-	os.Remove(suspendFile)
-	resetActivePresetToDefault(dir)
-	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
-	// Defensive: ForceLaunchAgent → launchAgentUnsafe calls fs.CleanSignals
-	// internally, but a fresh .suspend written by another path between our
-	// remove() above and the relaunch would put the new process to sleep.
-	// Removing again here is cheap and idempotent.
-	os.Remove(suspendFile)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Selected: dir}, projectLifecycleNative())
+	return err
 }
 
 // waitForLockClear polls for .agent.lock to free (force-removing it after
@@ -1402,45 +1348,7 @@ func readActivePreset(dir string) string {
 // validate it again with `_preset_ref_in` so home-shortened and
 // absolute forms compare equal.
 func resolvePresetInAllowed(dir, query string) (string, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return "", fmt.Errorf("preset name is empty")
-	}
-	allowed := readAllowedPresets(dir)
-	if len(allowed) == 0 {
-		return "", fmt.Errorf("agent has no manifest.preset.allowed list — cannot switch")
-	}
-	// Exact-path match first.
-	for _, ref := range allowed {
-		if ref == query {
-			return ref, nil
-		}
-	}
-	// Basename-stem match (drop directory prefix and .json suffix).
-	var matches []string
-	for _, ref := range allowed {
-		stem := strings.TrimSuffix(filepath.Base(ref), ".json")
-		if stem == query {
-			matches = append(matches, ref)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		// Two presets in the allow-list with the same basename (e.g.
-		// a template "mimo.json" and a saved "mimo.json"). Disambiguate.
-		return "", fmt.Errorf("preset %q is ambiguous (matches %d entries) — pass the full path",
-			query, len(matches))
-	}
-	// No match. Build a helpful error listing what's actually allowed
-	// (basenames only — full paths are noisy in the status bar).
-	stems := make([]string, 0, len(allowed))
-	for _, ref := range allowed {
-		stems = append(stems, strings.TrimSuffix(filepath.Base(ref), ".json"))
-	}
-	return "", fmt.Errorf("preset %q is not in this agent's allowed list (available: %s)",
-		query, strings.Join(stems, ", "))
+	return process.ResolveExternalProjectPreset("", dir, query, readAllowedPresets)
 }
 
 // setActivePreset rewrites manifest.preset.active to the given path.
@@ -1690,58 +1598,16 @@ func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 // The caller is expected to have already validated presetPath via
 // resolvePresetInAllowed.
 func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	suspendFile := filepath.Join(dir, ".suspend")
-	os.WriteFile(suspendFile, []byte(""), 0o644)
-	waitForLockClear(dir)
-	if process.IsAgentRunning(dir) {
-		if err := process.TerminateAgentProcesses(dir); errors.Is(err, process.ErrPuffoManagedAgent) {
-			return err
-		}
-	}
-	os.Remove(filepath.Join(dir, ".agent.lock"))
-	os.Remove(filepath.Join(dir, ".refresh"))
-	os.Remove(filepath.Join(dir, ".refresh.taken"))
-	os.Remove(suspendFile)
-	if err := setActivePreset(dir, presetPath); err != nil {
-		// Don't refuse the relaunch — the user asked to refresh.
-		// Falling back to whatever active currently is.
-	}
-	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
-	os.Remove(suspendFile)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "refresh", Selected: dir, PresetPath: presetPath}, projectLifecycleNative())
+	return err
 }
 
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
 // is gone), then relaunches the agent. Used by /cpr (dead agent, no prior
 // suspend) and as the tail of hardRefreshDir (after writing .suspend).
 func reviveDir(lingtaiCmd, dir string) error {
-	if hasPuffoManagedAgent(dir) {
-		return process.ErrPuffoManagedAgent
-	}
-	lockFile := filepath.Join(dir, ".agent.lock")
-	locked := true
-	for i := 0; i < 120; i++ { // 120 × 500ms = 60s max
-		if tryLock(lockFile) {
-			locked = false
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if locked {
-		// Process likely died without releasing lock — clean up
-		os.Remove(lockFile)
-	}
-	cmd, err := process.LaunchAgent(lingtaiCmd, dir)
-	if err != nil {
-		return err
-	}
-	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+	_, err := externalProjectLifecycle(lingtaiCmd, process.ProjectLifecycleOptions{Action: "revive", Selected: dir}, projectLifecycleNative())
+	return err
 }
 
 var reviveAgentDir = reviveDir
@@ -2413,4 +2279,26 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 		}
 	}
 	return ""
+}
+
+// projectPython keeps launch's existing selected-init venv resolver and the
+// actual App/global fallback; no feature flag or installer is involved.
+func (a App) projectPython() string {
+	fallback := a.lingtaiCmd
+	if fallback == "" {
+		fallback = config.LingtaiCmd(a.globalDir)
+	}
+	return process.ProjectPython(a.orchDir, fallback)
+}
+
+// Failure, including partial/unknown, blocks subsequent recipe/launch actions.
+// The typed driver's static text retains writes/counts/reader status, not raw
+// documents or child stderr. Mail is display only, not a global readiness claim.
+func (a App) projectConfigurationFailed(err error) (tea.Model, tea.Cmd) {
+	a.currentView = appViewMail
+	humanDir := filepath.Join(a.projectDir, "human")
+	addr := humanAddr(a.projectDir)
+	a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.ToolCallTruncate))
+	a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
+	return a, tea.Batch(a.mail.Init(), a.sendSize())
 }

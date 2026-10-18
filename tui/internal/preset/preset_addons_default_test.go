@@ -17,6 +17,7 @@ import (
 )
 
 func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -32,7 +33,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 	opts := AgentOpts{
 		Addons: []string{"imap", "telegram", "feishu", "wechat", "whatsapp"},
 	}
-	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,6 +119,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 // preserve-vs-add behavior: pre-existing addons are kept verbatim from the
 // previous init.json, so user edits are never clobbered by /setup.
 func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -132,7 +134,7 @@ func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
 	p := codexPreset()
 
 	// First creation: only imap.
-	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
+	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
 		Addons: []string{"imap"},
 	}); err != nil {
 		t.Fatal(err)
@@ -155,7 +157,7 @@ func TestGenerateInitJSONPreservesExistingAddons(t *testing.T) {
 	os.WriteFile(initPath, updated, 0o644)
 
 	// Re-run with a different addon selection (telegram).
-	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
+	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
 		Addons: []string{"telegram"},
 	}); err != nil {
 		t.Fatal(err)
@@ -198,6 +200,7 @@ func keysOf(m map[string]interface{}) []string {
 // edited init.json by hand), GenerateInitJSONWithOpts should normalize on
 // the next /setup pass without losing the addon names.
 func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -217,7 +220,7 @@ func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
 	p := codexPreset()
-	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
+	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{
 		Addons: []string{"feishu"}, // should be ignored — legacy names take precedence
 	}); err != nil {
 		t.Fatal(err)
@@ -249,6 +252,7 @@ func TestGenerateInitJSONNormalizesLegacyDictShape(t *testing.T) {
 // has that key dropped during regen instead of being carried into the
 // regenerated init.json, while valid keys are preserved.
 func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -267,7 +271,7 @@ func TestGenerateInitJSONDropsInvalidLegacyDictKey(t *testing.T) {
 	os.WriteFile(filepath.Join(agentDir, "init.json"), data, 0o644)
 
 	p := codexPreset()
-	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{}); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, p, "alice", "alice", lingtaiDir, globalDir, AgentOpts{}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -8,10 +8,11 @@ import (
 )
 
 func TestGenerateInitJSONFreshOmitsObsoletePromptFiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, "global")
-	if err := GenerateInitJSON(codexPreset(), "fresh", "fresh", lingtaiDir, globalDir); err != nil {
+	if err := fixtureGenerateInitJSON(t, codexPreset(), "fresh", "fresh", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "fresh", "init.json"))
@@ -33,6 +34,7 @@ func TestGenerateInitJSONFreshOmitsObsoletePromptFiles(t *testing.T) {
 }
 
 func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	agentDir := filepath.Join(lingtaiDir, "alice")
@@ -44,6 +46,10 @@ func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *t
 	// /setup rewrites an existing init.json. The two *_file keys are stale
 	// kernel-facing fields, while the other top-level and manifest fields are
 	// supported or user-owned and must survive the rewrite.
+	envFile := filepath.Join(tmp, "custom.env")
+	if err := os.WriteFile(envFile, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	old := map[string]interface{}{
 		"manifest": map[string]interface{}{
 			"agent_name": "alice",
@@ -53,7 +59,7 @@ func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *t
 		"covenant_file":   "/project/.recipe/covenant.md",
 		"principle_file":  "/project/.lingtai/principle.md",
 		"procedures_file": "/project/.lingtai/procedures.md",
-		"env_file":        "/project/.lingtai/.env",
+		"env_file":        envFile,
 		"venv_path":       "/project/.lingtai/runtime/venv",
 		"pad":             "keep this pad",
 		"user_config":     map[string]interface{}{"keep": "me"},
@@ -66,7 +72,7 @@ func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *t
 		t.Fatal(err)
 	}
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 
@@ -86,7 +92,7 @@ func TestGenerateInitJSONOmitsObsoletePromptFilesAndPreservesExistingConfig(t *t
 
 	for key, want := range map[string]interface{}{
 		"covenant_file": "/project/.recipe/covenant.md",
-		"env_file":      "/project/.lingtai/.env",
+		"env_file":      envFile,
 		"venv_path":     "/project/.lingtai/runtime/venv",
 		"pad":           "keep this pad",
 	} {

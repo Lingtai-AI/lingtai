@@ -13,6 +13,7 @@ import (
 // genInit runs GenerateInitJSONWithOpts against fresh temp dirs and returns
 // the parsed manifest plus the globalDir (for .env assertions).
 func genInit(t *testing.T, opts AgentOpts) (manifest map[string]interface{}, globalDir string) {
+	t.Setenv("HOME", t.TempDir())
 	t.Helper()
 	tmp := t.TempDir()
 	globalDir = filepath.Join(tmp, "global")
@@ -20,7 +21,7 @@ func genInit(t *testing.T, opts AgentOpts) (manifest map[string]interface{}, glo
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
@@ -58,6 +59,7 @@ func TestGenerateInitJSON_NeverEmitsSoulConfig(t *testing.T) {
 // existing .env — including a LINGTAI_SOUL_FLOW_ENABLED line left by the
 // retired opt-in — is neither rewritten nor pruned by agent generation.
 func TestGenerateInitJSON_PreservesRetiredEnvLinesByteForByte(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -71,7 +73,9 @@ func TestGenerateInitJSON_PreservesRetiredEnvLinesByteForByte(t *testing.T) {
 	if err := os.WriteFile(config.EnvFilePath(globalDir), []byte(seed), 0o600); err != nil {
 		t.Fatalf("seed .env: %v", err)
 	}
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	opts := DefaultAgentOpts()
+	opts.EnvFile = config.EnvFilePath(globalDir)
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	got, err := os.ReadFile(config.EnvFilePath(globalDir))
@@ -89,6 +93,7 @@ func TestGenerateInitJSON_PreservesRetiredEnvLinesByteForByte(t *testing.T) {
 // retired top-level soul_file value through unchanged — neither rewritten,
 // extended, nor dropped — while still emitting no new Soul field.
 func TestGenerateInitJSON_OldAgentKeepsLegacySoulFieldsInert(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -115,7 +120,7 @@ func TestGenerateInitJSON_OldAgentKeepsLegacySoulFieldsInert(t *testing.T) {
 		t.Fatalf("seed legacy init.json: %v", err)
 	}
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(agentDir, "init.json"))

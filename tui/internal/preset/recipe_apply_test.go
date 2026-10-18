@@ -104,6 +104,7 @@ func skillsPaths(t *testing.T, initJSONPath string) []string {
 // --- CopyBundle ---
 
 func TestCopyBundle_NoLibrary(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	src := makeBundleRoot(t, "test", nil)
 	dst := t.TempDir()
 	if err := CopyBundle(src, dst); err != nil {
@@ -125,6 +126,7 @@ func TestCopyBundle_NoLibrary(t *testing.T) {
 }
 
 func TestCopyBundle_WithLibrary(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	libName := "my-lib"
 	src := makeBundleRoot(t, "test", &libName)
 	dst := t.TempDir()
@@ -141,6 +143,7 @@ func TestCopyBundle_WithLibrary(t *testing.T) {
 }
 
 func TestCopyBundle_ReplacesOldRecipe(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	src := makeBundleRoot(t, "newrecipe", nil)
 	dst := t.TempDir()
 	// pre-existing .recipe/ with stale file
@@ -158,6 +161,7 @@ func TestCopyBundle_ReplacesOldRecipe(t *testing.T) {
 }
 
 func TestCopyBundle_InvalidSource(t *testing.T) {
+	fixtureRecipeRuntime(t) // exact parent-installed candidate; original oracle unchanged
 	dst := t.TempDir()
 	empty := t.TempDir()
 	if err := CopyBundle(empty, dst); err == nil {
@@ -218,6 +222,7 @@ func TestAppendSkillsPath_NoSkillsCap(t *testing.T) {
 // --- RecipeNeedsApply ---
 
 func TestRecipeNeedsApply_NoRecipe(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	proj := t.TempDir()
 	if RecipeNeedsApply(proj) {
 		t.Errorf("RecipeNeedsApply with no .recipe/ = true, want false")
@@ -225,6 +230,7 @@ func TestRecipeNeedsApply_NoRecipe(t *testing.T) {
 }
 
 func TestRecipeNeedsApply_NoSnapshot(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	src := makeBundleRoot(t, "test", nil)
 	proj := t.TempDir()
 	CopyBundle(src, proj)
@@ -235,6 +241,7 @@ func TestRecipeNeedsApply_NoSnapshot(t *testing.T) {
 }
 
 func TestRecipeNeedsApply_Identical(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	src := makeBundleRoot(t, "test", nil)
 	proj := t.TempDir()
 	CopyBundle(src, proj)
@@ -249,6 +256,7 @@ func TestRecipeNeedsApply_Identical(t *testing.T) {
 }
 
 func TestRecipeNeedsApply_Different(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	src := makeBundleRoot(t, "test", nil)
 	proj := t.TempDir()
 	CopyBundle(src, proj)
@@ -268,6 +276,7 @@ func TestRecipeNeedsApply_Different(t *testing.T) {
 // --- ApplyRecipe ---
 
 func TestApplyRecipe_WritesPromptAndSnapshots(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	src := makeBundleRoot(t, "test", nil)
 	proj := makeProjectWithAgents(t, "alpha", "beta")
 	CopyBundle(src, proj)
@@ -307,6 +316,7 @@ func TestApplyRecipe_WritesPromptAndSnapshots(t *testing.T) {
 }
 
 func TestApplyRecipe_AppendsSkillsPath(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	libName := "velli"
 	src := makeBundleRoot(t, "test", &libName)
 	proj := makeProjectWithAgents(t, "alpha", "beta")
@@ -332,6 +342,7 @@ func TestApplyRecipe_AppendsSkillsPath(t *testing.T) {
 }
 
 func TestApplyRecipe_SkillsPathAdditive_AcrossChanges(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	// First recipe has library "old-lib"; apply → agent paths include ../../old-lib.
 	oldLib := "old-lib"
 	src1 := makeBundleRoot(t, "r1", &oldLib)
@@ -364,6 +375,7 @@ func TestApplyRecipe_SkillsPathAdditive_AcrossChanges(t *testing.T) {
 }
 
 func TestApplyRecipe_SkipsHumanDir(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	src := makeBundleRoot(t, "test", nil)
 	proj := makeProjectWithAgents(t, "orch", "human")
 	CopyBundle(src, proj)
@@ -382,6 +394,7 @@ func TestApplyRecipe_SkipsHumanDir(t *testing.T) {
 }
 
 func TestApplyRecipe_NoRecipeInProject(t *testing.T) {
+	fixtureRecipeRuntime(t) // installed transport fixture; original assertions unchanged
 	proj := makeProjectWithAgents(t, "orch")
 	// No .recipe/ copied in.
 	_, err := ApplyRecipe(proj, "", nil)

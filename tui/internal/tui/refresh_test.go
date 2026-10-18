@@ -172,6 +172,7 @@ func TestReadAllowedPresets_Missing(t *testing.T) {
 // TestResolvePresetInAllowed_StemMatch verifies that a bare preset
 // name resolves to the matching full path.
 func TestResolvePresetInAllowed_StemMatch(t *testing.T) {
+	fixtureUILifecycle(t)
 	dir := t.TempDir()
 	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
 		"manifest": map[string]interface{}{
@@ -196,6 +197,7 @@ func TestResolvePresetInAllowed_StemMatch(t *testing.T) {
 // TestResolvePresetInAllowed_ExactPath verifies that the full path
 // form also resolves.
 func TestResolvePresetInAllowed_ExactPath(t *testing.T) {
+	fixtureUILifecycle(t)
 	dir := t.TempDir()
 	ref := "~/.lingtai-tui/presets/templates/minimax.json"
 	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
@@ -218,6 +220,7 @@ func TestResolvePresetInAllowed_ExactPath(t *testing.T) {
 // TestResolvePresetInAllowed_NotInAllowed verifies the error message
 // names the unknown preset and lists what's available.
 func TestResolvePresetInAllowed_NotInAllowed(t *testing.T) {
+	fixtureUILifecycle(t)
 	dir := t.TempDir()
 	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
 		"manifest": map[string]interface{}{
@@ -246,6 +249,7 @@ func TestResolvePresetInAllowed_NotInAllowed(t *testing.T) {
 // allowed entries share a basename, the resolver refuses rather than
 // pick arbitrarily.
 func TestResolvePresetInAllowed_AmbiguousStem(t *testing.T) {
+	fixtureUILifecycle(t)
 	dir := t.TempDir()
 	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
 		"manifest": map[string]interface{}{

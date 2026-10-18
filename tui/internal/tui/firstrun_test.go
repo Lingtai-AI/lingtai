@@ -669,10 +669,13 @@ func TestSetupModePrefillsLegacyCommentWhenCommentFileMissing(t *testing.T) {
 // every agent's .prompt untouched — instead of re-applying adaptive, which
 // would RemoveAll the project's .recipe/ and rewrite .prompt for every agent.
 func TestSetupKeepCurrentDoesNotRewritePromptOrRecipe(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	baseDir := filepath.Join(tmp, ".lingtai")
 	orchDir := filepath.Join(baseDir, "alice")
 	globalDir := filepath.Join(tmp, "global")
+	fixtureUIKernel(t, globalDir)
+	writeRecipeFile(t, config.EnvFilePath(globalDir), "")
 
 	// Existing network: the project ships its own .recipe/ and the agent has
 	// a live .prompt that must survive /setup. The global adaptive bundle is
@@ -700,7 +703,7 @@ func TestSetupKeepCurrentDoesNotRewritePromptOrRecipe(t *testing.T) {
 		setupOrchDir:     orchDir,
 		agentName:        "alice",
 		cursor:           0,
-		presets:          []preset.Preset{minimaxPresetForSetupTest()},
+		presets:          []preset.Preset{fixtureUISetupPreset(t)},
 		pendingAgentOpts: preset.DefaultAgentOpts(),
 		step:             stepAgentNameDir,
 		fieldIdx:         -1, // "Skip — keep existing agent settings" branch

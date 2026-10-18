@@ -15,6 +15,7 @@ import (
 // after creation via system/lingtai.md / psyche, and the kernel treats a
 // missing seed as an empty seed.
 func TestGenerateInitJSONOmitsSeedCharacterField(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, ".lingtai-tui")
@@ -26,7 +27,7 @@ func TestGenerateInitJSONOmitsSeedCharacterField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatal(err)
 	}
 

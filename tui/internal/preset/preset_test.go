@@ -667,7 +667,7 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 
 		globalDir := filepath.Join(tmpDir, ".lingtai-global")
 		Bootstrap(globalDir)
-		if err := GenerateInitJSON(p, "test-agent", "test-agent", lingtaiDir, globalDir); err != nil {
+		if err := fixtureGenerateInitJSON(t, p, "test-agent", "test-agent", lingtaiDir, globalDir); err != nil {
 			t.Fatalf("GenerateInitJSON() error: %v", err)
 		}
 
@@ -812,6 +812,7 @@ func TestFamilyTemplatesEndpointFields(t *testing.T) {
 }
 
 func TestCodexPresetDefaultOmitsServiceTierAndSetsThinking(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	p := codexPreset()
 	llm, ok := p.Manifest["llm"].(map[string]interface{})
 	if !ok {
@@ -833,7 +834,7 @@ func TestCodexPresetDefaultOmitsServiceTierAndSetsThinking(t *testing.T) {
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatalf("create lingtai dir: %v", err)
 	}
-	if err := GenerateInitJSON(p, "codex-agent", "codex-agent", lingtaiDir, globalDir); err != nil {
+	if err := fixtureGenerateInitJSON(t, p, "codex-agent", "codex-agent", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON() error: %v", err)
 	}
 
@@ -938,13 +939,15 @@ func TestHasAny(t *testing.T) {
 }
 
 func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
 	os.MkdirAll(lingtaiDir, 0o755)
 
 	p := openaiPreset()
-	if err := GenerateInitJSON(p, "alice", "alice", lingtaiDir, globalDir); err != nil {
+	p.Manifest["llm"].(map[string]interface{})["model"] = "fixture-model"
+	if err := fixtureGenerateInitJSON(t, p, "alice", "alice", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
 
@@ -1090,6 +1093,7 @@ func TestFamilyTemplateCapabilities(t *testing.T) {
 // writes the retired manifest.llm.api_compat field, even from a legacy saved
 // preset that still carries it.
 func TestGenerateInitJSONStripsRetiredAPICompat(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
 	globalDir := filepath.Join(tmp, "global")
@@ -1097,7 +1101,7 @@ func TestGenerateInitJSONStripsRetiredAPICompat(t *testing.T) {
 	llm := p.Manifest["llm"].(map[string]interface{})
 	llm["model"] = "test-model"
 	llm["api_compat"] = "openai"
-	if err := GenerateInitJSON(p, "alice", "alice", lingtaiDir, globalDir); err != nil {
+	if err := fixtureGenerateInitJSON(t, p, "alice", "alice", lingtaiDir, globalDir); err != nil {
 		t.Fatalf("GenerateInitJSON: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))

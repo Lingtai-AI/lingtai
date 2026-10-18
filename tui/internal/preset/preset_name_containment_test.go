@@ -110,6 +110,7 @@ func TestDelete_RejectsUnsafeNamesAndDoesNotTouchOutsideFiles(t *testing.T) {
 }
 
 func TestGenerateInitJSONWithOpts_RejectsUnsafeDirName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	for _, name := range unsafeNames {
 		tmp := t.TempDir()
 		lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -138,6 +139,7 @@ func TestGenerateInitJSONWithOpts_RejectsUnsafeDirName(t *testing.T) {
 }
 
 func TestGenerateInitJSONWithOpts_AcceptsNormalDirName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
@@ -145,7 +147,7 @@ func TestGenerateInitJSONWithOpts_AcceptsNormalDirName(t *testing.T) {
 	}
 	globalDir := filepath.Join(tmp, "global")
 
-	if err := GenerateInitJSONWithOpts(codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
+	if err := fixtureGenerateInitJSONWithOpts(t, codexPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 		t.Fatalf("GenerateInitJSONWithOpts(normal dirName) error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(lingtaiDir, "alice", "init.json")); err != nil {

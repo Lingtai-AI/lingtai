@@ -21,12 +21,14 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // FirstRunDoneMsg is emitted when first-run flow completes.
 type FirstRunDoneMsg struct {
-	OrchDir  string // full path to orchestrator directory
-	OrchName string // agent name
+	OrchDir       string                              // full path to orchestrator directory
+	OrchName      string                              // agent name
+	ProjectResult *process.ProjectConfigurationResult // actual combined import receipt; prevents a second worker propagation
 }
 
 // ProjectDraftConfirmedMsg is emitted from stepReview (draftMode only) when
@@ -76,12 +78,13 @@ type bootstrapErrMsg struct{ err string }
 // bootstrapProgressMsg reports a setup progress step (i18n key).
 type bootstrapProgressMsg struct{ key string }
 
-// rehydrateDoneMsg is emitted when RehydrateNetwork finishes during the
+// rehydrateDoneMsg is emitted when kernel project rehydrate finishes during the
 // rehydration flow's stepPropagate. Carries the worker count on success
 // or a non-empty error string on failure.
 type rehydrateDoneMsg struct {
 	workers int
 	err     string
+	result  process.ProjectConfigurationResult
 }
 
 type firstRunStep int
@@ -94,7 +97,7 @@ const (
 	stepAgentPresets // pick default + multi-toggle allowed
 	stepAgentNameDir
 	stepReview    // draftMode only — final "Start project" confirmation before staging/commit
-	stepPropagate // rehydration only — runs after orchestrator save, before launch
+	stepPropagate // combined imported configure or terminal mutation failure
 	stepLaunching
 )
 
@@ -174,7 +177,9 @@ type FirstRunModel struct {
 	covenantInput textinput.Model
 	commentInput  textinput.Model
 	// Track whether user manually edited prompt paths (dirty = don't auto-update on lang change)
-	covenantDirty bool
+	covenantDirty               bool
+	setupPromptCovenantBaseline string // displayed value, not an edit
+	setupPromptCommentBaseline  string // displayed value, not an edit
 	// Welcome page language selector
 	langCursor            int
 	welcomeOnly           bool     // true when opened from /settings (return to mail after language pick)
@@ -200,13 +205,14 @@ type FirstRunModel struct {
 	// Rehydration mode (agora cloned network): runs the normal first-run wizard
 	// but prefills the orchestrator name/dir from .agent.json, locks the dir
 	// (can't be edited), and adds stepPropagate at the end to propagate the
-	// orchestrator's init.json to every other agent via preset.RehydrateNetwork.
+	// orchestrator's init.json to every other agent via the combined kernel operation.
 	rehydrateMode     bool
-	rehydrateOrchDir  string // existing orchestrator directory name (not a full path)
-	rehydrateOrchName string // existing orchestrator agent_name from its .agent.json
-	rehydrateWorkers  int    // count of workers propagated (set at stepPropagate completion)
-	rehydrateErr      string // non-empty if RehydrateNetwork failed
-	rehydrateDone     bool   // true when rehydrateDoneMsg has arrived
+	rehydrateOrchDir  string                             // existing orchestrator directory name (not a full path)
+	rehydrateOrchName string                             // existing orchestrator agent_name from its .agent.json
+	rehydrateWorkers  int                                // count of workers propagated (set at stepPropagate completion)
+	rehydrateErr      string                             // non-empty if kernel project rehydrate failed
+	rehydrateDone     bool                               // true when rehydrateDoneMsg has arrived
+	rehydrateResult   process.ProjectConfigurationResult // actual receipt, including partial source effects
 	// Bootstrap state (venv + assets install)
 	setupDone   bool        // true when bootstrap goroutine finishes
 	setupErr    string      // non-empty if bootstrap failed
@@ -709,11 +715,9 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 //     (cannot be renamed — the directory already exists on disk).
 //   - The dir-exists check is skipped in the save handler (normal first-run
 //     refuses to overwrite an existing directory; rehydration expects it).
-//   - After the orchestrator's init.json is written, the wizard advances to
-//     stepPropagate instead of stepLaunching, which calls
-//     preset.RehydrateNetwork to propagate the new init.json to every
-//     non-orchestrator agent. stepPropagate then advances to stepLaunching
-//     as usual.
+//   - One kernel rehydrate request observes all blueprint membership before
+//     any source init write, then configures source and workers in order.
+//     stepPropagate presents the complete/partial/unknown result before launch.
 //
 // orchDir is the existing orchestrator directory name (not a full path),
 // and orchName is the agent_name read from that directory's .agent.json.
@@ -789,19 +793,41 @@ func waitForProgress(ch <-chan string) tea.Cmd {
 	}
 }
 
-// runRehydratePropagation runs preset.RehydrateNetwork in the background
-// and emits a rehydrateDoneMsg with the worker count or an error. Called
-// after the orchestrator's init.json has been written in rehydration mode.
-func (m FirstRunModel) runRehydratePropagation() tea.Cmd {
-	baseDir := m.baseDir
-	orchDir := m.rehydrateOrchDir
+// runRehydratePropagation makes ONE all-absent kernel operation. Never
+// configure the selected source first: that would create a mixed network.
+// Recipe reconcile remains Go-owned and runs only after a complete receipt.
+func (m FirstRunModel) runRehydratePropagation(request process.ProjectConfigureRequest, recipeName, lang string) tea.Cmd {
+	python := process.ProjectPython(filepath.Join(m.baseDir, request.DirectoryName), config.LingtaiCmd(m.globalDir))
 	return func() tea.Msg {
-		n, err := preset.RehydrateNetwork(baseDir, orchDir)
-		if err != nil {
-			return rehydrateDoneMsg{workers: n, err: err.Error()}
+		result, err := process.RehydrateProject(context.Background(), python, request)
+		workers := result.Updated
+		if result.Source.InitWritten {
+			workers--
 		}
-		return rehydrateDoneMsg{workers: n}
+		if err != nil {
+			return rehydrateDoneMsg{workers: workers, err: err.Error(), result: result}
+		}
+		if result.Outcome == "unchanged" {
+			return rehydrateDoneMsg{workers: workers, result: result}
+		}
+		orchDir := filepath.Join(m.baseDir, request.DirectoryName)
+		humanDir := filepath.Join(m.baseDir, "human")
+		addr := humanAddr(m.baseDir)
+		if err := applyRecipe(m.baseDir, orchDir, m.globalDir, humanDir, addr, recipeName, lang); err != nil {
+			return rehydrateDoneMsg{workers: workers, err: "kernel rehydration completed; subsequent Go Recipe application failed; inspect before another action", result: result}
+		}
+		return rehydrateDoneMsg{workers: workers, result: result}
 	}
+}
+
+// A failed kernel mutation is terminal for this wizard attempt: no hidden
+// retry or return to a save button after possible partial/unknown effects.
+func (m FirstRunModel) projectConfigurationFailed(err error) (FirstRunModel, tea.Cmd) {
+	m.step = stepPropagate
+	m.rehydrateDone = true
+	m.rehydrateErr = err.Error()
+	m.message = err.Error()
+	return m, nil
 }
 
 // runBootstrap runs the runtime readiness check + asset population in a
@@ -1091,6 +1117,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.rehydrateWorkers = msg.workers
 		m.rehydrateErr = msg.err
 		m.rehydrateDone = true
+		m.rehydrateResult = msg.result
 		// User presses Enter on the propagate page to advance to stepLaunching,
 		// see the KeyPressMsg handler for stepPropagate below.
 		return m, nil
@@ -2147,7 +2174,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.step = stepLaunching
 				m.message = i18n.TF("firstrun.created", m.agentName)
 				return m, func() tea.Msg {
-					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
+					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName, ProjectResult: &m.rehydrateResult}
 				}
 			case "ctrl+c":
 				return m, tea.Quit
@@ -2624,16 +2651,16 @@ func (m FirstRunModel) View() string {
 		return m.viewReview()
 
 	case stepPropagate:
-		// Rehydration: we've written the orchestrator's init.json and are
-		// propagating it to the worker agents via preset.RehydrateNetwork.
+		// One combined kernel operation, or a terminal mutation failure.
+		// Earlier writes may remain; this screen never invites blind replay.
 		// The propagation is fast (few file reads/writes per agent) so the
 		// user usually sees this for a beat, then the result line, then
 		// presses Enter to advance.
 		b.WriteString("\n  " + StyleTitle.Render("Propagating config to worker agents") + "\n\n")
 		if m.rehydrateErr != "" {
 			b.WriteString("  ✗ rehydration failed: " + m.rehydrateErr + "\n\n")
-			b.WriteString(StyleFaint.Render("  Press Enter to exit. Run `lingtai-tui clean` and try again.") + "\n")
-		} else if m.rehydrateWorkers > 0 {
+			b.WriteString(StyleFaint.Render("  Press Enter to exit. Inspect the project and reconcile effects before a new action; do not retry or delete automatically.") + "\n")
+		} else if m.rehydrateDone {
 			b.WriteString(fmt.Sprintf("  ✓ rehydrated %d worker agent(s)\n\n", m.rehydrateWorkers))
 			b.WriteString(StyleFaint.Render("  Press Enter to launch the network.") + "\n")
 		} else {
@@ -3074,20 +3101,18 @@ func (m FirstRunModel) allowedPresetRefs() []string {
 	return out
 }
 
-// propagatePresetPolicyToNetwork applies the wizard's chosen
-// {default, allowed} surface to every other agent in the project. /setup
-// is treated as a network-wide preset policy reset: the wizard's choices
-// are not just for the agent being edited, they're for the whole project.
-//
-// skipDir is the agent the wizard's primary save already handled (so we
-// don't double-write it). Best-effort: errors are logged through the
-// preset package's return but not surfaced as a user-visible failure
-// because the primary save already succeeded.
-func propagatePresetPolicyToNetwork(lingtaiDir, skipDir, defaultRef string, allowed []string) {
-	if defaultRef == "" || len(allowed) == 0 {
-		return // nothing the wizard configured to propagate
+// propagatePresetPolicyToNetwork preserves empty-allowed no-op and reads
+// authoritative post-save policy; it never reconciles active/default in Go.
+func propagatePresetPolicyToNetwork(lingtaiDir, globalDir, skipDir string, requestedAllowed []string) error {
+	if len(requestedAllowed) == 0 {
+		return nil
 	}
-	preset.PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef, allowed)
+	defaultRef, allowed, err := preset.SavedPresetPolicy(lingtaiDir, skipDir)
+	if err != nil {
+		return err
+	}
+	_, err = preset.PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef, allowed, config.LingtaiCmd(globalDir))
+	return err
 }
 
 // currentPreset returns the preset the user is working with.
@@ -3221,6 +3246,8 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		}
 	}
 
+	m.setupPromptCovenantBaseline = normalizePromptPathValue(m.covenantInput.Value())
+	m.setupPromptCommentBaseline = normalizePromptPathValue(m.commentInput.Value())
 	m.step = stepAgentNameDir
 }
 
@@ -3586,51 +3613,41 @@ func (m FirstRunModel) viewReview() string {
 	return b.String()
 }
 
-// performSetupSaveOnly writes init.json with the updated runtime settings
-// but keeps the current recipe and does not rewrite .prompt.
+// performSetupSaveOnly delegates merge and owner writes, preserving current
+// Recipe/Psyche/Pad unless the human actually edited the corresponding input.
 func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 	p := m.currentPreset()
 	dirName := filepath.Base(m.setupOrchDir)
-
-	// Resolve supported prompt file paths from the project's staged .recipe/
-	// so init.json stays consistent with whatever the user picked last.
-	lang := m.pendingAgentOpts.Language
-	if lang == "" {
-		lang = "en"
+	opts := m.pendingAgentOpts
+	opts.PreserveActivePreset = true
+	covenantEdited := opts.CovenantFile != m.setupPromptCovenantBaseline
+	commentEdited := opts.CommentFile != m.setupPromptCommentBaseline
+	if !covenantEdited {
+		opts.CovenantFile = ""
 	}
-	projectRoot := filepath.Dir(m.baseDir)
-	if commentPath := resolveRecipeComment(projectRoot, lang); m.pendingAgentOpts.CommentFile == "" && commentPath != "" {
-		m.pendingAgentOpts.CommentFile = commentPath
+	if !commentEdited {
+		opts.CommentFile = ""
 	}
-	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
-		m.pendingAgentOpts.CovenantFile = covenantPath
-	}
-	// /setup updates the default preset only — running agents keep their
-	// active preset until the next AED fallback or revert_preset call.
-	m.pendingAgentOpts.PreserveActivePreset = m.setupMode
-
-	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, m.pendingAgentOpts); err != nil {
+	request, err := preset.ProjectConfigurationRequest(p, m.agentName, dirName, m.baseDir, m.globalDir, opts)
+	if err != nil {
 		m.message = i18n.TF("firstrun.error", err)
-		m.step = stepAgentNameDir
 		return m, nil
 	}
-	if m.setupMode {
-		// Derive the real policy default ref for propagation. When the user
-		// chose "Keep current preset" (cursor == -1), p is the synthetic
-		// keep_current preset whose presetCanonicalRef would produce a
-		// non-existent path. Use the existing init.json's manifest.preset.default
-		// instead so propagation never broadcasts keep_current.json to peers.
-		policyDefaultRef := presetCanonicalRef(p)
-		if m.cursor == -1 && m.setupKeepInitJSON != nil {
-			if mn, ok := m.setupKeepInitJSON["manifest"].(map[string]interface{}); ok {
-				if pre, ok := mn["preset"].(map[string]interface{}); ok {
-					if def, ok := pre["default"].(string); ok && def != "" {
-						policyDefaultRef = def
-					}
-				}
-			}
-		}
-		propagatePresetPolicyToNetwork(m.baseDir, dirName, policyDefaultRef, m.pendingAgentOpts.AllowedPresets)
+	// A deliberate clearing is not omission. No legacy principle/comment route.
+	if covenantEdited && opts.CovenantFile == "" {
+		empty := ""
+		request.Prompts = &process.ProjectPromptEdits{CovenantFile: &empty}
+	}
+	if commentEdited && opts.CommentFile == "" {
+		empty := ""
+		request.Options.Pad = &empty
+	}
+	python := process.ProjectPython(m.setupOrchDir, config.LingtaiCmd(m.globalDir))
+	if _, err := process.ConfigureProject(context.Background(), python, request); err != nil {
+		return m.projectConfigurationFailed(err)
+	}
+	if err := propagatePresetPolicyToNetwork(m.baseDir, m.globalDir, dirName, opts.AllowedPresets); err != nil {
+		return m.projectConfigurationFailed(err)
 	}
 	return m, func() tea.Msg { return SetupSavedMsg{} }
 }
@@ -3679,7 +3696,24 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 		lang = "en"
 	}
 
-	// 1. Stage the bundle into the project root.
+	// 1. Recipe staging remains Go-owned. Imported pre-existing bundles are
+	// operator-owned, including malformed ones: refuse rather than replace them.
+	if m.rehydrateMode {
+		local := filepath.Join(filepath.Dir(m.baseDir), ".recipe")
+		if info, err := os.Lstat(local); err == nil {
+			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				m.message = "Imported Recipe must be a real readable bundle; existing bytes were preserved"
+				return m, nil
+			}
+			if _, err := preset.LoadRecipeInfo(local, ""); err != nil {
+				m.message = "Imported Recipe is unreadable; existing bytes were preserved"
+				return m, nil
+			}
+		} else if !os.IsNotExist(err) {
+			m.message = "Imported Recipe observation failed; existing bytes were preserved"
+			return m, nil
+		}
+	}
 	projectRoot, err := copyRecipeBundle(m.baseDir, m.globalDir, recipeName)
 	if err != nil {
 		m.message = i18n.TF("firstrun.error", err)
@@ -3693,11 +3727,27 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 	//   - covenant empty → CovenantFile stays unset (kernel default)
 	//   - greet empty    → ApplyRecipe skips .prompt entirely
 	opts := m.pendingAgentOpts
-	if commentPath := resolveRecipeComment(projectRoot, lang); commentPath != "" {
-		opts.CommentFile = commentPath
-	}
-	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
-		opts.CovenantFile = covenantPath
+	if m.rehydrateMode {
+		// Imported owner documents are durable. Displayed defaults/Recipe discovery
+		// are not explicit edits; omission must preserve Psyche and Pad bytes.
+		if opts.CommentFile == m.setupPromptCommentBaseline {
+			opts.CommentFile = ""
+		}
+		if opts.CovenantFile == m.setupPromptCovenantBaseline {
+			opts.CovenantFile = ""
+		}
+	} else {
+		commentPath, covenantPath, err := preset.ResolveRecipeSetupLayers(projectRoot, lang)
+		if err != nil {
+			m.message = i18n.TF("firstrun.error", err)
+			return m, nil
+		}
+		if commentPath != "" {
+			opts.CommentFile = commentPath
+		}
+		if covenantPath != "" {
+			opts.CovenantFile = covenantPath
+		}
 	}
 	// /setup: update default preset only, leave the running agent's active alone.
 	opts.PreserveActivePreset = m.setupMode
@@ -3705,14 +3755,35 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 	p := m.presets[m.cursor]
 	dirName := m.pendingDirName
 
-	// 3. Write init.json with project-local paths.
-	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
+	// 3. Project-owned configure, or ONE source+worker rehydrate before init.
+	request, err := preset.ProjectConfigurationRequest(p, m.agentName, dirName, m.baseDir, m.globalDir, opts)
+	if err != nil {
 		m.message = i18n.TF("firstrun.error", err)
-		m.step = stepAgentNameDir
 		return m, nil
 	}
+	if m.rehydrateMode {
+		// Distinguish deliberate clears from unchanged empty inputs too.
+		if m.pendingAgentOpts.CovenantFile != m.setupPromptCovenantBaseline && m.pendingAgentOpts.CovenantFile == "" {
+			empty := ""
+			request.Prompts = &process.ProjectPromptEdits{CovenantFile: &empty}
+		}
+		if m.pendingAgentOpts.CommentFile != m.setupPromptCommentBaseline && m.pendingAgentOpts.CommentFile == "" {
+			empty := ""
+			request.Options.Pad = &empty
+		}
+		m.step = stepPropagate
+		m.message = ""
+		m.rehydrateDone = false
+		return m, m.runRehydratePropagation(request, recipeName, lang)
+	}
+	python := process.ProjectPython(filepath.Join(m.baseDir, dirName), config.LingtaiCmd(m.globalDir))
+	if _, err := process.ConfigureProject(context.Background(), python, request); err != nil {
+		return m.projectConfigurationFailed(err)
+	}
 	if m.setupMode {
-		propagatePresetPolicyToNetwork(m.baseDir, dirName, presetCanonicalRef(p), opts.AllowedPresets)
+		if err := propagatePresetPolicyToNetwork(m.baseDir, m.globalDir, dirName, opts.AllowedPresets); err != nil {
+			return m.projectConfigurationFailed(err)
+		}
 	}
 
 	// 4. Apply: write .prompt, append skills.paths, snapshot.
@@ -3733,11 +3804,6 @@ func (m FirstRunModel) performRecipeSave(recipeName string) (FirstRunModel, tea.
 
 	if m.setupMode {
 		return m, func() tea.Msg { return SetupSavedMsg{} }
-	}
-	if m.rehydrateMode {
-		m.step = stepPropagate
-		m.message = ""
-		return m, m.runRehydratePropagation()
 	}
 	m.message = i18n.TF("firstrun.created", m.agentName)
 	m.step = stepLaunching

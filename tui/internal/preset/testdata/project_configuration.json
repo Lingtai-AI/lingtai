@@ -1,0 +1,28 @@
+{
+  "existing_init": {
+    "custom_root": {"integer": 9007199254740993123456789},
+    "pad": "durable Pad",
+    "env_file": "custom.env",
+    "venv_path": "custom/venv",
+    "addons": ["imap"],
+    "mcp": {"imap": {"type": "stdio", "command": "custom-python", "args": ["custom-module"]}},
+    "manifest": {
+      "agent_name": "Before",
+      "llm": {"provider": "openai", "model": "old-model"},
+      "admin": {"karma": true},
+      "custom_manifest": 9007199254740993123456789,
+      "preset": {"default": "old.json", "active": "active.json", "allowed": ["old.json", "active.json"]}
+    }
+  },
+  "existing_blueprint": {
+    "agent_name": "Blueprint Display", "address": "orch-dir", "admin": {"karma": true},
+    "agent_id": "stable-id", "created_at": "2025-01-01", "molt_count": 9007199254740993123456789,
+    "nickname": "durable nick", "state": "asleep", "custom_blueprint": {"retain": true}
+  },
+  "cases": [
+    {"id": "preserve-authorized-active", "keep_current": false, "allowed": ["selected.json", "active.json"], "expected_active": "active.json", "expected_default": "selected.json"},
+    {"id": "revoke-active", "keep_current": false, "allowed": ["selected.json"], "expected_active": "selected.json", "expected_default": "selected.json"},
+    {"id": "omitted-allowed", "keep_current": false, "allowed": [], "expected_active": "active.json", "expected_default": "selected.json"},
+    {"id": "keep-current", "keep_current": true, "allowed": [], "expected_active": "active.json", "expected_default": "old.json"}
+  ]
+}

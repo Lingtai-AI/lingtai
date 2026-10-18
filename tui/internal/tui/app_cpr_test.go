@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 func TestCPRDirectTargetAttemptsReviveWithEmptyFallbackCommand(t *testing.T) {
+	fixtureUILifecycle(t)
 	root := t.TempDir()
 	lingtaiDir := filepath.Join(root, ".lingtai")
 	targetDir := filepath.Join(lingtaiDir, "worker")
@@ -49,13 +51,12 @@ func TestCPRDirectTargetAttemptsReviveWithEmptyFallbackCommand(t *testing.T) {
 	}
 
 	var gotCmd, gotDir string
-	previous := reviveAgentDir
-	reviveAgentDir = func(lingtaiCmd, dir string) error {
-		gotCmd = lingtaiCmd
-		gotDir = dir
-		return nil
+	previous := externalProjectLifecycle
+	externalProjectLifecycle = func(command string, options process.ProjectLifecycleOptions, native process.ProjectLifecycleNative) (process.ProjectLifecycleResult, error) {
+		gotCmd, gotDir = command, options.Selected
+		return previous(command, options, native)
 	}
-	defer func() { reviveAgentDir = previous }()
+	defer func() { externalProjectLifecycle = previous }()
 
 	_, _ = app.handlePaletteCommand("cpr", "")
 

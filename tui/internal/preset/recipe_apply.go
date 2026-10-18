@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	iofs "io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 // Recipe lifecycle primitives.
@@ -59,60 +59,7 @@ const (
 // Fails if srcBundleRoot does not contain .recipe/recipe.json. The caller
 // should validate first via LoadRecipeInfo(srcBundleRoot, lang).
 func CopyBundle(srcBundleRoot, projectRoot string) error {
-	if srcBundleRoot == "" || projectRoot == "" {
-		return fmt.Errorf("CopyBundle: empty paths")
-	}
-	info, err := LoadRecipeInfo(srcBundleRoot, "")
-	if err != nil {
-		return fmt.Errorf("CopyBundle: source bundle invalid: %w", err)
-	}
-
-	// When the source bundle IS the project root (user ran `lingtai-tui` inside
-	// a cloned recipe repo — common with agora recipes), the bundle is already
-	// in place and there is nothing to copy. Doing a RemoveAll+copyTree here
-	// would wipe the bundle before reading it, nuking the recipe. Detect and
-	// no-op instead. We still want LoadRecipeInfo above to succeed as a sanity
-	// check, so the bundle is validated even when we don't copy.
-	srcAbs, srcErr := filepath.Abs(srcBundleRoot)
-	dstAbs, dstErr := filepath.Abs(projectRoot)
-	if srcErr == nil && dstErr == nil && srcAbs == dstAbs {
-		return nil
-	}
-
-	// 1. .recipe/ — replace wholesale.
-	srcRecipe := filepath.Join(srcBundleRoot, RecipeDotDir)
-	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)
-	if err := os.RemoveAll(dstRecipe); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("CopyBundle: remove old .recipe/: %w", err)
-	}
-	if err := copyTree(srcRecipe, dstRecipe); err != nil {
-		return fmt.Errorf("CopyBundle: copy .recipe/: %w", err)
-	}
-
-	// 2. Library folder (if recipe declares one) — merge.
-	if info.LibraryName != nil && *info.LibraryName != "" {
-		srcLib := filepath.Join(srcBundleRoot, *info.LibraryName)
-		if st, err := os.Stat(srcLib); err == nil && st.IsDir() {
-			dstLib := filepath.Join(projectRoot, *info.LibraryName)
-			if err := copyTree(srcLib, dstLib); err != nil {
-				return fmt.Errorf("CopyBundle: copy library %q: %w", *info.LibraryName, err)
-			}
-		}
-		// Silently tolerate missing library dir; LoadRecipeInfo already
-		// validated the manifest, and the library absence is visible to
-		// downstream callers via ResolveLibraryDir.
-	}
-
-	// 3. .lingtai/ sibling (if present — imported-network case) — merge.
-	srcLingtai := filepath.Join(srcBundleRoot, ".lingtai")
-	if st, err := os.Stat(srcLingtai); err == nil && st.IsDir() {
-		dstLingtai := filepath.Join(projectRoot, ".lingtai")
-		if err := copyTree(srcLingtai, dstLingtai); err != nil {
-			return fmt.Errorf("CopyBundle: copy .lingtai/: %w", err)
-		}
-	}
-
-	return nil
+	return materializeRecipeBundle(process.ProjectBundleRequest{Kind: "disk", Source: srcBundleRoot, Destination: projectRoot})
 }
 
 // CopyEmbeddedBundle materializes a compiled recipe into a project root after
@@ -120,44 +67,7 @@ func CopyBundle(srcBundleRoot, projectRoot string) error {
 // then applies this project-root copy into its owned .lingtai staging tree
 // before the atomic rename.
 func CopyEmbeddedBundle(recipeName, projectRoot string) error {
-	if recipeName == "" || projectRoot == "" {
-		return fmt.Errorf("CopyEmbeddedBundle: empty paths")
-	}
-	root := embeddedRecipeRoot(recipeName)
-	if root == "" {
-		return fmt.Errorf("CopyEmbeddedBundle: recipe %q not found", recipeName)
-	}
-	if _, err := loadEmbeddedRecipeInfo(root); err != nil {
-		return fmt.Errorf("CopyEmbeddedBundle: source bundle invalid: %w", err)
-	}
-
-	// Match CopyBundle's replace semantics for the selected behavioral layer;
-	// sibling libraries and imported .lingtai data remain additive.
-	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)
-	if err := os.RemoveAll(dstRecipe); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("CopyEmbeddedBundle: remove old .recipe/: %w", err)
-	}
-	return iofs.WalkDir(recipeAssetsFS, root, func(filePath string, entry iofs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(filePath, root+"/")
-		target := filepath.Join(projectRoot, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", filepath.Dir(target), err)
-		}
-		data, err := recipeAssetsFS.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("read embedded %s: %w", rel, err)
-		}
-		if err := os.WriteFile(target, data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", target, err)
-		}
-		return nil
-	})
+	return materializeRecipeBundle(process.ProjectBundleRequest{Kind: "packaged", RecipeName: recipeName, Destination: projectRoot})
 }
 
 // RecipeNeedsApply reports whether the recipe currently selected in the
@@ -173,24 +83,24 @@ func CopyEmbeddedBundle(recipeName, projectRoot string) error {
 //   - .recipe/ does not exist (no recipe selected — nothing to apply)
 //   - both exist and are byte-identical
 //
-// The comparison walks both trees and compares every file by content.
+// The kernel comparison walks both trees and compares every file by content.
 // Directories, mode bits, and mtimes are ignored — only the byte stream
 // of each file matters. Extra files on either side make the recipes
-// "different."
+// "different." Unknown transport cannot establish absence/equality; this
+// bool-only API returns true so the subsequent apply can surface its error.
 func RecipeNeedsApply(projectRoot string) bool {
 	if projectRoot == "" {
 		return false
 	}
-	srcRecipe := filepath.Join(projectRoot, RecipeDotDir)
-	if st, err := os.Stat(srcRecipe); err != nil || !st.IsDir() {
-		return false
-	}
-	snapshot := filepath.Join(projectRoot, ".lingtai", AppliedRecipeSubpath)
-	if st, err := os.Stat(snapshot); err != nil || !st.IsDir() {
+	python, err := recipePython()
+	if err != nil {
+		return true
+	} // transport uncertainty is not equality/absence
+	result, err := process.ObserveProjectRecipe(python, projectRoot)
+	if err != nil {
 		return true
 	}
-	equal, _ := treesEqual(srcRecipe, snapshot)
-	return !equal
+	return result.NeedsApply
 }
 
 // ApplyRecipe materializes the recipe currently in <projectRoot>/.recipe/
@@ -211,9 +121,9 @@ func RecipeNeedsApply(projectRoot string) bool {
 //   - Snapshots the applied recipe to .lingtai/.tui-asset/.recipe/ so a
 //     future RecipeNeedsApply call can detect future changes.
 //
-// Returns the number of agents successfully processed and, on failure,
+// Returns the legacy processed count (including its first-error count quirk) and, on failure,
 // the first error encountered. Partial success is possible — the caller
-// may want to re-invoke after remediating any per-agent errors.
+// must inspect partial state before explicitly deciding on another action.
 //
 // This function is additive for skill-catalog paths by design: on recipe
 // change, we DO NOT remove prior recipes' skill-library entries. The user may
@@ -238,74 +148,7 @@ func ApplyRecipeToLingTaiDir(bundleDir, lingtaiDir, lang string, greetSubstituto
 	if lingtaiDir == "" {
 		return 0, fmt.Errorf("ApplyRecipe: empty lingtaiDir")
 	}
-	info, err := LoadRecipeInfo(bundleDir, lang)
-	if err != nil {
-		return 0, fmt.Errorf("ApplyRecipe: invalid recipe in %s: %w", bundleDir, err)
-	}
-
-	greetPath := ResolveGreetPath(bundleDir, lang)
-	var greetTemplate string
-	if greetPath != "" {
-		data, rerr := os.ReadFile(greetPath)
-		if rerr == nil {
-			greetTemplate = string(data)
-		}
-	}
-
-	// Expand the library-path entry once; it's identical for every agent.
-	var libPathEntry string
-	if info.LibraryName != nil && *info.LibraryName != "" {
-		libPathEntry = LibraryPathForInitJSON(bundleDir, lang)
-	}
-
-	entries, err := os.ReadDir(lingtaiDir)
-	if err != nil {
-		return 0, fmt.Errorf("ApplyRecipe: read .lingtai: %w", err)
-	}
-
-	var firstErr error
-	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() || name == "" || name[0] == '.' || name == "human" {
-			continue
-		}
-		agentDir := filepath.Join(lingtaiDir, name)
-
-		// Write .prompt (greet).
-		if greetTemplate != "" {
-			var rendered string
-			if greetSubstitutor != nil {
-				rendered = greetSubstitutor(greetTemplate)
-			} else {
-				rendered = greetTemplate
-			}
-			promptPath := filepath.Join(agentDir, ".prompt")
-			if werr := os.WriteFile(promptPath, []byte(rendered), 0o644); werr != nil && firstErr == nil {
-				firstErr = fmt.Errorf("ApplyRecipe: write .prompt for %s: %w", name, werr)
-				continue
-			}
-		}
-
-		// Patch skills.paths (additive) when recipe declares a skill library.
-		if libPathEntry != "" {
-			initPath := filepath.Join(agentDir, "init.json")
-			if werr := AppendSkillsPath(initPath, libPathEntry); werr != nil && firstErr == nil {
-				firstErr = fmt.Errorf("ApplyRecipe: update skills.paths for %s: %w", name, werr)
-				continue
-			}
-		}
-		applied++
-	}
-
-	// Snapshot the applied recipe so future RecipeNeedsApply calls can
-	// detect change vs the then-current .recipe/.
-	snapshot := filepath.Join(lingtaiDir, AppliedRecipeSubpath)
-	_ = os.RemoveAll(snapshot) // best-effort; fresh copy on each apply
-	if err := copyTree(filepath.Join(bundleDir, RecipeDotDir), snapshot); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("ApplyRecipe: snapshot applied recipe: %w", err)
-	}
-
-	return applied, firstErr
+	return applyKernelRecipe(bundleDir, lingtaiDir, lang, greetSubstitutor)
 }
 
 // AppendSkillsPath ensures the given path string appears in the
@@ -484,62 +327,4 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return cerr
 	}
 	return closeErr
-}
-
-// treesEqual returns true iff the two directory trees contain the same
-// set of files with the same byte content. Directory entries, mode bits,
-// mtimes, and symlink attributes are not compared.
-func treesEqual(a, b string) (bool, error) {
-	aFiles, err := listFiles(a)
-	if err != nil {
-		return false, err
-	}
-	bFiles, err := listFiles(b)
-	if err != nil {
-		return false, err
-	}
-	if len(aFiles) != len(bFiles) {
-		return false, nil
-	}
-	for rel := range aFiles {
-		if _, ok := bFiles[rel]; !ok {
-			return false, nil
-		}
-	}
-	for rel := range aFiles {
-		aData, err := os.ReadFile(filepath.Join(a, rel))
-		if err != nil {
-			return false, err
-		}
-		bData, err := os.ReadFile(filepath.Join(b, rel))
-		if err != nil {
-			return false, err
-		}
-		if string(aData) != string(bData) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// listFiles returns the set of relative file paths under root (files
-// only, skipping directories). Keys are forward-slash normalized so
-// comparisons work cross-platform.
-func listFiles(root string) (map[string]struct{}, error) {
-	out := make(map[string]struct{})
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		out[filepath.ToSlash(rel)] = struct{}{}
-		return nil
-	})
-	return out, err
 }

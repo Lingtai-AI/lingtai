@@ -1,6 +1,7 @@
 package preset
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -11,9 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
-	lingfs "github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 //go:embed all:covenant
@@ -334,13 +336,12 @@ func (p *Preset) NormalizeLegacyContextLimit() {
 		return
 	}
 
-	// context_limit predates the exact-token capability path and existing
-	// callers expect this known integer field as float64 after loading. Keep the
-	// compatibility representation for both canonical and legacy-root input;
-	// capability values remain json.Number through canonicalization and writes.
+	// Keep the legacy float64 representation for ordinary context limits, but
+	// retain exact JSON integers outside float64's safe integer range. The
+	// Project exchange must compare the selected snapshot with actual disk data.
 	if canonical, hasCanonical := llm["context_limit"]; hasCanonical {
 		if number, ok := canonical.(json.Number); ok {
-			if value, err := strconv.ParseFloat(string(number), 64); err == nil {
+			if value, err := strconv.ParseFloat(string(number), 64); err == nil && value > -9007199254740992 && value < 9007199254740992 {
 				llm["context_limit"] = value
 			}
 		}
@@ -350,7 +351,7 @@ func (p *Preset) NormalizeLegacyContextLimit() {
 		return
 	}
 	if number, ok := rootCtx.(json.Number); ok {
-		if value, err := strconv.ParseFloat(string(number), 64); err == nil {
+		if value, err := strconv.ParseFloat(string(number), 64); err == nil && value > -9007199254740992 && value < 9007199254740992 {
 			rootCtx = value
 		}
 	}
@@ -1288,6 +1289,23 @@ func ReadBundledSkillFile(skill, relPath string) (string, error) {
 	return string(data), nil
 }
 
+// CreationCovenant reads the existing caller-selected covenant without writes.
+// A cold home uses the same compiled resource that Bootstrap would extract.
+func CreationCovenant(globalDir, lang, selectedPath string) (string, error) {
+	path := selectedPath
+	if path == "" {
+		path = CovenantPath(globalDir, lang)
+	}
+	data, err := os.ReadFile(path)
+	if selectedPath == "" && os.IsNotExist(err) {
+		data, err = covenantFS.ReadFile("covenant/" + lang + "/covenant.md")
+	}
+	if err != nil || len(data) == 0 || !utf8.Valid(data) {
+		return "", fmt.Errorf("creation covenant unavailable")
+	}
+	return string(data), nil
+}
+
 // CovenantPath returns the absolute path to the covenant file for a language.
 func CovenantPath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "covenant", lang, "covenant.md")
@@ -1405,6 +1423,8 @@ func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
 
 // AgentOpts holds per-agent configuration values set at creation time.
 type AgentOpts struct {
+	EnvFile        string   // public explicit fallback; existing kernel-owned value wins
+	VenvPath       string   // public explicit fallback/interpreter selection
 	Language       string   // "en", "zh", or "wen"
 	ContextLimit   int      // token budget
 	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
@@ -1529,521 +1549,34 @@ func stripObsoleteInitFields(initJSON map[string]interface{}) {
 	delete(initJSON, "procedures_file")
 }
 
-// GenerateInitJSONWithOpts creates a full init.json from a preset with explicit agent options.
-func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts) error {
-	// The directory derived from dirName must remain a single contained
-	// child of lingtaiDir: reject absolute paths, parent segments, and
-	// either platform's separators before any join or mkdir (issue #849).
-	if err := ValidateSafeName(dirName); err != nil {
-		return fmt.Errorf("invalid agent directory name %q: %w", dirName, err)
+// GenerateInitJSONWithOpts is the existing caller adapter, not a Go merger.
+// A persisted real preset reference is required; Keep-current is explicit.
+func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts, python ...string) error {
+	cmd := config.LingtaiCmd(globalDir)
+	if len(python) > 0 {
+		cmd = python[0]
 	}
-	if err := p.NormalizeLegacyCapabilities(); err != nil {
-		return fmt.Errorf("canonicalize preset capabilities: %w", err)
-	}
-	agentDir := filepath.Join(lingtaiDir, dirName)
-	if err := os.MkdirAll(agentDir, 0o755); err != nil {
-		return fmt.Errorf("create agent dir: %w", err)
-	}
-
-	// Keep the existing root and manifest fields when /setup regenerates an
-	// agent. Known generated fields below overwrite these values; unrelated
-	// user/kernel fields remain intact.
-	var existingInit map[string]interface{}
-	existingInitPath := filepath.Join(agentDir, "init.json")
-	if existingData, err := os.ReadFile(existingInitPath); err == nil {
-		if DecodeJSONUseNumber(existingData, &existingInit) != nil {
-			existingInit = nil
-		}
-	}
-
-	// Build manifest with opts
-	manifest := make(map[string]interface{})
-	if existingManifest, ok := existingInit["manifest"].(map[string]interface{}); ok {
-		for key, value := range existingManifest {
-			manifest[key] = value
-		}
-	}
-	manifest["agent_name"] = agentName
-	lang := opts.Language
-	if lang == "" {
-		lang = "en"
-	}
-	manifest["language"] = lang
-	if llm, ok := p.Manifest["llm"]; ok {
-		manifest["llm"] = llm
-	}
-	if caps, ok := p.Manifest["capabilities"]; ok {
-		manifest["capabilities"] = caps
-	}
-	// The kernel no longer reads retired llm keys (api_compat); never
-	// carry them into a generated init.json.
-	if llmMap, ok := manifest["llm"].(map[string]interface{}); ok {
-		StripRetiredLLMFields(llmMap)
-	}
-	// Propagate the LLM's resolved api_key_env to capabilities that
-	// share the same provider. A template may declare a placeholder like
-	// "OPENAI_API_KEY" while stampAutoEnvVar rewrites the LLM's slot to
-	// "OPENAI_1_API_KEY". Without this, a capability that names the same
-	// provider would still reference the placeholder and fail at boot.
-	SyncCapabilityAPIKeyEnv(manifest)
-	manifest["admin"] = map[string]interface{}{
-		"karma":   opts.Karma,
-		"nirvana": opts.Nirvana,
-	}
-	// No `soul` block is ever emitted: the Soul subsystem is retired. A
-	// legacy `soul` key already present in an existing manifest is carried
-	// through by the generic copy above (like other stale keys) and ignored
-	// by the kernel; it is never rewritten, extended, or propagated here.
-	manifest["context_limit"] = opts.ContextLimit
-	// molt_pressure and molt_prompt are intentionally NOT written: the kernel no
-	// longer accepts configurable context.molt thresholds or messages (Jason
-	// #4135/#4137/#4140). Existing init.json files that still carry stale keys
-	// are left untouched (no migration); the kernel ignores them.
-	// Per-wake loop budget: every iteration of the LLM/tool-call loop
-	// counts as a turn, not just LLM requests, so tool-heavy work burns
-	// through it quickly. The agent sleeps when the budget is exhausted.
-	manifest["max_turns"] = 500
-	manifest["max_rpm"] = opts.MaxRpm
-	// AED max-attempts: normalize through ClampAedAttempts so a zero-value
-	// AgentOpts (caller didn't set it) still writes a valid default rather
-	// than 0, which the kernel would treat as "never retry".
-	manifest["max_aed_attempts"] = ClampAedAttempts(opts.MaxAedAttempts)
-	manifest["streaming"] = false
-	// Track which preset this agent was created from. The kernel reads this
-	// at boot to materialize manifest.llm + manifest.capabilities from the
-	// referenced preset file. As of the path-as-name redesign, the value is
-	// the preset's full path (in ~/... shorthand for portability across
-	// machines), not its filename stem. The agent passes this same string
-	// to system(action='refresh', preset='<path>') to swap.
-	// The 'default' field is used by AED auto-fallback to revert to the
-	// original preset when the active one keeps failing.
-	if p.Name != "" {
-		presetRef := RefFor(p)
-		// Default behavior: both active and default point at the new
-		// preset (the agent runs on the chosen preset immediately).
-		// /setup mode (PreserveActivePreset=true) only updates default,
-		// so the running agent keeps its current preset until an AED
-		// fallback or explicit revert_preset takes effect.
-		activeRef := presetRef
-		// /setup mode also preserves the existing `allowed` list so
-		// re-running the wizard never silently widens the authorized set.
-		var existingAllowed []string
-		if opts.PreserveActivePreset {
-			existingInitPath := filepath.Join(agentDir, "init.json")
-			if data, err := os.ReadFile(existingInitPath); err == nil {
-				var existing map[string]interface{}
-				if DecodeJSONUseNumber(data, &existing) == nil {
-					if mn, ok := existing["manifest"].(map[string]interface{}); ok {
-						if pre, ok := mn["preset"].(map[string]interface{}); ok {
-							if cur, ok := pre["active"].(string); ok && cur != "" {
-								activeRef = cur
-							}
-							if al, ok := pre["allowed"].([]interface{}); ok {
-								for _, e := range al {
-									if s, ok := e.(string); ok && s != "" {
-										existingAllowed = append(existingAllowed, s)
-									}
-								}
-							}
-							// When the caller passed a synthetic preset (e.g. the
-							// "Keep current preset" sentinel Name="keep_current"
-							// built in NewSetupModeModel), RefFor() above produces
-							// a path that doesn't correspond to any real file.
-							// Preserve the existing on-disk default ref so we never
-							// write keep_current.json into manifest.preset.{default,allowed}.
-							// Older init.json files may lack manifest.preset.default; in that
-							// case fall back to the real active ref instead.
-							if isSyntheticPreset(p) {
-								syntheticRef := RefFor(p)
-								if existingDef, ok := pre["default"].(string); ok && existingDef != "" {
-									presetRef = existingDef
-								} else if activeRef != "" && activeRef != syntheticRef {
-									presetRef = activeRef
-								}
-								// activeRef was already set to the existing active above; if it
-								// was still pointing at the synthetic ref, snap it to the real
-								// policy default.
-								if activeRef == syntheticRef {
-									activeRef = presetRef
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Build the allowed list. Caller-supplied AllowedPresets wins;
-		// otherwise we keep the existing list (during /setup) or fall
-		// back to the single-preset default. The default preset is always
-		// present.
-		//
-		// `active` must also end up in `allowed` (the kernel's validate_init
-		// enforces this). But when the caller passed an explicit
-		// AllowedPresets list and the current `active` was deselected from
-		// it, force-adding active back would silently re-authorize a preset
-		// the user just chose to revoke. In that case we snap active to the
-		// new default instead, which is always in allowed by construction.
-		allowedSet := map[string]struct{}{}
-		var allowed []string
-		appendUnique := func(s string) {
-			if s == "" {
-				return
-			}
-			if _, exists := allowedSet[s]; exists {
-				return
-			}
-			allowedSet[s] = struct{}{}
-			allowed = append(allowed, s)
-		}
-
-		var seed []string
-		userSuppliedAllowed := len(opts.AllowedPresets) > 0
-		switch {
-		case userSuppliedAllowed:
-			seed = opts.AllowedPresets
-		case len(existingAllowed) > 0:
-			seed = existingAllowed
-		}
-		for _, s := range seed {
-			appendUnique(s)
-		}
-		appendUnique(presetRef) // default must always be in allowed
-
-		// Reconcile active against the authoritative allowed list. When
-		// the caller has explicitly listed allowed presets and the current
-		// active is no longer one of them, demote active to the default
-		// (which is always allowed). When the caller didn't supply an
-		// allowed list, we silently include active to preserve the prior
-		// behavior of "I didn't touch the surface, don't change it".
-		activeAllowed := false
-		for _, s := range allowed {
-			if s == activeRef {
-				activeAllowed = true
-				break
-			}
-		}
-		if !activeAllowed {
-			if userSuppliedAllowed {
-				activeRef = presetRef
-			} else {
-				appendUnique(activeRef)
-			}
-		}
-
-		manifest["preset"] = map[string]interface{}{
-			"active":  activeRef,
-			"default": presetRef,
-			"allowed": allowed,
-		}
-	}
-
-	// Resolve file paths — use opts if set, fallback to language defaults
-	// Keep an existing supported covenant path during /setup; fresh agents
-	// use the language default. Obsolete principle/procedures paths are not
-	// resolved or emitted.
-	covenantFile := opts.CovenantFile
-	if covenantFile == "" {
-		if existing, ok := existingInit["covenant_file"].(string); ok && existing != "" {
-			covenantFile = existing
-		} else {
-			covenantFile = CovenantPath(globalDir, lang)
-		}
-	}
-	// Load existing init.json addons + mcp fields so we preserve them across
-	// regens. Critical for /setup: when the user changes non-addon settings,
-	// existing addon registrations and MCP activations must not be dropped.
-	// User edits always win over opts.Addons — opts only seeds the fields
-	// on first creation.
-	//
-	// Reads both shapes for back-compat with init.json files written by older
-	// TUIs (pre-v0.7.3 wrote a dict; new TUIs write a list). Both shapes get
-	// converted to the new list-of-names form before re-writing, so the on-
-	// disk file is normalized on the next refresh.
-	var existingAddonsList []interface{}
-	var existingMCP map[string]interface{}
-	switch v := existingInit["addons"].(type) {
-	case []interface{}:
-		existingAddonsList = v
-	case map[string]interface{}:
-		// Legacy dict shape — extract just the names. Apply the same
-		// identifier validation contract as the launch-time addon check so a
-		// malformed or untrusted key can never be carried into a regenerated
-		// init.json.
-		for name := range v {
-			if config.ValidateAddonKey(name) != nil {
-				continue
-			}
-			existingAddonsList = append(existingAddonsList, name)
-		}
-	}
-	if mcp, ok := existingInit["mcp"].(map[string]interface{}); ok && len(mcp) > 0 {
-		existingMCP = mcp
-	}
-
-	envFile := config.EnvFilePath(globalDir)
-	if existing, ok := existingInit["env_file"].(string); ok && existing != "" {
-		envFile = existing
-	}
-	venvPath := filepath.Join(globalDir, "runtime", "venv")
-	if existing, ok := existingInit["venv_path"].(string); ok && existing != "" {
-		venvPath = existing
-	}
-	pad := interface{}("")
-	if existing, ok := existingInit["pad"]; ok {
-		pad = existing
-	}
-
-	initJSON := make(map[string]interface{}, len(existingInit)+8)
-	for key, value := range existingInit {
-		initJSON[key] = value
-	}
-	stripObsoleteInitFields(initJSON)
-	initJSON["manifest"] = manifest
-	initJSON["covenant_file"] = covenantFile
-	initJSON["env_file"] = envFile
-	initJSON["venv_path"] = venvPath
-	initJSON["pad"] = pad
-	// No seed-character field is written here. 灵台 (character) is durable
-	// state owned by the agent and managed after creation via
-	// system/lingtai.md / psyche — the kernel treats a missing seed as an
-	// empty seed and lets the agent author its own character. The legacy
-	// `prompt` field was an unknown key (boot warning, never honored); we
-	// emit neither `prompt` nor `lingtai`.
-
-	// Decide which addons to wire.
-	//
-	// Precedence:
-	//   1. Pre-existing addons:[...] in init.json (preserved verbatim — user
-	//      edits win).
-	//   2. Otherwise, opts.Addons from the caller (the wizard's selection).
-	//
-	// The list is normalized to the new shape (list of curated MCP names).
-	// The kernel's `mcp` capability decompresses each name from the catalog
-	// into the per-agent mcp_registry.jsonl on boot.
-	var addonsList []interface{}
-	if existingAddonsList != nil {
-		addonsList = existingAddonsList
-	} else {
-		for _, name := range opts.Addons {
-			addonsList = append(addonsList, name)
-		}
-	}
-	if addonsList != nil {
-		initJSON["addons"] = addonsList
-	}
-
-	// Build the mcp activation map for any addon name in the list. Each entry
-	// points at the local venv python (where `pip install lingtai` placed the
-	// MCP packages) running `python -m lingtai_<name>` with the canonical
-	// LINGTAI_<NAME>_CONFIG env var set to the .secrets/<name>.json convention.
-	//
-	// Pre-existing mcp.<name> entries take precedence — humans who customized
-	// the spec (e.g., switched to a different Python or added env vars) keep
-	// their settings.
-	if len(addonsList) > 0 {
-		venvPython := config.VenvPython(filepath.Join(globalDir, "runtime", "venv"))
-		mcpField := make(map[string]interface{})
-		for k, v := range existingMCP {
-			mcpField[k] = v
-		}
-		for _, raw := range addonsList {
-			name, ok := raw.(string)
-			if !ok || name == "" {
-				continue
-			}
-			if _, exists := mcpField[name]; exists {
-				continue // user-set entry wins
-			}
-			module, envVar, configRel, supported := defaultMCPSpec(name)
-			if !supported {
-				continue // unknown name — let the kernel surface the warning
-			}
-			mcpField[name] = map[string]interface{}{
-				"type":    "stdio",
-				"command": venvPython,
-				"args":    []interface{}{"-m", module},
-				"env":     map[string]interface{}{envVar: configRel},
-			}
-		}
-		if len(mcpField) > 0 {
-			initJSON["mcp"] = mcpField
-		}
-	}
-
-	// Comment file — only if user specified one
-	if opts.CommentFile != "" {
-		initJSON["comment_file"] = opts.CommentFile
-	}
-
-	data, err := json.MarshalIndent(initJSON, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal init.json: %w", err)
-	}
-
-	initPath := filepath.Join(agentDir, "init.json")
-	if err := lingfs.WriteFileAtomic(initPath, data, 0o644); err != nil {
-		return fmt.Errorf("write init.json: %w", err)
-	}
-
-	// The global .env is deliberately NOT touched here. Generating an
-	// agent never writes or removes feature flags; any pre-existing lines
-	// (including ones left by retired features) stay byte-for-byte.
-
-	// Build the wizard-controlled subset of .agent.json. Other fields the
-	// kernel populates at runtime (agent_id, created_at, molt_count,
-	// language, started_at, capabilities, nickname, legacy soul_* keys,
-	// etc) must NOT be touched here — re-running /setup against an
-	// existing agent should preserve the agent's identity and history,
-	// not reset it. Without this preservation, molt_count drops to 0 on
-	// every /setup, which makes psyche overwrite earlier snapshots.
-	agentManifest := map[string]interface{}{
-		"agent_name": agentName,
-		"address":    filepath.Base(agentDir),
-		"admin": map[string]interface{}{
-			"karma":   opts.Karma,
-			"nirvana": opts.Nirvana,
-		},
-	}
-
-	// Create mailbox structure
-	for _, sub := range []string{
-		"mailbox/inbox",
-		"mailbox/sent",
-		"mailbox/archive",
-	} {
-		os.MkdirAll(filepath.Join(agentDir, sub), 0o755)
-	}
-
-	// Merge with any existing .agent.json so kernel-owned identity fields
-	// (molt_count etc.) survive a /setup-driven regen. The wizard owns the
-	// keys it explicitly sets above; everything else is preserved verbatim.
-	agentJSONPath := filepath.Join(agentDir, ".agent.json")
-	merged := agentManifest
-	if existing, err := os.ReadFile(agentJSONPath); err == nil {
-		var prev map[string]interface{}
-		if DecodeJSONUseNumber(existing, &prev) == nil {
-			// Start from prev, then overwrite the wizard-controlled keys.
-			merged = prev
-			for k, v := range agentManifest {
-				merged[k] = v
-			}
-		}
-	} else {
-		// Fresh agent — initialize state to "" so the kernel sees a blank.
-		merged["state"] = ""
-	}
-
-	mdata, err := json.MarshalIndent(merged, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal .agent.json: %w", err)
-	}
-	if err := lingfs.WriteFileAtomic(agentJSONPath, mdata, 0o644); err != nil {
-		return fmt.Errorf("write .agent.json: %w", err)
-	}
-
-	return nil
+	_, err := configureWithOpts(p, agentName, dirName, lingtaiDir, globalDir, opts, cmd)
+	return err
 }
 
-// PropagatePresetPolicy rewrites manifest.preset.{default,allowed} on every
-// agent under lingtaiDir (skipping the human pseudo-agent and the agent
-// passed via skipDir, which the wizard's own save already handled).
-//
-// The intent: /setup is a network-wide preset-policy reset. Whatever the
-// wizard's allowed list is becomes the authoritative allowed surface for
-// all agents in the project; whatever the wizard's default is becomes
-// every agent's default. Per-agent active is preserved when still in the
-// new allowed list, otherwise demoted to the new default (which is always
-// in allowed by construction).
-//
-// Best-effort per agent: malformed init.json or missing preset block is
-// silently skipped so one bad agent doesn't block the propagation. Returns
-// the count of agents successfully updated and the first error encountered
-// (for surfacing to the user) — the walk doesn't abort on errors.
-func PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef string, allowed []string) (int, error) {
-	entries, err := os.ReadDir(lingtaiDir)
-	if err != nil {
-		return 0, fmt.Errorf("read lingtai dir: %w", err)
+// PropagatePresetPolicy delegates authorization/reconciliation to Core.
+// Empty allowed remains the wizard's deliberate no-op, not a reset policy.
+func PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef string, allowed []string, python ...string) (int, error) {
+	if len(allowed) == 0 {
+		return 0, nil
 	}
-
-	allowedSet := map[string]struct{}{}
-	for _, s := range allowed {
-		allowedSet[s] = struct{}{}
-	}
-
-	var firstErr error
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	cmd := ""
+	if len(python) > 0 {
+		cmd = python[0]
+	} else {
+		globalDir, err := config.GlobalDirPath()
+		if err != nil {
+			return 0, fmt.Errorf("Project kernel interpreter unavailable")
 		}
-		name := entry.Name()
-		if name == "human" || name == skipDir {
-			continue
-		}
-		agentDir := filepath.Join(lingtaiDir, name)
-		// Skip non-agent dirs (no init.json).
-		initPath := filepath.Join(agentDir, "init.json")
-		if _, err := os.Stat(initPath); err != nil {
-			continue
-		}
-		if err := rewritePresetBlock(initPath, defaultRef, allowed, allowedSet); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", name, err)
-			}
-			continue
-		}
-		count++
+		cmd = config.LingtaiCmd(globalDir)
 	}
-	return count, firstErr
-}
-
-// rewritePresetBlock updates one agent's init.json preset block in place.
-// Sets default and allowed to the network policy; preserves active if
-// still in allowed, otherwise demotes to default. Silently no-ops when
-// the agent has no preset block (older shape) — the kernel's regen on
-// next boot will populate it.
-func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSet map[string]struct{}) error {
-	data, err := os.ReadFile(initPath)
-	if err != nil {
-		return fmt.Errorf("read: %w", err)
-	}
-	var raw map[string]interface{}
-	if err := DecodeJSONUseNumber(data, &raw); err != nil {
-		return fmt.Errorf("parse: %w", err)
-	}
-	stripObsoleteInitFields(raw)
-	manifest, ok := raw["manifest"].(map[string]interface{})
-	if !ok {
-		return nil // no manifest, nothing to propagate
-	}
-	pre, ok := manifest["preset"].(map[string]interface{})
-	if !ok {
-		return nil // older shape — kernel handles regen
-	}
-
-	currentActive, _ := pre["active"].(string)
-	newActive := currentActive
-	if _, stillAllowed := allowedSet[currentActive]; !stillAllowed {
-		newActive = defaultRef
-	}
-
-	// Materialize allowed as []interface{} so JSON round-trips cleanly.
-	allowedJSON := make([]interface{}, len(allowed))
-	for i, s := range allowed {
-		allowedJSON[i] = s
-	}
-
-	pre["active"] = newActive
-	pre["default"] = defaultRef
-	pre["allowed"] = allowedJSON
-
-	out, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if err := lingfs.WriteFileAtomic(initPath, out, 0o644); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-	return nil
+	cmd = process.ProjectPython(filepath.Join(lingtaiDir, skipDir), cmd)
+	result, err := process.PropagateProjectPolicy(context.Background(), cmd, filepath.Dir(lingtaiDir), skipDir, defaultRef, allowed)
+	return result.Updated, err
 }

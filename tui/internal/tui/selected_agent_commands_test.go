@@ -7,6 +7,7 @@ import (
 )
 
 func TestPaletteAgentCommandsFollowCurrentConversation(t *testing.T) {
+	fixtureUILifecycle(t)
 	fixture := newDirectAffinityFixture(t, false)
 	app, _ := directAffinityActivate(t, fixture.app, fixture.targetA.AgentID)
 	app.orchDir = t.TempDir()
@@ -38,6 +39,7 @@ func TestPaletteAgentCommandsFollowCurrentConversation(t *testing.T) {
 }
 
 func TestPaletteAgentCommandsKeepMainFallback(t *testing.T) {
+	fixtureUILifecycle(t)
 	fixture := newDirectAffinityFixture(t, false)
 	app := fixture.app
 	app.orchDir = t.TempDir()

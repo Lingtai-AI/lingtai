@@ -6,15 +6,88 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
+// The actual Project CLI comes only from the parent's cold-installed package.
+// The local interpreter handle is deliberately non-executable: Project commands
+// use its sibling CLI, whereas an accidental agent launch must fail before any
+// provider or runtime starts. This is fixture wiring, not a fake Project merger.
+func fixtureUIKernel(t *testing.T, globalDir string) string {
+	t.Helper()
+	return fixtureUIKernelAt(t, globalDir, fixtureUIProjectPython(t))
+}
+
+func fixtureUIKernelAt(t *testing.T, globalDir, installed string) string {
+	t.Helper()
+	python := config.VenvPython(filepath.Join(globalDir, "runtime", "venv"))
+	if err := os.MkdirAll(filepath.Dir(python), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("test-only provider launch guard"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(filepath.Dir(installed), "lingtai-agent"), filepath.Join(filepath.Dir(python), "lingtai-agent")); err != nil {
+		t.Fatal(err)
+	}
+	return python
+}
+
+// Nil-command lifecycle consumers resolve the managed runtime through HOME.
+// Keep that lookup task-local and use only the parent's cold-installed candidate.
+func fixtureUILifecycle(t *testing.T) string {
+	t.Helper()
+	installed := os.Getenv("LINGTAI_PROJECT_LIFECYCLE_TEST_PYTHON")
+	if installed == "" || !filepath.IsAbs(installed) {
+		t.Fatal("explicit parent-verified lifecycle test interpreter required; no global runtime fallback")
+	}
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return fixtureUIKernelAt(t, filepath.Join(home, ".lingtai-tui"), installed)
+}
+
+func fixtureUIProjectPython(t *testing.T) string {
+	t.Helper()
+	python := os.Getenv("LINGTAI_PROJECT_CONFIGURATION_TEST_PYTHON")
+	if python == "" || !filepath.IsAbs(python) {
+		t.Fatal("explicit parent-verified installed test interpreter required; no global runtime fallback")
+	}
+	if _, err := os.Stat(python); err != nil {
+		t.Fatal(err)
+	}
+	return python
+}
+
+func fixtureUISetupPreset(t *testing.T) preset.Preset {
+	t.Helper()
+	p := minimaxPresetForSetupTest()
+	// The current kernel routes MiniMax via its Anthropic-compatible provider;
+	// the old standalone "minimax" provider was independently retired.
+	p.Manifest["llm"].(map[string]interface{})["provider"] = "anthropic"
+	p.Source = preset.SourceSaved
+	p.Description = preset.PresetDescription{Summary: "setup fixture"}
+	if err := preset.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestSetupSaveStripsObsoletePromptFilesAndPreservesExistingConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	baseDir := filepath.Join(tmp, ".lingtai")
 	agentDir := filepath.Join(baseDir, "alice")
 	globalDir := filepath.Join(tmp, "global")
+	fixtureUIKernel(t, globalDir)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(tmp, "custom.env")
+	if err := os.WriteFile(envFile, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 	old := map[string]interface{}{
@@ -26,7 +99,7 @@ func TestSetupSaveStripsObsoletePromptFilesAndPreservesExistingConfig(t *testing
 		"covenant_file":   "/project/.recipe/covenant.md",
 		"principle_file":  "/project/.lingtai/principle.md",
 		"procedures_file": "/project/.lingtai/procedures.md",
-		"env_file":        "/project/.lingtai/.env",
+		"env_file":        envFile,
 		"venv_path":       "/project/.lingtai/runtime/venv",
 		"pad":             "keep this pad",
 		"user_config":     map[string]interface{}{"keep": "me"},
@@ -47,7 +120,7 @@ func TestSetupSaveStripsObsoletePromptFilesAndPreservesExistingConfig(t *testing
 		setupOrchDir:     agentDir,
 		agentName:        "alice",
 		cursor:           0,
-		presets:          []preset.Preset{minimaxPresetForSetupTest()},
+		presets:          []preset.Preset{fixtureUISetupPreset(t)},
 		pendingAgentOpts: preset.DefaultAgentOpts(),
 	}
 	_, cmd := m.performSetupSaveOnly()
@@ -74,7 +147,7 @@ func TestSetupSaveStripsObsoletePromptFilesAndPreservesExistingConfig(t *testing
 	}
 	for key, want := range map[string]interface{}{
 		"covenant_file": "/project/.recipe/covenant.md",
-		"env_file":      "/project/.lingtai/.env",
+		"env_file":      envFile,
 		"venv_path":     "/project/.lingtai/runtime/venv",
 		"pad":           "keep this pad",
 	} {
